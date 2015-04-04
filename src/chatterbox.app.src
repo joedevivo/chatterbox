@@ -1,0 +1,18 @@
+%% -*- mode: erlang -*-
+{application, chatterbox,
+ [
+  {description, "the chatterbox http2 server"},
+  {vsn, "0.0.1"},
+  {registered, []},
+  {applications, [
+                  kernel,
+                  stdlib,
+                  lager
+                 ]},
+  {mod, { chatterbox_app, []}},
+  {env, [
+    {port, 80},
+    {concurrent_acceptors, 20}
+  ]}
+ ]}.
+%% vim: set filetype=erlang tabstop=2

@@ -1,0 +1,11 @@
+ebin/*
+*.beam
+deps/*
+rel/chatterbox
+.concrete/DEV_MODE
+deps.plt
+.eunit
+_rel
+relx
+.rebar
+erln8.config
