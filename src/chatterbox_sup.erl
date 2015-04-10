@@ -14,7 +14,7 @@ start_link() ->
 init([]) ->
     {ok, Port} = application:get_env(port),
     ListenerOptions = [
-        {active, once}, binary
+        {active, once}, binary %%, {keepalive, true}, {reuseaddr, true}, {nodelay, true}, {delay_send, false}, {backlog, 1024}
     ],
     spawn_link(fun empty_listeners/0),
     {ok, ListenSocket} = gen_tcp:listen(Port, ListenerOptions),

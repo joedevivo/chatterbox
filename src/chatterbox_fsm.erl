@@ -42,8 +42,14 @@ connected(start_frame, S = #chatterbox_fsm_state{socket=Socket}) ->
     lager:debug("Incoming Frame"),
     {Header, Payload} = http2_frame:read(Socket),
     gen_fsm:send_event(self(), start_frame),
-    case Header#header.type of
-        ?SETTINGS ->
+    case {Header#header.type, Header#header.flags} of
+        {?SETTINGS,<<0>>} ->
+            lager:debug("got dat settings 0"),
+            http2_frame_settings:ack(Socket, Payload),
+            {next_state, connected, S#chatterbox_fsm_state{settings=Payload}};
+        {?SETTINGS,<<1>>} ->
+            lager:debug("got dat settings 1"),
+            http2_frame_settings:ack(Socket),
             {next_state, connected, S#chatterbox_fsm_state{settings=Payload}};
         _ ->
             {next_state, connected, S}
