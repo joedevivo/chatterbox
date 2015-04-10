@@ -18,21 +18,11 @@ read(Socket) ->
 -spec read_header(port()) -> header().
 read_header(Socket) ->
     lager:debug("reading http2 header"),
-    {ok, L} = gen_tcp:recv(Socket, 3),
-    Length = binary:decode_unsigned(L),
+    {ok, <<Length:24,Type:8,Flags:8,R:1,StreamId:31>>} = gen_tcp:recv(Socket, 9),
     lager:debug("Length: ~p", [Length]),
-    {ok, T} = gen_tcp:recv(Socket, 1),
-    Type = binary:decode_unsigned(T),
     lager:debug("Type: ~p", [Type]),
-    {ok, Flags} = gen_tcp:recv(Socket, 1),
     lager:debug("Flags: ~p", [Flags]),
-    %TODO: Actually the first bit here is R, some HTTP/2
-    % thing that currently is always 0 so it's easier to
-    % just read all 4 bytes into stream ID
-    % WARNING: NOT TO EXACT SPEC, but won't hurt
-    %{ok, R} = gen_tcp:recv(Socket, 1),
-    %lager:debug("R: ~p", [R]),
-    {ok, StreamId} = gen_tcp:recv(Socket, 4),
+    lager:debug("R: ~p", [R]),
     lager:debug("StreamId: ~p", [StreamId]),
 
     #header{
