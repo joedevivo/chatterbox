@@ -201,9 +201,9 @@ handle_sync_event(_E, _F, StateName, State) ->
     {next_state, StateName, State}.
 
 
-handle_info({tcp, _Socket, <<"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n">>}, _, S) ->
+handle_info({tcp, _Socket, <<"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n",Bin/bits>>}, _, S) ->
     lager:debug("handle_info HTTP/2 Preamble!"),
-    gen_fsm:send_event(self(), start_frame),
+    gen_fsm:send_event(self(), {start_frame,Bin}),
     {next_state, settings_handshake, S};
 handle_info({tcp_closed, _Socket}, _StateName, S) ->
     lager:debug("tcp_close"),

@@ -1,6 +1,6 @@
 -module(http2_frame_data).
 
--export([read_payload/2]).
+-export([read_payload/2, send/3]).
 
 -include("http2.hrl").
 
@@ -17,10 +17,7 @@ read_payload(Socket, Header=#header{flags=Flags}) ->
     Data = http2_padding:read_possibly_padded_payload(Socket, Header),
     {ok, #data{data=Data}}.
 
-
-%-spec send(port(), payload()) -> ok | {error, term()}.
-%send(Socket, Bin) when is_binary(Bin) ->
-%    L = length(Bin),
-%    H = <<L:24,?DATA:8,1:8,0:1
-%
-
+%% TODO for POC response, Hardcoded
+send({Transport, Socket}, StreamId, Data) ->
+    L = byte_size(Data),
+    Transport:send(Socket, [<<L:24,?DATA:8,?FLAG_END_STREAM:8,0:1,StreamId:31>>,Data]).

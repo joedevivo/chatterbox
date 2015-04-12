@@ -93,13 +93,16 @@ init([ParentConnection, Socket, StreamId]) ->
          open | reserved_local | reserved_remote,
          #http2_stream_state{}} | {stop, connection_error, #http2_stream_state{}}.
 idle({_, {#header{type=?HEADERS,stream_id=StrId,flags=F},Payload}},
-    State = #http2_stream_state{stream_id=StrId})
+    State = #http2_stream_state{stream_id=StrId,socket=Socket})
         when F band ?FLAG_END_HEADERS == ?FLAG_END_HEADERS ->
     %% Headers are done!
     lager:debug("Header Payload: ~p", [Payload]),
     Headers = hpack:decode(Payload#headers.block_fragment),
     %% TODO Process Headers
     lager:debug("Headers decoded: ~p", [Headers]),
+    %% TODO: next two lines are super hard coded to prove I can respond
+    http2_frame_headers:send(Socket, StrId, <<136>>),
+    http2_frame_data:send(Socket, StrId, <<"hi!">>),
     {next_state, open, State#http2_stream_state{req_headers=Headers}};
 idle({send, {#header{type=?PUSH_PROMISE,stream_id=StrId},_}},
      State = #http2_stream_state{stream_id=StrId}) ->
