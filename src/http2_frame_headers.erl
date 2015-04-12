@@ -6,9 +6,26 @@
 
 -export([read_payload/2]).
 
-read_payload(Socket, _Header = #header{flags=_F, length=Length}) ->
-    {ok, Payload} = gen_tcp:recv(Socket, Length),
+-spec read_payload(socket(), frame_header()) -> {ok, payload()} | {error, term()}.
+read_payload(Socket, Header) ->
+    Data = http2_padding:read_possibly_padded_payload(Socket, Header),
+
+    {Priority, HeaderFragment} = case is_priority(Header) of
+        true ->
+            http2_frame_priority:read_priority(Data);
+        false ->
+            {undefined, Data}
+    end,
+
+    Payload = #headers{
+                 priority=Priority,
+                 block_fragment=HeaderFragment
+                },
+
     lager:debug("HEADERS payload: ~p", [Payload]),
-    Headers = hpack:decode(Payload),
-    lager:debug("Headers: ~p", [Headers]),
-    {ok, not_implemented}.
+    {ok, Payload}.
+
+is_priority(#header{flags=F}) when F band ?FLAG_PRIORITY == 1 ->
+    true;
+is_priority(_) ->
+    false.

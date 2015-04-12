@@ -20,7 +20,7 @@ init([]) ->
     {ok, ListenSocket} = gen_tcp:listen(Port, ListenerOptions),
     Restart = {simple_one_for_one, 60, 3600},
     Children = [{socket,
-                {chatterbox_fsm, start_link, [ListenSocket]}, % pass the socket!
+                {chatterbox_fsm, start_link, [{gen_tcp, ListenSocket}]}, % pass the socket!
                 temporary, 1000, worker, [chatterbox_fsm]}],
     {ok, {Restart, Children}}.
 
