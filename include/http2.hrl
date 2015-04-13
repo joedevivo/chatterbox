@@ -65,15 +65,19 @@
               | ?FLAG_PADDED
               | ?FLAG_PRIORITY.
 
--type stream_id() :: binary().
--record(header, {
+%% These are macros because they're used in guards alot
+-define(IS_FLAG(Flags, Flag), Flags band Flag =:= Flag).
+-define(NOT_FLAG(Flags, Flag), Flags band Flag =/= Flag).
+
+-type stream_id() :: non_neg_integer().
+-record(frame_header, {
     length      :: non_neg_integer(),
     type        :: frame_type(),
-    flags       :: binary(),
+    flags = 0   :: non_neg_integer(),
     stream_id   :: stream_id()
     }).
--type header() :: #header{}.
--type frame_header() :: #header{}.
+
+-type frame_header() :: #frame_header{}.
 
 -record(data, {
     data :: binary()
@@ -128,7 +132,7 @@
 -type goaway() :: #goaway{}.
 
 -record(window_update, {
-          window_size_increment :: binary()
+          window_size_increment :: non_neg_integer()
 }).
 -type window_update() :: #window_update{}.
 
@@ -144,7 +148,7 @@
                  | settings()
                  | continuation().
 
--type frame() :: {header(), payload()}.
+-type frame() :: {frame_header(), payload()}.
 
 
 -type transport() :: gen_tcp | ssl.

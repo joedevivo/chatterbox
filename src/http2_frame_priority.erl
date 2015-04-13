@@ -1,29 +1,27 @@
 -module(http2_frame_priority).
 
+-include("http2.hrl").
+
 -export([
-         read_payload/2,
+         read_binary/2,
          read_priority/1
         ]).
 
--include("http2.hrl").
-
 -behaviour(http2_frame).
 
--spec read_payload(Socket :: socket(),
-                   Header::header()) ->
-    {ok, payload()} |
+-spec read_binary(binary(), frame_header()) ->
+    {ok, payload(), binary()} |
     {error, term()}.
-read_payload({Transport, Socket}, #header{stream_id=0,length=5}) ->
-    {ok, Bin} = Transport:recv(Socket, 5),
-    {Payload, <<>>} = read_priority(Bin),
-    {ok, Payload, <<>>}.
+read_binary(Bin, #frame_header{stream_id=0,length=5}) ->
+    {Payload, Rem} = read_priority(Bin),
+    {ok, Payload, Rem}.
 
 -spec read_priority(binary()) -> {priority(), binary()}.
 read_priority(Binary) ->
-    <<Exclusive:1,StreamId:31,Weight:8,Extra/bits>> = Binary,
+    <<Exclusive:1,StreamId:31,Weight:8,Rem/bits>> = Binary,
     Payload = #priority{
         exclusive = Exclusive,
         stream_id = StreamId,
         weight = Weight
     },
-    {Payload, Extra}.
+    {Payload, Rem}.

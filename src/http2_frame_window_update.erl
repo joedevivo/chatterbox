@@ -4,15 +4,18 @@
 
 -behavior(http2_frame).
 
--export([read_payload/2]).
+-export([
+         read_binary/2
+]).
 
--spec read_payload(socket(), frame_header()) -> {ok, payload()} | {error, term()}.
-read_payload({Transport, Socket}, #header{length=4}) ->
-    {ok, Data} = Transport:recv(Socket, 4),
-    <<_R:1,Increment:31>> = Data,
+-spec read_binary(Bin::binary(),
+                      Header::frame_header()) ->
+    {ok, payload(), binary()} | {error, term()}.
+read_binary(Bin, #frame_header{length=4}) ->
+    <<_R:1,Increment:31,Rem/bits>> = Bin,
     Payload = #window_update{
                  window_size_increment=Increment
                 },
-    {ok, Payload, <<>>};
-read_payload(_, _) ->
+    {ok, Payload, Rem};
+read_binary(_, _) ->
     {error, frame_size_error}.

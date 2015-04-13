@@ -4,12 +4,12 @@
 
 -behavior(http2_frame).
 
--export([read_payload/2]).
+-export([read_binary/2]).
 
--spec read_payload(socket(), frame_header()) -> {ok, payload()} | {error, term()}.
-read_payload({Transport, Socket}, #header{length=8}) ->
-    {ok, Data} = Transport:recv(Socket, 8),
+-spec read_binary(binary(), frame_header()) ->
+    {ok, payload(), binary()} | {error, term()}.
+read_binary(<<Data:8/binary,Rem/bits>>, #frame_header{length=8}) ->
     Payload = #ping{
                  opaque_data = Data
                 },
-    {ok, Payload, <<>>}.
+    {ok, Payload, Rem}.

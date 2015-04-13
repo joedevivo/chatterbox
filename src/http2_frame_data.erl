@@ -1,21 +1,23 @@
 -module(http2_frame_data).
 
--export([read_payload/2, send/3]).
-
 -include("http2.hrl").
+
+-export([
+         read_binary/2,
+         send/3
+        ]).
 
 -behaviour(http2_frame).
 
--spec read_payload(Socket :: socket(),
-                   Header::header()) ->
-    {ok, payload()} |
+-spec read_binary(binary(), frame_header()) ->
+    {ok, payload(), binary()} |
     {error, term()}.
-read_payload(_Socket, #header{stream_id=0}) ->
+read_binary(_, #frame_header{stream_id=0}) ->
     {error, 'PROTOCOL_ERROR'};
-read_payload(Socket, Header=#header{flags=Flags}) ->
-    _ = Flags band 16#1,
-    Data = http2_padding:read_possibly_padded_payload(Socket, Header),
-    {ok, #data{data=Data}, <<>>}.
+read_binary(Bin, H=#frame_header{length=L}) ->
+    <<PayloadBin:L/binary,Rem/bits>> = Bin,
+    Data = http2_padding:read_possibly_padded_payload(PayloadBin, H),
+    {ok, #data{data=Data}, Rem}.
 
 %% TODO for POC response, Hardcoded
 send({Transport, Socket}, StreamId, Data) ->

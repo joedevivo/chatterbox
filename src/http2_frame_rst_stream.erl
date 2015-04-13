@@ -1,22 +1,20 @@
 -module(http2_frame_rst_stream).
 
--export([read_payload/2]).
+-export([read_binary/2]).
 
 -include("http2.hrl").
 
 -behavior(http2_frame).
 
--spec read_payload(Socket :: socket(),
-                   Header::header()) ->
-    {ok, payload()} |
+-spec read_binary(binary(), frame_header()) ->
+    {ok, payload(), binary()} |
     {error, term()}.
-read_payload(_, #header{stream_id=0}) ->
+read_binary(_, #frame_header{stream_id=0}) ->
     {error, connection_error};
-read_payload({Transport, Socket}, #header{length=4}) ->
-    {ok, ErrorCode} = Transport:recv(Socket, 4),
+read_binary(<<ErrorCode:4/binary,Rem/bits>>, #frame_header{length=4}) ->
     Payload = #rst_stream{
                  error_code = ErrorCode
                 },
-    {ok, Payload, <<>>};
-read_payload(_, #header{stream_id=0}) ->
+    {ok, Payload, Rem};
+read_binary(_, #frame_header{stream_id=0}) ->
     {error, frame_size_error}.

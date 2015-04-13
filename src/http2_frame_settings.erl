@@ -7,31 +7,21 @@
 -define(SETTINGS_MAX_FRAME_SIZE,            <<16#5>>).
 -define(SETTINGS_MAX_HEADER_LIST_SIZE,      <<16#6>>).
 
-
 -include("http2.hrl").
 
 -behaviour(http2_frame).
 
--export([read_payload/2, send/2, ack/1]).
+-export([read_binary/2, send/2, ack/1]).
 
-read_payload(Bin, _Header = #header{length=0}) when is_binary(Bin) ->
+-spec read_binary(binary(), frame_header()) ->
+    {ok, payload(), binary()} |
+    {error, term()}.
+read_binary(Bin, _Header = #frame_header{length=0}) ->
     {ok, <<>>, Bin};
-read_payload(_Socket, _Header = #header{length=0}) ->
-    {ok, <<>>, <<>>};
-read_payload(Bin, _Header = #header{length=Length}) when is_binary(Bin) ->
-    lager:debug("L:~p", [Length]),
-    lager:debug("Bin: ~p", [Bin]),
-    %%L = Length*8,
+read_binary(Bin, _Header = #frame_header{length=Length}) ->
     <<SettingsBin:Length/binary,Rem/bits>> = Bin,
-    lager:debug("S/R: {~p,~p}", [SettingsBin, Rem]),
     Settings = parse_settings(SettingsBin),
-    {ok, Settings, Rem};
-read_payload({Transport, Socket}, _Header = #header{length=Length}) ->
-    {ok, Payload} = Transport:recv(Socket, Length),
-
-    Settings = parse_settings(Payload),
-    lager:debug("Settings: ~p", [Settings]),
-    {ok, Settings, <<>>}.
+    {ok, Settings, Rem}.
 
 -spec parse_settings(binary()) -> settings().
 parse_settings(Bin) ->
@@ -47,11 +37,11 @@ parse_settings(<<>>, Settings) ->
 
 -spec send(socket(), settings()) -> ok | {error, term()}.
 send({Transport, Socket}, _Settings) ->
-    %% TODO: hard coded settings frame. needs to be figured out from _Settings
-    %% Also needs to be compared to ?DEFAULT_SETTINGS
-    %% and only send the ones that are different
-    %% or maybe it's the fsm's current settings.
-    %% figure out later
+    %% TODO: hard coded settings frame. needs to be figured out from
+    %% _Settings. Or not. We can have our own settings and they can be
+    %% different.  Also needs to be compared to ?DEFAULT_SETTINGS and
+    %% only send the ones that are different or maybe it's the fsm's
+    %% current settings.  figure out later
     Header = <<12:24,?SETTINGS:8,16#0:8,0:1,0:31>>,
 
     Payload = <<3:16,

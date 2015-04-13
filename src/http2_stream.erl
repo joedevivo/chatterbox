@@ -92,9 +92,9 @@ init([ParentConnection, Socket, StreamId]) ->
         {next_state,
          open | reserved_local | reserved_remote,
          #http2_stream_state{}} | {stop, connection_error, #http2_stream_state{}}.
-idle({_, {#header{type=?HEADERS,stream_id=StrId,flags=F},Payload}},
+idle({_, {#frame_header{type=?HEADERS,stream_id=StrId,flags=F},Payload}},
     State = #http2_stream_state{stream_id=StrId,socket=Socket})
-        when F band ?FLAG_END_HEADERS == ?FLAG_END_HEADERS ->
+        when ?IS_FLAG(F,?FLAG_END_HEADERS) ->
     %% Headers are done!
     lager:debug("Header Payload: ~p", [Payload]),
     Headers = hpack:decode(Payload#headers.block_fragment),
@@ -104,11 +104,11 @@ idle({_, {#header{type=?HEADERS,stream_id=StrId,flags=F},Payload}},
     http2_frame_headers:send(Socket, StrId, <<136>>),
     http2_frame_data:send(Socket, StrId, <<"hi!">>),
     {next_state, open, State#http2_stream_state{req_headers=Headers}};
-idle({send, {#header{type=?PUSH_PROMISE,stream_id=StrId},_}},
+idle({send, {#frame_header{type=?PUSH_PROMISE,stream_id=StrId},_}},
      State = #http2_stream_state{stream_id=StrId}) ->
     %% TODO Sent a Push Promise
     {next_state, reserved_local, State};
-idle({recv, {#header{type=?PUSH_PROMISE,stream_id=StrId},_}},
+idle({recv, {#frame_header{type=?PUSH_PROMISE,stream_id=StrId},_}},
      State = #http2_stream_state{stream_id=StrId}) ->
     %% TODO recv'd Push Promise
     {next_state, reserved_remote, State};
@@ -122,9 +122,9 @@ idle(Msg, State) ->
     {next_state,
      closed | half_closed_remote | half_closed_local,
      #http2_stream_state{}}.
-open({_, {#header{type=?RST_STREAM}}}, State) ->
+open({_, {#frame_header{type=?RST_STREAM}}}, State) ->
     {next_state, closed, State};
-open({send, {#header{flags=F},_}}, State) ->
+open({send, {#frame_header{flags=F},_}}, State) ->
     NextState = case F band ?FLAG_END_STREAM of
         1 ->
             half_closed_local;
@@ -132,7 +132,7 @@ open({send, {#header{flags=F},_}}, State) ->
             open
     end,
     {next_state, NextState, State};
-open({recv, {#header{flags=F},_}}, State) ->
+open({recv, {#frame_header{flags=F},_}}, State) ->
     NextState = case F band 16#1 of
         1 ->
             half_closed_remote;
@@ -175,7 +175,7 @@ half_closed_remote(_, State) ->
      #http2_stream_state{}} |
     {stop,
      _, #http2_stream_state{}}.
-closed({_, {#header{type=?PRIORITY},_}}, State) ->
+closed({_, {#frame_header{type=?PRIORITY},_}}, State) ->
     %% Right now we ignore PRIORITY
     {next_state, closed, State};
 closed(_, State) ->
@@ -191,8 +191,8 @@ handle_info(E, StateName, S) ->
     lager:debug("unexpected [~p]: ~p~n", [StateName, E]),
     {next_state, StateName , S}.
 
-code_change(_OldVsn, _StateName, State, _Extra) ->
-    {ok, State}.
+code_change(_OldVsn, StateName, State, _Extra) ->
+    {ok, StateName, State}.
 
 terminate(normal, _StateName, _State) ->
     ok;

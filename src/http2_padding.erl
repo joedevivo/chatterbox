@@ -1,38 +1,36 @@
 -module(http2_padding).
 
--export([is_padded/1, read_possibly_padded_payload/2]).
-
 -include("http2.hrl").
 
+-export([
+         is_padded/1,
+         read_possibly_padded_payload/2
+        ]).
+
 -spec is_padded(frame_header()) -> boolean().
-is_padded(#header{flags=Flags})
-    when Flags band 16#8 == 1 ->
+is_padded(#frame_header{flags=Flags})
+    when ?IS_FLAG(Flags, ?FLAG_PADDED) ->
     true;
 is_padded(_) ->
     false.
 
--spec read_possibly_padded_payload(socket() | binary(), frame_header()) -> {binary(), binary()}.
-read_possibly_padded_payload(SockOrBin, Header) ->
-    case is_padded(Header) of
-        true ->
-            read_padded_payload(SockOrBin, Header);
-        false ->
-            read_unpadded_payload(SockOrBin, Header)
-    end.
+-spec read_possibly_padded_payload(binary(), frame_header())
+                                  -> {binary(), binary()}.
+read_possibly_padded_payload(Bin, H=#frame_header{flags=F})
+  when ?IS_FLAG(F, ?FLAG_PADDED) ->
+    read_padded_payload(Bin, H);
+read_possibly_padded_payload(Bin, Header) ->
+    read_unpadded_payload(Bin, Header).
 
--spec read_padded_payload(socket() | binary(), frame_header()) -> {binary(), binary()}.
-read_padded_payload(<<Padding:8,Bytes/bits>> = Bin, #header{length=Length}) when is_binary(Bin) ->
+-spec read_padded_payload(binary(), frame_header())
+                         -> binary().
+read_padded_payload(<<Padding:8,Bytes/bits>>,
+                    #frame_header{length=Length}) ->
     L = Length - Padding,
-    <<Data:L/binary,_:Padding/binary,Rem/bits>> = Bytes,
-    {Data, Rem};
-read_padded_payload({Transport, Socket}, Header = #header{length=Length}) ->
-    {ok, Bytes} = Transport:recv(Socket,Length),
-    read_padded_payload(Bytes, Header).
+    <<Data:L/binary,_:Padding/binary>> = Bytes,
+    Data.
 
--spec read_unpadded_payload(socket() | binary(), frame_header()) -> binary().
-read_unpadded_payload(Bin, #header{length=Length}) when is_binary(Bin) ->
-    <<Data:Length/binary,Rem/bits>> = Bin,
-    {Data, Rem};
-read_unpadded_payload({Transport, Socket}, #header{length=Length}) ->
-    {ok, Data} = Transport:recv(Socket, Length),
-    {Data, <<>>}.
+-spec read_unpadded_payload(binary(), frame_header())
+                           -> binary().
+read_unpadded_payload(Data, _H) ->
+    Data.
