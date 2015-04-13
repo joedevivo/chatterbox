@@ -13,6 +13,6 @@ read_payload({Transport, Socket}, #header{length=4}) ->
     Payload = #window_update{
                  window_size_increment=Increment
                 },
-    {ok, Payload};
+    {ok, Payload, <<>>};
 read_payload(_, _) ->
     {error, frame_size_error}.

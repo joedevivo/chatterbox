@@ -17,6 +17,6 @@ read_payload({Transport, Socket}, #header{length=4}) ->
     Payload = #rst_stream{
                  error_code = ErrorCode
                 },
-    {ok, Payload};
+    {ok, Payload, <<>>};
 read_payload(_, #header{stream_id=0}) ->
     {error, frame_size_error}.

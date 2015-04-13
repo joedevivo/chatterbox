@@ -7,6 +7,7 @@
 -record(chatterbox_fsm_state, {
         socket :: {gen_tcp | ssl, port()},
         frame_backlog = [],
+        settings_backlog = [],
         client_settings = undefined,
         server_settings = #settings{},
         next_available_stream_id =2 :: stream_id(),
@@ -53,11 +54,23 @@ accept(start, S = #chatterbox_fsm_state{socket={Transport,ListenSocket}}) ->
 %% connection, and MAY be sent at any other time by either endpoint
 %% over the lifetime of the connection. Implementations MUST support
 %% all of the parameters defined by this specification.
-settings_handshake(start_frame, S = #chatterbox_fsm_state{
+settings_handshake({start_frame, Bin}, S = #chatterbox_fsm_state{
                                        socket=Socket,
                                        server_settings=ServerSettings
                                       }) ->
     %% We just triggered this from the handle info of the HTTP/2 preamble
+
+    %% It's possible we got more. Thanks, Nagle.
+    NewState = case Bin of
+        <<>> ->
+            S;
+        _ ->
+            OtherFrames = http2_frame:from_binary(Bin),
+            lager:debug("OtherFrames: ~p", [OtherFrames]),
+            {SettingsBacklog, FB} = lists:partition(fun({X,_}) -> X#header.type =:= ?SETTINGS end, OtherFrames),
+            lager:debug("OtherFrame: ~p", [SettingsBacklog]),
+            S#chatterbox_fsm_state{frame_backlog=FB, settings_backlog=SettingsBacklog}
+    end,
 
     %% Assemble our settings and send them
     http2_frame_settings:send(Socket, ServerSettings),
@@ -73,16 +86,23 @@ settings_handshake(start_frame, S = #chatterbox_fsm_state{
     %% if something else comes in, let's store them in a backlog until
     %% we can deal with them
 
-    settings_handshake_loop(S, {false, false}).
+    settings_handshake_loop(NewState, {false, false}).
 
 settings_handshake_loop(State=#chatterbox_fsm_state{frame_backlog=FB}, {true, true}) ->
     gen_fsm:send_event(self(), backlog),
     {next_state, connected, State#chatterbox_fsm_state{frame_backlog=lists:reverse(FB)}};
 settings_handshake_loop(State = #chatterbox_fsm_state{
-                                   socket=Socket
+                                   settings_backlog=[{Header,P}|T]
                                   },
                         Acc) ->
-    lager:debug("[settings_handshake] Incoming Frame"),
+    lager:debug("[settings_handshake] Backlogged Frame"),
+    settings_handshake_loop({Header#header.type,Header#header.flags band ?FLAG_ACK}, {Header, P}, Acc, State#chatterbox_fsm_state{settings_backlog=T});
+settings_handshake_loop(State = #chatterbox_fsm_state{
+                                   socket=Socket,
+                                   settings_backlog=[]
+                                  },
+                        Acc) ->
+    lager:debug("[settings_handshake] Incoming Frame ~p", [Socket]),
     {Header, Payload} = http2_frame:read(Socket),
     settings_handshake_loop({Header#header.type,Header#header.flags band ?FLAG_ACK}, {Header, Payload}, Acc, State).
 

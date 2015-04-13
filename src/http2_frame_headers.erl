@@ -6,10 +6,9 @@
 
 -export([read_payload/2,send/3]).
 
--spec read_payload(socket(), frame_header()) -> {ok, payload()} | {error, term()}.
-read_payload(Socket, Header) ->
-    Data = http2_padding:read_possibly_padded_payload(Socket, Header),
-
+-spec read_payload(socket() | binary(), frame_header()) -> {ok, payload()} | {error, term()}.
+read_payload(SocketOrBin, Header) ->
+    {Data, Rem} = http2_padding:read_possibly_padded_payload(SocketOrBin, Header),
     {Priority, HeaderFragment} = case is_priority(Header) of
         true ->
             http2_frame_priority:read_priority(Data);
@@ -23,7 +22,7 @@ read_payload(Socket, Header) ->
                 },
 
     lager:debug("HEADERS payload: ~p", [Payload]),
-    {ok, Payload}.
+    {ok, Payload, Rem}.
 
 is_priority(#header{flags=F}) when F band ?FLAG_PRIORITY == 1 ->
     true;

@@ -12,4 +12,4 @@ read_payload({Transport, Socket}, #header{length=Length}) ->
     Payload = #continuation{
                  block_fragment=Data
                 },
-    {ok, Payload}.
+    {ok, Payload, <<>>}.

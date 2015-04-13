@@ -11,20 +11,28 @@ is_padded(#header{flags=Flags})
 is_padded(_) ->
     false.
 
-read_possibly_padded_payload(Sock, Header) ->
+-spec read_possibly_padded_payload(socket() | binary(), frame_header()) -> {binary(), binary()}.
+read_possibly_padded_payload(SockOrBin, Header) ->
     case is_padded(Header) of
         true ->
-            read_padded_payload(Sock, Header);
+            read_padded_payload(SockOrBin, Header);
         false ->
-            read_unpadded_payload(Sock, Header)
+            read_unpadded_payload(SockOrBin, Header)
     end.
 
-read_padded_payload({Transport, Socket}, #header{length=Length}) ->
-    {ok, <<Padding>>} = Transport:recv(Socket,1),
-    Data = Transport:recv(Socket, Length-Padding),
-    _ = Transport:recv(Socket, Padding),
-    Data.
+-spec read_padded_payload(socket() | binary(), frame_header()) -> {binary(), binary()}.
+read_padded_payload(<<Padding:8,Bytes/bits>> = Bin, #header{length=Length}) when is_binary(Bin) ->
+    L = Length - Padding,
+    <<Data:L/binary,_:Padding/binary,Rem/bits>> = Bytes,
+    {Data, Rem};
+read_padded_payload({Transport, Socket}, Header = #header{length=Length}) ->
+    {ok, Bytes} = Transport:recv(Socket,Length),
+    read_padded_payload(Bytes, Header).
 
+-spec read_unpadded_payload(socket() | binary(), frame_header()) -> binary().
+read_unpadded_payload(Bin, #header{length=Length}) when is_binary(Bin) ->
+    <<Data:Length/binary,Rem/bits>> = Bin,
+    {Data, Rem};
 read_unpadded_payload({Transport, Socket}, #header{length=Length}) ->
     {ok, Data} = Transport:recv(Socket, Length),
-    Data.
+    {Data, <<>>}.

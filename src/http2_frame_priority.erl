@@ -16,7 +16,7 @@
 read_payload({Transport, Socket}, #header{stream_id=0,length=5}) ->
     {ok, Bin} = Transport:recv(Socket, 5),
     {Payload, <<>>} = read_priority(Bin),
-    {ok, Payload}.
+    {ok, Payload, <<>>}.
 
 -spec read_priority(binary()) -> {priority(), binary()}.
 read_priority(Binary) ->

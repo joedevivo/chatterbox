@@ -15,4 +15,4 @@ read_payload({Transport, Socket}, #header{length=L}) ->
                  error_code = ErrorCode,
                  additional_debug_data = Extra
                 },
-    {ok, Payload}.
+    {ok, Payload, <<>>}.

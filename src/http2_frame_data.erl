@@ -15,7 +15,7 @@ read_payload(_Socket, #header{stream_id=0}) ->
 read_payload(Socket, Header=#header{flags=Flags}) ->
     _ = Flags band 16#1,
     Data = http2_padding:read_possibly_padded_payload(Socket, Header),
-    {ok, #data{data=Data}}.
+    {ok, #data{data=Data}, <<>>}.
 
 %% TODO for POC response, Hardcoded
 send({Transport, Socket}, StreamId, Data) ->

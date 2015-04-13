@@ -12,4 +12,4 @@ read_payload({Transport, Socket}, #header{length=8}) ->
     Payload = #ping{
                  opaque_data = Data
                 },
-    {ok, Payload}.
+    {ok, Payload, <<>>}.

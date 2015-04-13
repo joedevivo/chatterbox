@@ -14,4 +14,4 @@ read_payload(Socket, Header) ->
                  promised_stream_id=Stream,
                  block_fragment=BlockFragment
                 },
-    {ok, Payload}.
+    {ok, Payload, <<>>}.

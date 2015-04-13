@@ -14,13 +14,24 @@
 
 -export([read_payload/2, send/2, ack/1]).
 
+read_payload(Bin, _Header = #header{length=0}) when is_binary(Bin) ->
+    {ok, <<>>, Bin};
 read_payload(_Socket, _Header = #header{length=0}) ->
-    {ok, <<>>};
+    {ok, <<>>, <<>>};
+read_payload(Bin, _Header = #header{length=Length}) when is_binary(Bin) ->
+    lager:debug("L:~p", [Length]),
+    lager:debug("Bin: ~p", [Bin]),
+    %%L = Length*8,
+    <<SettingsBin:Length/binary,Rem/bits>> = Bin,
+    lager:debug("S/R: {~p,~p}", [SettingsBin, Rem]),
+    Settings = parse_settings(SettingsBin),
+    {ok, Settings, Rem};
 read_payload({Transport, Socket}, _Header = #header{length=Length}) ->
     {ok, Payload} = Transport:recv(Socket, Length),
+
     Settings = parse_settings(Payload),
     lager:debug("Settings: ~p", [Settings]),
-    {ok, Settings}.
+    {ok, Settings, <<>>}.
 
 -spec parse_settings(binary()) -> settings().
 parse_settings(Bin) ->
