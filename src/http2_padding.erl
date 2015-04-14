@@ -15,7 +15,7 @@ is_padded(_) ->
     false.
 
 -spec read_possibly_padded_payload(binary(), frame_header())
-                                  -> {binary(), binary()}.
+                                  -> binary().
 read_possibly_padded_payload(Bin, H=#frame_header{flags=F})
   when ?IS_FLAG(F, ?FLAG_PADDED) ->
     read_padded_payload(Bin, H);

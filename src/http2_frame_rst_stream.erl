@@ -11,7 +11,7 @@
     {error, term()}.
 read_binary(_, #frame_header{stream_id=0}) ->
     {error, connection_error};
-read_binary(<<ErrorCode:4/binary,Rem/bits>>, #frame_header{length=4}) ->
+read_binary(<<ErrorCode:4,Rem/bits>>, #frame_header{length=4}) ->
     Payload = #rst_stream{
                  error_code = ErrorCode
                 },

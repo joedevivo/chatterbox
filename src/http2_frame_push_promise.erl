@@ -9,7 +9,7 @@
 -spec read_binary(binary(), frame_header()) ->
     {ok, payload(), binary()} | {error, term()}.
 read_binary(Bin, H=#frame_header{length=L}) ->
-    <<PayloadBin:L/binary,Rem/bits>> = Bin,
+    <<PayloadBin:L/binary,Rem/binary>> = Bin,
     Data = http2_padding:read_possibly_padded_payload(PayloadBin, H),
     <<_R:1,Stream:31,BlockFragment/bits>> = Data,
     Payload = #push_promise{

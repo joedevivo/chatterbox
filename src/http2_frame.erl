@@ -26,7 +26,7 @@ read(Socket) ->
     {ok, Payload, <<>>} = read_payload(Socket, H),
     {H, Payload}.
 
--spec from_binary(binary()) -> {frame_header(), payload()}.
+-spec from_binary(binary()) -> [{frame_header(), payload()}].
 from_binary(Bin) ->
     from_binary(Bin, []).
 
@@ -84,7 +84,4 @@ read_binary_payload(Socket, Header = #frame_header{type=?GOAWAY}) ->
 read_binary_payload(Socket, Header = #frame_header{type=?WINDOW_UPDATE}) ->
     http2_frame_window_update:read_binary(Socket, Header);
 read_binary_payload(Socket, Header = #frame_header{type=?CONTINUATION}) ->
-    http2_frame_continuation:read_binary(Socket, Header);
-read_binary_payload(_Socket, #frame_header{type=T}) ->
-    lager:error("Unknown Header Type: ~p", [T]),
-    {error, "bad header type"}.
+    http2_frame_continuation:read_binary(Socket, Header).
