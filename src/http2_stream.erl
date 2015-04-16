@@ -97,7 +97,8 @@ idle({_, {#frame_header{type=?HEADERS,stream_id=StrId,flags=F},Payload}},
         when ?IS_FLAG(F,?FLAG_END_HEADERS) ->
     %% Headers are done!
     lager:debug("Header Payload: ~p", [Payload]),
-    Headers = hpack:decode(Payload#headers.block_fragment),
+    Headers = hpack:decode(Payload#headers.block_fragment,
+            hpack:new_decode_context()),
     %% TODO Process Headers
     lager:debug("Headers decoded: ~p", [Headers]),
     %% TODO: next two lines are super hard coded to prove I can respond
