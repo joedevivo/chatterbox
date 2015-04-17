@@ -54,70 +54,79 @@ decode(<<B:1,_/binary>>, _HeaderAcc, _Context) ->
     lager:debug("Bad header packet ~p", [B]),
     error.
 
-%% this is the easiest!
-decode_indexed_header(<<2#1:1,Index:7,B1/bits>>, Acc, Context = #decode_context{dynamic_table=T}) ->
-    decode(B1, Acc ++ [headers:lookup(Index, T) ], Context).
+decode_indexed_header(<<2#1:1,2#1111111:7,B1/bits>>,
+                      Acc,
+                      Context = #decode_context{dynamic_table=T}) ->
+    {Index, B2} = decode_integer(B1, 7),
+    decode(B2, Acc ++ [headers:lookup(Index, T)], Context);
+decode_indexed_header(<<2#1:1,Index:7,B1/bits>>,
+                      Acc,
+                      Context = #decode_context{dynamic_table=T}) ->
+    decode(B1, Acc ++ [headers:lookup(Index, T)], Context).
 
+%% This is the case when the index is greater than 62
 decode_literal_header_with_indexing(<<2#01:2,2#111111:6,B1/bits>>, Acc,
     Context = #decode_context{dynamic_table=T}) ->
     {Index, Rem} = decode_integer(B1,6),
-    lager:debug("Zero: ~p, ~p", [Index, T]),
     {Str, B2} = get_literal(Rem),
-    case Index of
-        0 ->
-            Name = binary_to_atom(Str, latin1),
-            {Value, B3} = get_literal(B2),
-            decode(B3, Acc ++ [{Name, Value}],
-                Context#decode_context{dynamic_table=headers:add(Name, Value, T)});
-        _ ->
-            {Name,_}= headers:lookup(Index, T),
-            decode(B2, Acc ++ [{Name, Str}],
-                Context#decode_context{dynamic_table=headers:add(Name, Str, T)})
-    end;
+    {Name,_}= headers:lookup(Index, T),
+    decode(B2,
+           Acc ++ [{Name, Str}],
+           Context#decode_context{dynamic_table=headers:add(Name, Str, T)});
+decode_literal_header_with_indexing(<<2#01:2,2#000000:6,B1/bits>>, Acc,
+    Context = #decode_context{dynamic_table=T}) ->
+    {Str, B2} = get_literal(B1),
+    {Value, B3} = get_literal(B2),
+    decode(B3,
+           Acc ++ [{Str, Value}],
+           Context#decode_context{dynamic_table=headers:add(Str, Value, T)});
 decode_literal_header_with_indexing(<<2#01:2,Index:6,B1/bits>>, Acc,
     Context = #decode_context{dynamic_table=T}) ->
     {Str, B2} = get_literal(B1),
-    case Index of
-        0 ->
-            Name = binary_to_atom(Str, latin1),
-            {Value, B3} = get_literal(B2),
-            decode(B3, Acc ++ [{Name, Value}],
-                Context#decode_context{dynamic_table=headers:add(Name, Value, T)});
-        _ ->
-            {Name,_}= headers:lookup(Index, T),
-            decode(B2, Acc ++ [{Name, Str}],
-                Context#decode_context{dynamic_table=headers:add(Name, Str, T)})
-    end.
+    {Name,_}= headers:lookup(Index, T),
+    decode(B2,
+           Acc ++ [{Name, Str}],
+           Context#decode_context{dynamic_table=headers:add(Name, Str, T)}).
 
+decode_literal_header_without_indexing(<<2#0000:4,2#1111:4,B1/bits>>, Acc,
+    Context = #decode_context{dynamic_table=T}) ->
+    {Index, Rem} = decode_integer(B1,4),
+    {Str, B2} = get_literal(Rem),
+    {Name,_}= headers:lookup(Index, T),
+    decode(B2, Acc ++ [{Name, Str}], Context);
+decode_literal_header_without_indexing(<<2#0000:4,2#0000:4,B1/bits>>, Acc,
+    Context) ->
+    {Str, B2} = get_literal(B1),
+    {Value, B3} = get_literal(B2),
+    decode(B3, Acc ++ [{Str, Value}], Context);
 decode_literal_header_without_indexing(<<2#0000:4,Index:4,B1/bits>>, Acc,
     Context = #decode_context{dynamic_table=T}) ->
     {Str, B2} = get_literal(B1),
-    case Index of
-        0 ->
-            {Value, B3} = get_literal(B2),
-            decode(B3, Acc ++ [{binary_to_atom(Str, latin1), Value}], Context);
-        _ ->
-            {Name,_}= headers:lookup(Index, T),
-            decode(B2, Acc ++ [{Name, Str}], Context)
-    end.
+    {Name,_}= headers:lookup(Index, T),
+    decode(B2, Acc ++ [{Name, Str}], Context).
 
+decode_literal_header_never_indexed(<<2#0001:4,2#1111:4,B1/bits>>, Acc,
+    Context = #decode_context{dynamic_table=T}) ->
+    {Index, Rem} = decode_integer(B1,4),
+    {Str, B2} = get_literal(Rem),
+    {Name,_}= headers:lookup(Index, T),
+    decode(B2, Acc ++ [{Name, Str}], Context);
+decode_literal_header_never_indexed(<<2#0001:4,2#0000:4,B1/bits>>, Acc,
+    Context) ->
+    {Str, B2} = get_literal(B1),
+    {Value, B3} = get_literal(B2),
+    decode(B3, Acc ++ [{Str, Value}], Context);
 decode_literal_header_never_indexed(<<2#0001:4,Index:4,B1/bits>>, Acc,
     Context = #decode_context{dynamic_table=T}) ->
     {Str, B2} = get_literal(B1),
-    case Index of
-        0 ->
-            {Value, B3} = get_literal(B2),
-            decode(B3, Acc ++ [{binary_to_atom(Str, latin1), Value}], Context);
-        _ ->
-            {Name,_}= headers:lookup(Index, T),
-            decode(B2, Acc ++ [{Name, Str}])
-    end.
+    {Name,_}= headers:lookup(Index, T),
+    decode(B2, Acc ++ [{Name, Str}], Context).
 
-
-decode_dynamic_table_size_update(<<2#001:3,_NewSize:5,Bin/bits>>, Acc, Context) ->
-    %% Yes, you are reading this right. We're throwing away the new
-    %% table size. TODO :D
-    decode(Bin, Acc, Context).
+decode_dynamic_table_size_update(<<2#001:3,2#11111:5,Bin/binary>>, Acc, Context) ->
+    {NewSize, Rem} = decode_integer(Bin,5),
+    decode(Rem, Acc, headers:resize(NewSize, Context));
+decode_dynamic_table_size_update(<<2#001:3,NewSize:5,Bin/binary>>, Acc, Context) ->
+    decode(Bin, Acc, headers:resize(NewSize, Context)).
 
 get_literal(<<>>) ->
     {<<>>, <<>>};
