@@ -5,24 +5,40 @@
 -compile([export_all]).
 
 basic_nghttp2_request_test() ->
-    {PList, _DC} = hpack:decode(<<130,132,134,65,138,160,228,29,19,157,9,184,240,30,7,83,3,42,47,42,144,122,138,170,105,210,154,196,192,23,117,119,127>>,
-            hpack:new_decode_context()),
+    Bin = <<130,132,134,65,138,160,228,29,19,157,9,184,240,30,7,83,3,42,47,42,144,
+            122,138,170,105,210,154,196,192,23,117,119,127>>,
+
+    {Decoded=[H1,H2,H3,H4,H5,H6,H7], _DC} = hpack:decode(Bin, hpack:new_decode_context()),
     % :method: GET
+    ?assertEqual({<<":method">>, <<"GET">>},H1),
     % :path: /
+    ?assertEqual({<<":path">>, <<"/">>},H2),
     % :scheme: http
+    ?assertEqual({<<":scheme">>, <<"http">>},H3),
     % :authority: localhost:8080
+    ?assertEqual({<<":authority">>, <<"localhost:8080">>},H4),
     % accept: */*
+    ?assertEqual({<<"accept">>, <<"*/*">>},H5),
     % accept-encoding: gzip, deflate
+    ?assertEqual({<<"accept-encoding">>, <<"gzip, deflate">>},H6),
     % user-agent: nghttp2/0.7.7
+    ?assertEqual({<<"user-agent">>, <<"nghttp2/0.7.7">>},H7),
 
-    io:format("Headers: ~p~n", [PList]), %%outputs
 
+    {ReEncoded, _EncodeContext} = hpack:encode([H1,H2,H3,H4,H5,H6,H7], hpack:new_encode_context()),
+    {ReDecoded, _} = hpack:decode(ReEncoded, hpack:new_decode_context()),
+    io:format("Original : ~p~n", [Bin]),
+    io:format("ReEncoded: ~p~n", [ReEncoded]),
+    io:format("ReDecoded: ~p~n", [ReDecoded]),
+
+    ?assertEqual(Decoded, ReDecoded),
     ok.
 
 decode_1_test() ->
-    Bin = <<130,132,134,65,138,160,228,29,19,157,9,184,240,30,15,83,3,42,47,42,144,122,138,170,105,210,154,196,192,23,117,112,135,64,135,242,178,125,117,73,236,175,1,66,126,1,79,64,133,242,181,37,63,143,1,112,126,1,116,127,1,1,116>>,
-
-
+    Bin = <<130,132,134,65,138,160,228,29,19,157,9,184,240,30,15,83,3,42,47,42,
+            144,122,138,170,105,210,154,196,192,23,117,112,135,64,135,242,178,
+            125,117,73,236,175,1,66,126,1,79,64,133,242,181,37,63,143,1,112,126,
+            1,116,127,1,1,116>>,
     {[
         H1,H2,H3,H4,H5,H6,H7,H8,H9,H10,H11,H12
     ], _DC} = hpack:decode(Bin, hpack:new_decode_context()),
@@ -39,7 +55,6 @@ decode_1_test() ->
     ?assertEqual({<<"x-meow">>, <<"p">>},H10),
     ?assertEqual({<<"x-meow">>, <<"t">>},H11),
     ?assertEqual({<<"x-tyktorp">>, <<"t">>},H12),
-
     ok.
 
 % http://http2.github.io/http2-spec/compression.html#rfc.section.C.2.1

@@ -8,7 +8,8 @@
     add/3,
     lookup/2,
     resize/2,
-    table_size/1
+    table_size/1,
+    match/2
 ]).
 
 -type header_name() :: binary().
@@ -138,6 +139,138 @@ resize(NewSize, DT) ->
 -spec table_size(dynamic_table()) -> pos_integer().
 table_size(#dynamic_table{size=S}) -> S.
 
+-spec match(header(), dynamic_table()) -> {atom(), pos_integer()}.
+match({<<":authority">>, <<>>}, _) ->                     {indexed, 1 };
+match({<<":method">>, <<"GET">>}, _) ->                   {indexed, 2 };
+match({<<":method">>, <<"POST">>}, _) ->                  {indexed, 3 };
+match({<<":path">>, <<"/">>}, _) ->                       {indexed, 4 };
+match({<<":path">>, <<"/index.html">>}, _) ->             {indexed, 5 };
+match({<<":scheme">>, <<"http">>}, _) ->                  {indexed, 6 };
+match({<<":scheme">>, <<"https">>}, _) ->                 {indexed, 7 };
+match({<<":status">>, <<"200">>}, _) ->                   {indexed, 8 };
+match({<<":status">>, <<"204">>}, _) ->                   {indexed, 9 };
+match({<<":status">>, <<"206">>}, _) ->                   {indexed, 10};
+match({<<":status">>, <<"304">>}, _) ->                   {indexed, 11};
+match({<<":status">>, <<"400">>}, _) ->                   {indexed, 12};
+match({<<":status">>, <<"404">>}, _) ->                   {indexed, 13};
+match({<<":status">>, <<"500">>}, _) ->                   {indexed, 14};
+match({<<"accept-charset">>, <<>>}, _) ->                 {indexed, 15};
+match({<<"accept-encoding">>, <<"gzip, deflate">>}, _) -> {indexed, 16};
+match({<<"accept-language">>, <<>>}, _) ->                {indexed, 17};
+match({<<"accept-ranges">>, <<>>}, _) ->                  {indexed, 18};
+match({<<"accept">>, <<>>}, _) ->                         {indexed, 19};
+match({<<"access-control-allow-origin">>, <<>>}, _) ->    {indexed, 20};
+match({<<"age">>, <<>>}, _) ->                            {indexed, 21};
+match({<<"allow">>, <<>>}, _) ->                          {indexed, 22};
+match({<<"authorization">>, <<>>}, _) ->                  {indexed, 23};
+match({<<"cache-control">>, <<>>}, _) ->                  {indexed, 24};
+match({<<"content-disposition">>, <<>>}, _) ->            {indexed, 25};
+match({<<"content-encoding">>, <<>>}, _) ->               {indexed, 26};
+match({<<"content-language">>, <<>>}, _) ->               {indexed, 27};
+match({<<"content-length">>, <<>>}, _) ->                 {indexed, 28};
+match({<<"content-location">>, <<>>}, _) ->               {indexed, 29};
+match({<<"content-range">>, <<>>}, _) ->                  {indexed, 30};
+match({<<"content-type">>, <<>>}, _) ->                   {indexed, 31};
+match({<<"cookie">>, <<>>}, _) ->                         {indexed, 32};
+match({<<"date">>, <<>>}, _) ->                           {indexed, 33};
+match({<<"etag">>, <<>>}, _) ->                           {indexed, 34};
+match({<<"expect">>, <<>>}, _) ->                         {indexed, 35};
+match({<<"expires">>, <<>>}, _) ->                        {indexed, 36};
+match({<<"from">>, <<>>}, _) ->                           {indexed, 37};
+match({<<"host">>, <<>>}, _) ->                           {indexed, 38};
+match({<<"if-match">>, <<>>}, _) ->                       {indexed, 39};
+match({<<"if-modified-since">>, <<>>}, _) ->              {indexed, 40};
+match({<<"if-none-match">>, <<>>}, _) ->                  {indexed, 41};
+match({<<"if-range">>, <<>>}, _) ->                       {indexed, 42};
+match({<<"if-unmodified-since">>, <<>>}, _) ->            {indexed, 43};
+match({<<"last-modified">>, <<>>}, _) ->                  {indexed, 44};
+match({<<"link">>, <<>>}, _) ->                           {indexed, 45};
+match({<<"location">>, <<>>}, _) ->                       {indexed, 46};
+match({<<"max-forwards">>, <<>>}, _) ->                   {indexed, 47};
+match({<<"proxy-authenticate">>, <<>>}, _) ->             {indexed, 48};
+match({<<"proxy-authorization">>, <<>>}, _) ->            {indexed, 49};
+match({<<"range">>, <<>>}, _) ->                          {indexed, 50};
+match({<<"referer">>, <<>>}, _) ->                        {indexed, 51};
+match({<<"refresh">>, <<>>}, _) ->                        {indexed, 52};
+match({<<"retry-after">>, <<>>}, _) ->                    {indexed, 53};
+match({<<"server">>, <<>>}, _) ->                         {indexed, 54};
+match({<<"set-cookie">>, <<>>}, _) ->                     {indexed, 55};
+match({<<"strict-transport-security">>, <<>>}, _) ->      {indexed, 56};
+match({<<"transfer-encoding">>, <<>>}, _) ->              {indexed, 57};
+match({<<"user-agent">>, <<>>}, _) ->                     {indexed, 58};
+match({<<"vary">>, <<>>}, _) ->                           {indexed, 59};
+match({<<"via">>, <<>>}, _) ->                            {indexed, 60};
+match({<<"www-authenticate">>, <<>>}, _) ->               {indexed, 61};
+match({Name, Value}, #dynamic_table{table=T}) ->
+    %% If there's a N/V match in the DT, return {indexed, Int}
+    %% If there's a N match, make sure there's not also a static_match
+        %% if so, use it, otherwise use the first element in the first match
+        %% If not
+    Found = lists:filter(fun({_,N,_}) -> N =:= Name end, T),
+    ExactFound = lists:filter(fun({_,_,V}) -> V =:= Value end, Found),
 
+    case {ExactFound, Found, static_match(Name)} of
+        {[{I,Name,Value}|_], _, _} ->
+            {indexed, I};
+        {[], [{I,Name,_}|_], undefined} ->
+            {literal_with_indexing, I};
+        {[], _, I} when is_integer(I) ->
+            {literal_with_indexing, I};
+        {[], [], undefined} ->
+            {literal_wo_indexing, undefined}
+    end.
 
-
+-spec static_match(header_name()) -> pos_integer().
+static_match(<<":authority">>) ->                      1 ;
+static_match(<<":method">>) ->                         2 ;
+static_match(<<":path">>) ->                           4 ;
+static_match(<<":scheme">>) ->                         6 ;
+static_match(<<":status">>) ->                         8 ;
+static_match(<<"accept-charset">>) ->                  15;
+static_match(<<"accept-encoding">>) ->                 16;
+static_match(<<"accept-language">>) ->                 17;
+static_match(<<"accept-ranges">>) ->                   18;
+static_match(<<"accept">>) ->                          19;
+static_match(<<"access-control-allow-origin">>) ->     20;
+static_match(<<"age">>) ->                             21;
+static_match(<<"allow">>) ->                           22;
+static_match(<<"authorization">>) ->                   23;
+static_match(<<"cache-control">>) ->                   24;
+static_match(<<"content-disposition">>) ->             25;
+static_match(<<"content-encoding">>) ->                26;
+static_match(<<"content-language">>) ->                27;
+static_match(<<"content-length">>) ->                  28;
+static_match(<<"content-location">>) ->                29;
+static_match(<<"content-range">>) ->                   30;
+static_match(<<"content-type">>) ->                    31;
+static_match(<<"cookie">>) ->                          32;
+static_match(<<"date">>) ->                            33;
+static_match(<<"etag">>) ->                            34;
+static_match(<<"expect">>) ->                          35;
+static_match(<<"expires">>) ->                         36;
+static_match(<<"from">>) ->                            37;
+static_match(<<"host">>) ->                            38;
+static_match(<<"if-match">>) ->                        39;
+static_match(<<"if-modified-since">>) ->               40;
+static_match(<<"if-none-match">>) ->                   41;
+static_match(<<"if-range">>) ->                        42;
+static_match(<<"if-unmodified-since">>) ->             43;
+static_match(<<"last-modified">>) ->                   44;
+static_match(<<"link">>) ->                            45;
+static_match(<<"location">>) ->                        46;
+static_match(<<"max-forwards">>) ->                    47;
+static_match(<<"proxy-authenticate">>) ->              48;
+static_match(<<"proxy-authorization">>) ->             49;
+static_match(<<"range">>) ->                           50;
+static_match(<<"referer">>) ->                         51;
+static_match(<<"refresh">>) ->                         52;
+static_match(<<"retry-after">>) ->                     53;
+static_match(<<"server">>) ->                          54;
+static_match(<<"set-cookie">>) ->                      55;
+static_match(<<"strict-transport-security">>) ->       56;
+static_match(<<"transfer-encoding">>) ->               57;
+static_match(<<"user-agent">>) ->                      58;
+static_match(<<"vary">>) ->                            59;
+static_match(<<"via">>) ->                             60;
+static_match(<<"www-authenticate">>) ->                61;
+static_match(_) ->                                     undefined.

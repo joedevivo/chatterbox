@@ -1,17 +1,36 @@
 -module(hpack).
 
--export([decode/2, new_decode_context/0, get_literal/1, decode_integer/2, decode_integer/3]).
+-export([
+    decode/2,
+    new_decode_context/0,
+    encode/2,
+    new_encode_context/0
+    ]).
 
 -type header() :: {atom(), binary()}.
 -type headers():: [header()].
+
+-compile(export_all).
 
 -record(decode_context, {
         dynamic_table = headers:new()
     }).
 -type decode_context() :: #decode_context{}.
 
+-record(encode_context, {
+        dynamic_table = headers:new()
+    }).
+-type encode_context() :: #encode_context{}.
+
+-spec new_encode_context() -> encode_context().
+new_encode_context() -> #encode_context{}.
+
 -spec new_decode_context() -> decode_context().
 new_decode_context() -> #decode_context{}.
+
+-spec encode([{binary(), binary()}], encode_context()) -> {binary(), encode_context()}.
+encode(Headers, Context) ->
+    encode(Headers, <<>>, Context).
 
 -spec decode(binary(), decode_context()) -> {headers(), decode_context()}.
 decode(Bin, Context) ->
@@ -158,10 +177,76 @@ decode_integer(<<1:1,Int:7,Rem/binary>>, M, I) ->
 decode_integer(<<0:1,Int:7,Rem/binary>>, M, I) ->
     {round(I + Int * math:pow(2, M)), Rem}.
 
+%% SO MANY ENCODING TODOs
+%% No huffman on the encoding side
+%% no non-indexed field encoding
+%% serious refactor needed
+
+encode_integer(Int, Prefix) ->
+    PrefixMask = 1 bsl Prefix - 1,
+    Remaining = Int - PrefixMask,
+    case Remaining < 0 of
+        true ->
+            {<<Int:Prefix>>, <<>>};
+        false ->
+            {<<Int:Prefix>>, encode_integer_(Remaining, <<>>)}
+    end.
+
+encode_integer_(0, BinAcc) ->
+    BinAcc;
+encode_integer_(I, BinAcc) ->
+    Rem = I bsr 7,
+    This = I band 255,
+    encode_integer_(Rem, <<BinAcc/binary, This/binary>>).
+
+
+-spec encode([{binary(), binary()}], binary(), encode_context()) -> {binary(), encode_context()}.
+encode([], Acc, Context) ->
+    {Acc, Context};
+encode([{HeaderName, HeaderValue}|Tail], B, Context = #encode_context{dynamic_table=T}) ->
+    {BinToAdd, NewContext} = case headers:match({HeaderName, HeaderValue}, T) of
+        {indexed, I} ->
+            io:format("I: ~p~n", [I]),
+            {encode_indexed(I), Context};
+        {literal_with_indexing, I} ->
+            {encode_literal_indexed(I, HeaderValue),
+             Context#encode_context{dynamic_table=headers:add(HeaderName, HeaderValue, T)}};
+        {literal_wo_indexing, _} ->
+            {encode_literal_wo_index(HeaderName, HeaderValue),
+             Context#encode_context{dynamic_table=headers:add(HeaderName, HeaderValue, T)}}
+    end,
+    encode(Tail, <<B/binary,BinToAdd/binary>>, NewContext).
+
+encode_indexed(I) when I < 63 ->
+    <<2#1:1,I:7>>;
+encode_indexed(I) ->
+    Encoded = encode_integer(I, 7),
+    <<2#11111111, Encoded/binary>>.
+
+encode_literal_indexed(I, Value) when I < 63 ->
+    io:format("Value ~p~n", [Value]),
+    BinToAdd = encode_literal(Value),
+    <<2#01:2,I:6,BinToAdd/binary>>;
+encode_literal_indexed(I, Value) ->
+    {_, Index} = encode_integer(I, 6),
+    io:format("Index: ~p~n", [Index]),
+    BinToAdd = encode_literal(Value),
+    io:format("BinToAdd: ~p~n", [BinToAdd]),
+
+    <<2#01111111:8,Index/binary,BinToAdd/binary>>.
+
+encode_literal(Value) ->
+    L = size(Value),
+    case L < 127 of
+        true ->
+            <<2#0:1,L:7,Value/binary>>;
+        false ->
+            {_,BigL} = encode_integer(L, 7),
+            <<127:8,BigL/binary,Value/binary>>
+    end.
 
 
 
 
-
-
-
+encode_literal_wo_index(_Name, _Value) ->
+    <<>>.
