@@ -97,20 +97,26 @@ idle({_, {#frame_header{type=?HEADERS,stream_id=StrId,flags=F},Payload}},
         when ?IS_FLAG(F,?FLAG_END_HEADERS) ->
     %% Headers are done!
     lager:debug("Header Payload: ~p", [Payload]),
-    Headers = hpack:decode(Payload#headers.block_fragment,
+    {Headers, _NewDecodeContext} = hpack:decode(Payload#headers.block_fragment,
             hpack:new_decode_context()),
     %% TODO Process Headers
     lager:debug("Headers decoded: ~p", [Headers]),
-    %% TODO: next two lines are super hard coded to prove I can respond
-    http2_frame_headers:send(Socket, StrId, <<136>>),
-    http2_frame_data:send(Socket, StrId, <<"hi!">>),
+
+    Path = binary_to_list(proplists:get_value(<<":path">>, Headers)),
+    File = "/Users/joe/Desktop" ++ Path,
+    {ok, Data} = file:read_file(File),
+    ResponseHeaders = [
+        {<<":status">>, <<"200">>}
+    ],
+    http2_frame_headers:send(Socket, StrId, ResponseHeaders),
+    http2_frame_data:send(Socket, StrId, Data),
     {next_state, open, State#http2_stream_state{req_headers=Headers}};
 idle({send, {#frame_header{type=?PUSH_PROMISE,stream_id=StrId},_}},
-     State = #http2_stream_state{stream_id=StrId}) ->
+    State = #http2_stream_state{stream_id=StrId}) ->
     %% TODO Sent a Push Promise
     {next_state, reserved_local, State};
 idle({recv, {#frame_header{type=?PUSH_PROMISE,stream_id=StrId},_}},
-     State = #http2_stream_state{stream_id=StrId}) ->
+    State = #http2_stream_state{stream_id=StrId}) ->
     %% TODO recv'd Push Promise
     {next_state, reserved_remote, State};
 idle(Msg, State) ->

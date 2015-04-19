@@ -14,13 +14,30 @@ start_link() ->
 init([]) ->
     {ok, Port} = application:get_env(port),
     ListenerOptions = [
-        {active, once}, binary %%, {keepalive, true}, {reuseaddr, true}, {nodelay, true}, {delay_send, false}, {backlog, 1024}
+        {active, false},
+        binary,
+        {reuseaddr, true},
+        {packet, raw},
+        {nodelay, true},
+        {backlog, 1024},
+        {send_timeout, 30000},
+        {send_timeout_close, true}
+        %% {keepalive, true}, {reuseaddr, true} %%, {nodelay, true}, {delay_send, false}, {backlog, 1024}
     ],
+    {ok, SSLEnabled} = application:get_env(ssl),
+    {Transport, Options} = case SSLEnabled of
+        true ->
+            {ok, SSLOptions} = application:get_env(ssl_options),
+            {ssl, ListenerOptions ++ SSLOptions};
+        false ->
+            {gen_tcp, ListenerOptions}
+    end,
+
     spawn_link(fun empty_listeners/0),
-    {ok, ListenSocket} = gen_tcp:listen(Port, ListenerOptions),
+    {ok, ListenSocket} = Transport:listen(Port, Options),
     Restart = {simple_one_for_one, 60, 3600},
     Children = [{socket,
-                {chatterbox_fsm, start_link, [{gen_tcp, ListenSocket}]}, % pass the socket!
+                {chatterbox_fsm, start_link, [{Transport, ListenSocket}]}, % pass the socket!
                 temporary, 1000, worker, [chatterbox_fsm]}],
     {ok, {Restart, Children}}.
 

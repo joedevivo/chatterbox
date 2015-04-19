@@ -7,6 +7,9 @@
   {applications, [
                   kernel,
                   stdlib,
+                  crypto,
+                  public_key,
+                  ssl,
                   lager
                  ]},
   {mod, { chatterbox_app, []}},

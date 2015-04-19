@@ -31,7 +31,7 @@ is_priority(#frame_header{flags=F}) when ?IS_FLAG(F, ?FLAG_PRIORITY) ->
 is_priority(_) ->
     false.
 
-%% TODO: Pretty hardcoded and gross
-send({Transport, Socket}, StreamId, Data) ->
-    L = byte_size(Data),
-    Transport:send(Socket, [<<L:24,?HEADERS:8,?FLAG_END_HEADERS:8,0:1,StreamId:31>>,Data]).
+send({Transport, Socket}, StreamId, Headers) ->
+    {HeadersToSend, _Context} = hpack:encode(Headers, hpack:new_encode_context()),
+    L = byte_size(HeadersToSend),
+    Transport:send(Socket, [<<L:24,?HEADERS:8,?FLAG_END_HEADERS:8,0:1,StreamId:31>>,HeadersToSend]).

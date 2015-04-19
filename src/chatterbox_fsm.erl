@@ -41,7 +41,24 @@ init(Socket) ->
 %% accepting connection state:
 accept(start, S = #chatterbox_fsm_state{socket={Transport,ListenSocket}}) ->
     lager:debug("chatterbox_fsm accept"),
-    {ok, AcceptSocket} = Transport:accept(ListenSocket),
+
+    %% TCP Version
+    %%    {ok, AcceptSocket} = Transport:accept(ListenSocket),
+
+
+    %% SSL conditional stuff
+
+    {ok, AcceptSocket} = ssl:transport_accept(ListenSocket),
+
+    lager:info("about to accept"),
+    Accept = ssl:ssl_accept(AcceptSocket),
+
+    lager:info("accepted ~p", [Accept]),
+    lager:info("about to negotiate"),
+    {ok, Upgrayedd} = ssl:negotiated_next_protocol(AcceptSocket),
+    lager:info("Upgrayedd ~p", [Upgrayedd]),
+
+    ssl:setopts(AcceptSocket, [{active, once}]),
 
     %% Start up a listening socket to take the place of this socket,
     %% that's no longer listening
@@ -118,8 +135,10 @@ settings_handshake_loop(_,FrameToBacklog,Acc,State=#chatterbox_fsm_state{frame_b
     settings_handshake_loop(State#chatterbox_fsm_state{frame_backlog=[FrameToBacklog|FB]}, Acc).
 
 connected(backlog, S = #chatterbox_fsm_state{frame_backlog=[F|T]}) ->
-    route_frame(F, S#chatterbox_fsm_state{frame_backlog=T}),
-    {next_state, connected, S};
+    Response = route_frame(F, S#chatterbox_fsm_state{frame_backlog=T}),
+    gen_fsm:send_event(self(), backlog),
+
+    Response;
 connected(backlog, S = #chatterbox_fsm_state{frame_backlog=[]}) ->
     gen_fsm:send_event(self(), start_frame),
     {next_state, connected, S};
@@ -220,7 +239,7 @@ handle_sync_event(_E, _F, StateName, State) ->
     {next_state, StateName, State}.
 
 
-handle_info({tcp, _Socket, <<"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n",Bin/bits>>}, _, S) ->
+handle_info({_, _Socket, <<"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n",Bin/bits>>}, _, S) ->
     lager:debug("handle_info HTTP/2 Preamble!"),
     gen_fsm:send_event(self(), {start_frame,Bin}),
     {next_state, settings_handshake, S};

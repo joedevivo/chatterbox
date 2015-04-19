@@ -39,7 +39,7 @@ from_binary(Bin, Acc) ->
 
 
 -spec read_header(socket()) -> {frame_header(), binary()}.
-read_header({Transport, Socket}) when is_port(Socket) ->
+read_header({Transport, Socket}) ->
     lager:debug("reading http2 header"),
     {ok, HeaderBytes} = Transport:recv(Socket, 9),
     read_binary_frame_header(HeaderBytes).

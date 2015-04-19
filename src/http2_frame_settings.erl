@@ -32,6 +32,8 @@ parse_settings(<<0,3,Val:4/binary,T/binary>>, S) ->
     parse_settings(T, S#settings{max_concurrent_streams=binary:decode_unsigned(Val)});
 parse_settings(<<0,4,Val:4/binary,T/binary>>, S) ->
     parse_settings(T, S#settings{initial_window_size=binary:decode_unsigned(Val)});
+parse_settings(<<0,5,Val:4/binary,T/binary>>, S) ->
+    parse_settings(T, S#settings{max_frame_size=binary:decode_unsigned(Val)});
 parse_settings(<<>>, Settings) ->
     Settings.
 

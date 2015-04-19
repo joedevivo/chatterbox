@@ -153,7 +153,7 @@ get_literal(<<Huff:1,Length:7,Bin/binary>>) ->
     <<RawLiteral:Length/binary,B2/binary>> = Bin,
     Literal = case Huff of
                   1 ->
-                      huffman:to_binary(RawLiteral);
+                      huffman:decode(RawLiteral);
                   0 ->
                       RawLiteral
               end,
