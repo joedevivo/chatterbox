@@ -83,9 +83,9 @@ settings_handshake({start_frame, Bin}, S = #chatterbox_fsm_state{
             S;
         _ ->
             OtherFrames = http2_frame:from_binary(Bin),
-            lager:debug("OtherFrames: ~p", [OtherFrames]),
-            {SettingsBacklog, FB} = lists:partition(fun({X,_}) -> X#frame_header.type =:= ?SETTINGS end, OtherFrames),
-            lager:debug("OtherFrame: ~p", [SettingsBacklog]),
+            {SettingsBacklog, FB} = lists:partition(
+                fun({X,_}) -> X#frame_header.type =:= ?SETTINGS end,
+                OtherFrames),
             S#chatterbox_fsm_state{frame_backlog=FB, settings_backlog=SettingsBacklog}
     end,
 
@@ -119,12 +119,12 @@ settings_handshake_loop(State = #chatterbox_fsm_state{
                                    settings_backlog=[]
                                   },
                         Acc) ->
-    lager:debug("[settings_handshake] Incoming Frame ~p", [Socket]),
+    lager:debug("[settings_handshake] Incoming Frame"),
     {H, Payload} = http2_frame:read(Socket),
     settings_handshake_loop({H#frame_header.type,?IS_FLAG(H#frame_header.flags, ?FLAG_ACK)}, {H, Payload}, Acc, State).
 
 settings_handshake_loop({?SETTINGS,false},{_Header,ClientSettings}, {ReceivedAck,false}, State = #chatterbox_fsm_state{socket=S}) ->
-    lager:debug("[settings_handshake] got client_settings"),
+    lager:debug("[settings_handshake] got client_settings: ~p", [http2_frame_settings:format(ClientSettings)]),
     http2_frame_settings:ack(S),
     settings_handshake_loop(State#chatterbox_fsm_state{client_settings=ClientSettings}, {ReceivedAck,true});
 settings_handshake_loop({?SETTINGS,true},{_,_},{false,ReceivedClientSettings},State) ->

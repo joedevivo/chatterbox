@@ -1,10 +1,17 @@
 -module(http2_frame_rst_stream).
 
--export([read_binary/2]).
+-export([
+    format/1,
+    read_binary/2
+    ]).
 
 -include("http2.hrl").
 
--behavior(http2_frame).
+-behaviour(http2_frame).
+
+-spec format(rst_stream()) -> iodata().
+format(Payload) ->
+    io_lib:format("[RST Stream: ~p]", [Payload]).
 
 -spec read_binary(binary(), frame_header()) ->
     {ok, payload(), binary()} |

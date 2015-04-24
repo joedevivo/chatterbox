@@ -2,9 +2,12 @@
 
 -include("http2.hrl").
 
--behavior(http2_frame).
+-behaviour(http2_frame).
 
--export([read_binary/2]).
+-export([
+    format/1,
+    read_binary/2
+    ]).
 
 -spec read_binary(binary(), frame_header()) ->
     {ok, payload(), binary()} | {error, term()}.
@@ -14,3 +17,7 @@ read_binary(Bin, #frame_header{length=Length}) ->
                  block_fragment=Data
                 },
     {ok, Payload, Rem}.
+
+-spec format(continuation()) -> iodata().
+format(Payload) ->
+    io_lib:format("[Continuation: ~p ]", [Payload]).

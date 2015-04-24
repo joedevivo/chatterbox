@@ -4,7 +4,8 @@
 
 -export([
          read/1,
-         from_binary/1
+         from_binary/1,
+         format_header/1
 ]).
 
 %% Each frame type should be able to be read off a binary stream. If
@@ -16,13 +17,14 @@
                       Header::frame_header()) ->
     {ok, payload(), Remainder::binary()} | {error, term()}.
 
+-callback format(payload()) -> iodata().
+
 %% TODO: some kind of callback for sending frames
 %-callback send(port(), payload()) -> ok | {error, term()}.
 
 -spec read(socket()) -> {frame_header(), payload()}.
 read(Socket) ->
     {H, <<>>} = read_header(Socket),
-    lager:debug("Frame Type: ~p", [H#frame_header.type]),
     {ok, Payload, <<>>} = read_payload(Socket, H),
     {H, Payload}.
 
@@ -37,23 +39,30 @@ from_binary(Bin, Acc) ->
     {ok, Payload, Rem} = read_binary_payload(PayloadBin, Header),
     from_binary(Rem, [{Header, Payload}|Acc]).
 
-
--spec read_header(socket()) -> {frame_header(), binary()}.
-read_header({Transport, Socket}) ->
-    lager:debug("reading http2 header"),
-    {ok, HeaderBytes} = Transport:recv(Socket, 9),
-    read_binary_frame_header(HeaderBytes).
-
--spec read_binary_frame_header(binary()) -> {frame_header(), binary()}.
-read_binary_frame_header(<<Length:24,Type:8,Flags:8,R:1,StreamId:31,Rem/bits>>) ->
-    lager:debug("Frame Header: L:~p, T:~p, F:~p, R:~p, StrId:~p", [Length, Type, Flags, R, StreamId]),
-    {#frame_header{
+-spec format_header(frame_header()) -> iodata().
+format_header(#frame_header{
         length = Length,
         type = Type,
         flags = Flags,
         stream_id = StreamId
-    }, Rem}.
+    }) ->
+    io_lib:format("[Frame Header: L:~p, T:~p, F:~p, StrId:~p]", [Length, ?FT(Type), Flags, StreamId]).
 
+-spec read_header(socket()) -> {frame_header(), binary()}.
+read_header({Transport, Socket}) ->
+    {ok, HeaderBytes} = Transport:recv(Socket, 9),
+    read_binary_frame_header(HeaderBytes).
+
+-spec read_binary_frame_header(binary()) -> {frame_header(), binary()}.
+read_binary_frame_header(<<Length:24,Type:8,Flags:8,_R:1,StreamId:31,Rem/bits>>) ->
+    Header = #frame_header{
+        length = Length,
+        type = Type,
+        flags = Flags,
+        stream_id = StreamId
+    },
+    lager:debug(format_header(Header)),
+    {Header, Rem}.
 
 -spec read_payload(socket(), frame_header()) ->
     {ok, payload(), <<>>} | {error, term()}.

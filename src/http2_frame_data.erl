@@ -3,11 +3,16 @@
 -include("http2.hrl").
 
 -export([
+         format/1,
          read_binary/2,
          send/3
         ]).
 
 -behaviour(http2_frame).
+
+-spec format(data()) -> iodata().
+format(Payload) ->
+    io_lib:format("[Data: ~p]", [Payload]).
 
 -spec read_binary(binary(), frame_header()) ->
     {ok, payload(), binary()} |

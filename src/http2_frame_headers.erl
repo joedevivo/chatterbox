@@ -4,7 +4,15 @@
 
 -behaviour(http2_frame).
 
--export([read_binary/2,send/3]).
+-export([
+    format/1,
+    read_binary/2,
+    send/3
+  ]).
+
+-spec format(headers()) -> iodata().
+format(Payload) ->
+    io_lib:format("[Headers: ~p]", [Payload]).
 
 -spec read_binary(binary(), frame_header()) ->
     {ok, payload(), binary()} | {error, term()}.

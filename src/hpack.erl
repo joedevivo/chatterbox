@@ -88,7 +88,12 @@ decode_literal_header_with_indexing(<<2#01:2,2#111111:6,B1/bits>>, Acc,
     Context = #decode_context{dynamic_table=T}) ->
     {Index, Rem} = decode_integer(B1,6),
     {Str, B2} = get_literal(Rem),
-    {Name,_}= headers:lookup(Index, T),
+    {Name,_} = case headers:lookup(Index, T) of
+        undefined ->
+            lager:error("Tried to find ~p in ~p", [Index, T]),
+            throw(undefined);
+        {N, V} -> {N, V}
+    end,
     decode(B2,
            Acc ++ [{Name, Str}],
            Context#decode_context{dynamic_table=headers:add(Name, Str, T)});
@@ -199,14 +204,12 @@ encode_integer_(I, BinAcc) ->
     This = I band 255,
     encode_integer_(Rem, <<BinAcc/binary, This/binary>>).
 
-
 -spec encode([{binary(), binary()}], binary(), encode_context()) -> {binary(), encode_context()}.
 encode([], Acc, Context) ->
     {Acc, Context};
 encode([{HeaderName, HeaderValue}|Tail], B, Context = #encode_context{dynamic_table=T}) ->
     {BinToAdd, NewContext} = case headers:match({HeaderName, HeaderValue}, T) of
         {indexed, I} ->
-            io:format("I: ~p~n", [I]),
             {encode_indexed(I), Context};
         {literal_with_indexing, I} ->
             {encode_literal_indexed(I, HeaderValue),
@@ -224,15 +227,11 @@ encode_indexed(I) ->
     <<2#11111111, Encoded/binary>>.
 
 encode_literal_indexed(I, Value) when I < 63 ->
-    io:format("Value ~p~n", [Value]),
     BinToAdd = encode_literal(Value),
     <<2#01:2,I:6,BinToAdd/binary>>;
 encode_literal_indexed(I, Value) ->
     {_, Index} = encode_integer(I, 6),
-    io:format("Index: ~p~n", [Index]),
     BinToAdd = encode_literal(Value),
-    io:format("BinToAdd: ~p~n", [BinToAdd]),
-
     <<2#01111111:8,Index/binary,BinToAdd/binary>>.
 
 encode_literal(Value) ->
@@ -245,8 +244,6 @@ encode_literal(Value) ->
             <<127:8,BigL/binary,Value/binary>>
     end.
 
-
-
-
+%%TODO: does nothing :(
 encode_literal_wo_index(_Name, _Value) ->
     <<>>.

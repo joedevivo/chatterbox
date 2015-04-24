@@ -80,7 +80,7 @@ start_link(ParentConnection, Socket, StreamId) ->
     gen_fsm:start_link(?MODULE, [ParentConnection, Socket, StreamId], []).
 
 init([ParentConnection, Socket, StreamId]) ->
-    lager:debug("Starting "),
+    lager:debug("Starting http stream: ~p", [StreamId]),
     %gen_fsm:send_event(self(), start),
     {ok, idle, #http2_stream_state{
             socket=Socket,
@@ -95,7 +95,7 @@ init([ParentConnection, Socket, StreamId]) ->
 idle({_, {#frame_header{type=?HEADERS,stream_id=StrId,flags=F},Payload}},
     State = #http2_stream_state{stream_id=StrId,socket=Socket})
         when ?IS_FLAG(F,?FLAG_END_HEADERS) ->
-    %% Headers are done!
+    %% Headers are done! lmao I believed this.
     lager:debug("Header Payload: ~p", [Payload]),
     {Headers, _NewDecodeContext} = hpack:decode(Payload#headers.block_fragment,
             hpack:new_decode_context()),
@@ -103,10 +103,19 @@ idle({_, {#frame_header{type=?HEADERS,stream_id=StrId,flags=F},Payload}},
     lager:debug("Headers decoded: ~p", [Headers]),
 
     Path = binary_to_list(proplists:get_value(<<":path">>, Headers)),
-    File = "/Users/joe/Desktop" ++ Path,
+    File = code:priv_dir(chatterbox) ++ Path,
+    Ext = filename:extension(File),
+    MimeType = case Ext of
+        ".js" -> <<"text/javascript">>;
+        ".html" -> <<"text/html">>;
+        ".css" -> <<"text/css">>;
+        ".scss" -> <<"text/css">>;
+        _ -> <<"unknown">>
+    end,
     {ok, Data} = file:read_file(File),
     ResponseHeaders = [
-        {<<":status">>, <<"200">>}
+        {<<":status">>, <<"200">>},
+        {<<"content-type">>, MimeType}
     ],
     http2_frame_headers:send(Socket, StrId, ResponseHeaders),
     http2_frame_data:send(Socket, StrId, Data),

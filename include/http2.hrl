@@ -21,6 +21,18 @@
                     | ?WINDOW_UPDATE
                     | ?CONTINUATION.
 
+-define(FT, fun(?DATA) -> "DATA";
+               (?HEADERS) -> "HEADERS";
+               (?PRIORITY) -> "PRIORITY";
+               (?RST_STREAM) -> "RST_STREAM";
+               (?SETTINGS) -> "SETTINGS";
+               (?PUSH_PROMISE) -> "PUSH_PROMISE";
+               (?PING) -> "PING";
+               (?GOAWAY) -> "GOAWAY";
+               (?WINDOW_UPDATE) -> "WINDOW_UPDATE";
+               (?CONTINUATION) -> "CONTINUATION" end
+  ).
+
 %% ERROR CODES
 -define(NO_ERROR,           16#0).
 -define(PROTOCOL_ERROR,     16#1).

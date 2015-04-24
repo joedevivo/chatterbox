@@ -11,7 +11,30 @@
 
 -behaviour(http2_frame).
 
--export([read_binary/2, send/2, ack/1]).
+-export([
+         format/1,
+         read_binary/2,
+         send/2,
+         ack/1
+        ]).
+
+-spec format(settings()) -> iodata().
+format(#settings{
+        header_table_size        = HTS,
+        enable_push              = EP,
+        max_concurrent_streams   = MCS,
+        initial_window_size      = IWS,
+        max_frame_size           = MFS,
+        max_header_list_size     = MHLS
+    }) ->
+    lists:flatten(
+        io_lib:format("[Settings: "
+        " header_table_size        = ~p,"
+        " enable_push              = ~p,"
+        " max_concurrent_streams   = ~p,"
+        " initial_window_size      = ~p,"
+        " max_frame_size           = ~p,"
+        " max_header_list_size     = ~p~n]", [HTS,EP,MCS,IWS,MFS,MHLS])).
 
 -spec read_binary(binary(), frame_header()) ->
     {ok, payload(), binary()} |
