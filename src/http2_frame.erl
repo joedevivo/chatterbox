@@ -5,7 +5,9 @@
 -export([
          read/1,
          from_binary/1,
-         format_header/1
+         format_header/1,
+         format_payload/1,
+         format/1
 ]).
 
 %% Each frame type should be able to be read off a binary stream. If
@@ -26,6 +28,7 @@
 read(Socket) ->
     {H, <<>>} = read_header(Socket),
     {ok, Payload, <<>>} = read_payload(Socket, H),
+    lager:debug(format({H, Payload})),
     {H, Payload}.
 
 -spec from_binary(binary()) -> [{frame_header(), payload()}].
@@ -37,6 +40,7 @@ from_binary(<<>>, Acc) ->
 from_binary(Bin, Acc) ->
     {Header, PayloadBin} = read_binary_frame_header(Bin),
     {ok, Payload, Rem} = read_binary_payload(PayloadBin, Header),
+    lager:debug(format({Header, Payload})),
     from_binary(Rem, [{Header, Payload}|Acc]).
 
 -spec format_header(frame_header()) -> iodata().
@@ -61,7 +65,6 @@ read_binary_frame_header(<<Length:24,Type:8,Flags:8,_R:1,StreamId:31,Rem/bits>>)
         flags = Flags,
         stream_id = StreamId
     },
-    lager:debug(format_header(Header)),
     {Header, Rem}.
 
 -spec read_payload(socket(), frame_header()) ->
@@ -94,3 +97,30 @@ read_binary_payload(Socket, Header = #frame_header{type=?WINDOW_UPDATE}) ->
     http2_frame_window_update:read_binary(Socket, Header);
 read_binary_payload(Socket, Header = #frame_header{type=?CONTINUATION}) ->
     http2_frame_continuation:read_binary(Socket, Header).
+
+-spec format_payload(frame()) -> iodata().
+format_payload({#frame_header{type=?DATA}, P}) ->
+    http2_frame_data:format(P);
+format_payload({#frame_header{type=?HEADERS}, P}) ->
+    http2_frame_headers:format(P);
+format_payload({#frame_header{type=?PRIORITY}, P}) ->
+    http2_frame_priority:format(P);
+format_payload({#frame_header{type=?RST_STREAM}, P}) ->
+    http2_frame_rst_stream:format(P);
+format_payload({#frame_header{type=?SETTINGS}, P}) ->
+    http2_frame_settings:format(P);
+format_payload({#frame_header{type=?PUSH_PROMISE}, P}) ->
+    http2_frame_push_promise:format(P);
+format_payload({#frame_header{type=?PING}, P}) ->
+    http2_frame_ping:format(P);
+format_payload({#frame_header{type=?GOAWAY}, P}) ->
+    http2_frame_goaway:format(P);
+format_payload({#frame_header{type=?WINDOW_UPDATE}, P}) ->
+    http2_frame_window_update:format(P);
+format_payload({#frame_header{type=?CONTINUATION}, P}) ->
+    http2_frame_continuation:format(P).
+
+-spec format(frame()) -> iodata().
+format({Header, Payload}) ->
+    lists:flatten(io_lib:format("~s | ~s", [format_header(Header), format_payload({Header, Payload})]));
+format(<<>>) -> "".

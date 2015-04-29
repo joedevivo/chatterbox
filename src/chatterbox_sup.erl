@@ -14,15 +14,15 @@ start_link() ->
 init([]) ->
     {ok, Port} = application:get_env(port),
     ListenerOptions = [
-        {active, false},
         binary,
         {reuseaddr, true},
         {packet, raw},
-        {nodelay, true},
+        %{nodelay, true},
         {backlog, 1024},
-        {send_timeout, 30000},
-        {send_timeout_close, true}
+        %{send_timeout, 30000},
+        %{send_timeout_close, true},
         %% {keepalive, true}, {reuseaddr, true} %%, {nodelay, true}, {delay_send, false}, {backlog, 1024}
+        {active, false}
     ],
     {ok, SSLEnabled} = application:get_env(ssl),
     {Transport, Options} = case SSLEnabled of

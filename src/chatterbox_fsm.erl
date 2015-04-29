@@ -11,7 +11,8 @@
         client_settings = undefined,
         server_settings = #settings{},
         next_available_stream_id = 2 :: stream_id(),
-        streams = [] :: [proplists:property()]
+        streams = [] :: [proplists:property()],
+        decode_context = hpack:new_decode_context() :: hpack:decode_context()
     }).
 
 -export([start_link/1]).
@@ -146,6 +147,8 @@ connected(start_frame, S = #chatterbox_fsm_state{socket=Socket}) ->
     lager:debug("[connected] Incoming Frame"),
     {_Header, _Payload} = Frame = http2_frame:read(Socket),
 
+    lager:debug("~p", [http2_frame:format(Frame)]),
+
     Response = route_frame(Frame, S),
     %% After frame is routed, let the FSM know we're ready for another
     %% TODO there could be a race condition in here where the next call to start_frame uses a different State then the one we're returning here
@@ -163,16 +166,55 @@ route_frame({H=#frame_header{stream_id=StreamId}, _Payload}, S = #chatterbox_fsm
     lager:debug("Received DATA Frame for Stream ~p", [StreamId]),
     lager:error("Chatterbox doesn't support streams. Throwing this DATA away"),
     {next_state, connected, S};
-route_frame({H=#frame_header{stream_id=StreamId}, Payload}, S = #chatterbox_fsm_state{socket=Socket,streams=Streams})
+route_frame({H=#frame_header{stream_id=StreamId}, Payload},
+        S = #chatterbox_fsm_state{
+            socket=Socket,
+            %%streams=Streams,
+            decode_context=DecodeContext})
     when H#frame_header.type == ?HEADERS ->
     lager:debug("Received HEADERS Frame for Stream ~p", [StreamId]),
     %% Spin up http2_stream fsm
-    {ok, StreamPid} = http2_stream:start_link(self(), Socket,  StreamId),
+    {Headers, NewDecodeContext} = hpack:decode(Payload#headers.block_fragment,
+            DecodeContext),
+    lager:debug("Headers decoded: ~p", [Headers]),
+
+    Path = binary_to_list(proplists:get_value(<<":path">>, Headers)),
+    File = code:priv_dir(chatterbox) ++ Path,
+    lager:debug("serving ~p", [File]),
+    case filelib:is_file(File) of
+        true ->
+            Ext = filename:extension(File),
+            MimeType = case Ext of
+                ".js" -> <<"text/javascript">>;
+                ".html" -> <<"text/html">>;
+                ".css" -> <<"text/css">>;
+                ".scss" -> <<"text/css">>;
+                ".woff" -> <<"application/font-woff">>;
+                ".ttf" -> <<"application/font-snft">>;
+                _ -> <<"unknown">>
+            end,
+            {ok, Data} = file:read_file(File),
+            ResponseHeaders = [
+                {<<":status">>, <<"200">>},
+                {<<"content-type">>, MimeType}
+            ],
+            http2_frame_headers:send(Socket, StreamId, ResponseHeaders),
+            http2_frame_data:send(Socket, StreamId, Data);
+        false ->
+            ResponseHeaders = [
+                {<<":status">>, <<"404">>}
+            ],
+            http2_frame_headers:send(Socket, StreamId, ResponseHeaders),
+
+            http2_frame_data:send(Socket, StreamId, <<>>)
+        end,
+    %%{ok, StreamPid} = http2_stream:start_link(self(), Socket,  StreamId),
 
     %% send it this headers frame which should transition it into the open state
-    gen_fsm:send_event(StreamPid, {recv, {H, Payload}}),
+    %% gen_fsm:send_event(StreamPid, {recv, {H, Payload}}),
     %% Add that pid to the set of streams in our state
-    {next_state, connected, S#chatterbox_fsm_state{streams=[{StreamId, StreamPid}|Streams]}};
+    %%{next_state, connected, S#chatterbox_fsm_state{streams=[{StreamId, StreamPid}|Streams],decode_context=NewDecodeContext}};
+    {next_state, connected, S#chatterbox_fsm_state{decode_context=NewDecodeContext}};
 route_frame({H, _Payload}, S = #chatterbox_fsm_state{socket=_Socket})
     when H#frame_header.type == ?PRIORITY,
          H#frame_header.stream_id == 16#0 ->

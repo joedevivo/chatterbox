@@ -27,4 +27,11 @@ read_binary(Bin, H=#frame_header{length=L}) ->
 %% TODO for POC response, Hardcoded
 send({Transport, Socket}, StreamId, Data) ->
     L = byte_size(Data),
-    Transport:send(Socket, [<<L:24,?DATA:8,?FLAG_END_STREAM:8,0:1,StreamId:31>>,Data]).
+    case L >= 16384 of
+        false ->
+            Transport:send(Socket, [<<L:24,?DATA:8,?FLAG_END_STREAM:8,0:1,StreamId:31>>,Data]);
+        true ->
+            <<ToSend:16384/binary,Rest/binary>> = Data,
+            Transport:send(Socket, [<<16384:24,?DATA:8,0:8,0:1,StreamId:31>>,ToSend]),
+            send({Transport,Socket}, StreamId, Rest)
+    end.

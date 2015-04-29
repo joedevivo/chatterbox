@@ -18,7 +18,8 @@
          ack/1
         ]).
 
--spec format(settings()) -> iodata().
+-spec format(settings()|binary()) -> iodata().
+format(<<>>) -> "Ack!";
 format(#settings{
         header_table_size        = HTS,
         enable_push              = EP,
