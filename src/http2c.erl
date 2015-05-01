@@ -39,13 +39,35 @@
 start_link() ->
     gen_server:start_link(?MODULE, [], []).
 
-send_binary(Pid, Binary) ->
-    gen_server:cast(Pid, {send_bin, Binary}).
-
 %% Three API levels:
 %% 1: lowest: Send a frame or set of frames
 %% 2: middle: Here's some hastily constucted frames, do some setup of frame header flags.
 %% 3: highest: a semantic http request: here are
+
+%% send_binary/2 is the lowest level API. It just puts bits on the wire
+send_binary(Pid, Binary) ->
+    gen_server:cast(Pid, {send_bin, Binary}).
+
+%% send_frames is the middle level. Converts a series of frames to
+%% binary and sends them over to send_binary. It will scrub the frame
+%% headers correctly, for example if you try to add a HEADERS frame
+%% and two CONTINUATION frames, no matter what flags are set in the
+%% frame headers, it will make sure that the HEADERS frame and the
+%% FIRST CONTINUATION frame have the END_HEADERS flag set to 0 and the
+%% SECOND CONTINUATION frame will have it set to 1.
+
+%% send_unaltered_frames is the raw version of the middle level. You
+%% can put frames directly as constructed on the wire. This is
+%% desgined for testing error conditions by giving you the freedom to
+%% create bad sets of frames. This will problably only be exported
+%% ifdef(TEST)
+
+%% send_request takes a set of headers and a possible body. It's
+%% broken up into HEADERS, CONTINUATIONS, and DATA frames, and that
+%% list of frames is passed to send_frames. This one needs to be smart
+%% about creating a new frame id
+
+
 
 %% gen_server callbacks
 
