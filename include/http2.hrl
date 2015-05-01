@@ -169,3 +169,5 @@
 
 -type transport() :: gen_tcp | ssl.
 -type socket() :: {transport(), port()}.
+
+-define(PREAMBLE, "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n").

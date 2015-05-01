@@ -12,7 +12,8 @@
         server_settings = #settings{},
         next_available_stream_id = 2 :: stream_id(),
         streams = [] :: [proplists:property()],
-        decode_context = hpack:new_decode_context() :: hpack:decode_context()
+        decode_context = hpack:new_decode_context() :: hpack:decode_context(),
+        encode_context = hpack:new_encode_context() :: hpack:encode_context()
     }).
 
 -export([start_link/1]).
@@ -170,7 +171,9 @@ route_frame({H=#frame_header{stream_id=StreamId}, Payload},
         S = #chatterbox_fsm_state{
             socket=Socket,
             %%streams=Streams,
-            decode_context=DecodeContext})
+            decode_context=DecodeContext,
+            encode_context=EncodeContext
+           })
     when H#frame_header.type == ?HEADERS ->
     lager:debug("Received HEADERS Frame for Stream ~p", [StreamId]),
     %% Spin up http2_stream fsm
@@ -181,7 +184,7 @@ route_frame({H=#frame_header{stream_id=StreamId}, Payload},
     Path = binary_to_list(proplists:get_value(<<":path">>, Headers)),
     File = code:priv_dir(chatterbox) ++ Path,
     lager:debug("serving ~p", [File]),
-    case filelib:is_file(File) of
+    NewEncodeContext = case filelib:is_file(File) of
         true ->
             Ext = filename:extension(File),
             MimeType = case Ext of
@@ -198,15 +201,17 @@ route_frame({H=#frame_header{stream_id=StreamId}, Payload},
                 {<<":status">>, <<"200">>},
                 {<<"content-type">>, MimeType}
             ],
-            http2_frame_headers:send(Socket, StreamId, ResponseHeaders),
-            http2_frame_data:send(Socket, StreamId, Data);
+            NewContext = http2_frame_headers:send(Socket, StreamId, ResponseHeaders, EncodeContext),
+            http2_frame_data:send(Socket, StreamId, Data),
+            NewContext;
         false ->
             ResponseHeaders = [
                 {<<":status">>, <<"404">>}
             ],
-            http2_frame_headers:send(Socket, StreamId, ResponseHeaders),
+            NewContext = http2_frame_headers:send(Socket, StreamId, ResponseHeaders, EncodeContext),
 
-            http2_frame_data:send(Socket, StreamId, <<>>)
+            http2_frame_data:send(Socket, StreamId, <<>>),
+            NewContext
         end,
     %%{ok, StreamPid} = http2_stream:start_link(self(), Socket,  StreamId),
 
@@ -214,7 +219,10 @@ route_frame({H=#frame_header{stream_id=StreamId}, Payload},
     %% gen_fsm:send_event(StreamPid, {recv, {H, Payload}}),
     %% Add that pid to the set of streams in our state
     %%{next_state, connected, S#chatterbox_fsm_state{streams=[{StreamId, StreamPid}|Streams],decode_context=NewDecodeContext}};
-    {next_state, connected, S#chatterbox_fsm_state{decode_context=NewDecodeContext}};
+    {next_state, connected, S#chatterbox_fsm_state{
+                              decode_context=NewDecodeContext,
+                              encode_context=NewEncodeContext
+                             }};
 route_frame({H, _Payload}, S = #chatterbox_fsm_state{socket=_Socket})
     when H#frame_header.type == ?PRIORITY,
          H#frame_header.stream_id == 16#0 ->
@@ -281,7 +289,8 @@ handle_sync_event(_E, _F, StateName, State) ->
     {next_state, StateName, State}.
 
 
-handle_info({_, _Socket, <<"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n",Bin/bits>>}, _, S) ->
+%%handle_info({_, _Socket, <<"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n",Bin/bits>>}, _, S) ->
+handle_info({_, _Socket, <<?PREAMBLE,Bin/bits>>}, _, S) ->
     lager:debug("handle_info HTTP/2 Preamble!"),
     gen_fsm:send_event(self(), {start_frame,Bin}),
     {next_state, settings_handshake, S};
