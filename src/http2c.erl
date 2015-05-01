@@ -18,7 +18,9 @@
 %% API
 -export([
          start_link/0,
-         send_binary/2
+         send_binary/2,
+         send_frames/2,
+         send_request/3
         ]).
 
 %% gen_server callbacks
@@ -27,6 +29,7 @@
 
 -record(http2c_state, {
           socket :: {gen_tcp | ssl, port()},
+          next_available_stream_id = 1 :: pos_integer(),
           client_settings = #settings{},
           server_settings = undefined,
           decode_context = hpack:new_decode_context() :: hpack:decode_context(),
@@ -44,7 +47,9 @@ start_link() ->
 %% 2: middle: Here's some hastily constucted frames, do some setup of frame header flags.
 %% 3: highest: a semantic http request: here are
 
-%% send_binary/2 is the lowest level API. It just puts bits on the wire
+%% send_binary/2 is the lowest level API. It just puts bits on the
+%% wire
+-spec send_binary(pid(), binary()) -> ok.
 send_binary(Pid, Binary) ->
     gen_server:cast(Pid, {send_bin, Binary}).
 
@@ -55,18 +60,43 @@ send_binary(Pid, Binary) ->
 %% frame headers, it will make sure that the HEADERS frame and the
 %% FIRST CONTINUATION frame have the END_HEADERS flag set to 0 and the
 %% SECOND CONTINUATION frame will have it set to 1.
+-spec send_frames(pid(), [frame()]) -> stub.
+send_frames(Pid, Frames) ->
+    %% Process Frames
+    MassagedFrames = Frames,
+    %% Then Send
+    send_unaltered_frames(Pid, MassagedFrames).
 
 %% send_unaltered_frames is the raw version of the middle level. You
 %% can put frames directly as constructed on the wire. This is
 %% desgined for testing error conditions by giving you the freedom to
 %% create bad sets of frames. This will problably only be exported
 %% ifdef(TEST)
+-spec send_unaltered_frames(pid(), [frame()]) -> stub.
+send_unaltered_frames(Pid, Frames) ->
+    stub.
 
 %% send_request takes a set of headers and a possible body. It's
 %% broken up into HEADERS, CONTINUATIONS, and DATA frames, and that
 %% list of frames is passed to send_frames. This one needs to be smart
 %% about creating a new frame id
+-spec send_request(pid(), [headers:header()], binary()) ->
+                          {[headers:header()], binary()}.
+send_request(Pid, Headers, Body) ->
+    %% TODO: Turn Headers & Body into frames
+    %% That means creating a new stream id
+    %% Which means getting one from the gen_server state
+    NewStreamId = gen_server:call(Pid, new_stream_id),
+    EncodeContext = gen_server:call(Pid, encode_context),
+    %% Use that to make frames
+    {HeaderBin, NewEncodeContext} = http2_frame_headers:to_frame(NewStreamId, Headers, EncodeContext),
+    gen_server:cast(Pid, {encode_context, NewEncodeContext}),
+    DataBin = http2_frame_data:to_frame(NewStreamId, Body),
 
+    send_binary(Pid, [HeaderBin,DataBin]),
+
+    %% Pull data off the wire. How?
+    {[],<<>>}.
 
 
 %% gen_server callbacks
@@ -95,10 +125,10 @@ init([]) ->
     end,
     lager:debug("Transport: ~p", [Transport]),
     {ok, Socket} = Transport:connect(Host, Port, Options),
-    %% TODO: Send the preamble
+    %% Send the preamble
     ssl:send(Socket, <<?PREAMBLE>>),
-    %% TODO: Settings Handshake
 
+    %% Settings Handshake
     {_SSH, ServerSettings}  = http2_frame:read({Transport, Socket}),
     http2_frame_settings:ack({Transport, Socket}),
 
@@ -124,6 +154,10 @@ init([]) ->
                          {noreply, #http2c_state{}, timeout()} |
                          {stop, any(), any(), #http2c_state{}} |
                          {stop, any(), #http2c_state{}}.
+handle_call(new_stream_id, _From, #http2c_state{next_available_stream_id=Next}=State) ->
+    {reply, Next, State#http2c_state{next_available_stream_id=Next+2}};
+handle_call(encode_context, _From, #http2c_state{encode_context=EC}=State) ->
+    {reply, EC, State};
 handle_call(_Request, _From, State) ->
     Reply = ok,
     {reply, Reply, State}.
@@ -137,6 +171,8 @@ handle_cast({send_bin, Bin}, #http2c_state{socket={Transport, Socket}}=State) ->
     lager:debug("Sending ~p", [Bin]),
     Transport:send(Socket, Bin),
     {noreply, State};
+handle_cast({encode_context, EC}, State) ->
+    {noreply, State#http2c_state{encode_context=EC}};
 handle_cast(_Msg, State) ->
     {noreply, State}.
 

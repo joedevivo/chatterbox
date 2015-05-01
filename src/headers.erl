@@ -15,6 +15,7 @@
 -type header_name() :: binary().
 -type header_value():: binary().
 -type header() :: {header_name(), header_value()}.
+-export_type([header/0]).
 
 -define(DYNAMIC_TABLE_MIN_INDEX, 62).
 

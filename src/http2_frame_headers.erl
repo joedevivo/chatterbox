@@ -7,6 +7,7 @@
 -export([
     format/1,
     read_binary/2,
+    to_frame/3,
     send/4
   ]).
 
@@ -39,8 +40,15 @@ is_priority(#frame_header{flags=F}) when ?IS_FLAG(F, ?FLAG_PRIORITY) ->
 is_priority(_) ->
     false.
 
-send({Transport, Socket}, StreamId, Headers, EncodeContext) ->
+-spec to_frame(pos_integer(), [headers:header()], hpack:encode_context()) ->
+                      {binary(), hpack:encode_context()}.
+to_frame(StreamId, Headers, EncodeContext) ->
     {HeadersToSend, NewContext} = hpack:encode(Headers, EncodeContext),
     L = byte_size(HeadersToSend),
-    Transport:send(Socket, [<<L:24,?HEADERS:8,?FLAG_END_HEADERS:8,0:1,StreamId:31>>,HeadersToSend]),
+    {[<<L:24,?HEADERS:8,?FLAG_END_HEADERS:8,0:1,StreamId:31>>,HeadersToSend],
+    NewContext}.
+
+send({Transport, Socket}, StreamId, Headers, EncodeContext) ->
+    {Bytes, NewContext} = to_frame(StreamId, Headers, EncodeContext),
+    Transport:send(Socket, Bytes),
     NewContext.
