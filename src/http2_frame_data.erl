@@ -20,7 +20,7 @@ format(Payload) ->
     {error, term()}.
 read_binary(_, #frame_header{stream_id=0}) ->
     {error, 'PROTOCOL_ERROR'};
-read_binary(Bin, H=#frame_header{length=0}) ->
+read_binary(Bin, _H=#frame_header{length=0}) ->
     {ok, #data{data= <<>>}, Bin};
 read_binary(Bin, H=#frame_header{length=L}) ->
     lager:info("read_binary L: ~p", [L]),
