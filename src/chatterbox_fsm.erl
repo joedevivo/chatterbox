@@ -148,7 +148,7 @@ connected(start_frame, S = #chatterbox_fsm_state{socket=Socket}) ->
     lager:debug("[connected] Incoming Frame"),
     {_Header, _Payload} = Frame = http2_frame:read(Socket),
 
-    lager:debug("~p", [http2_frame:format(Frame)]),
+    lager:debug("[connected] [start_frame] ~p", [http2_frame:format(Frame)]),
 
     Response = route_frame(Frame, S),
     %% After frame is routed, let the FSM know we're ready for another

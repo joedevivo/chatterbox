@@ -6,7 +6,8 @@
          format/1,
          read_binary/2,
          to_frame/2,
-         send/3
+         send/3,
+         to_binary/1
         ]).
 
 -behaviour(http2_frame).
@@ -43,6 +44,10 @@ send({Transport, Socket}, StreamId, Data) ->
     Frames = to_frame(StreamId, Data),
     lager:info("send Frames: ~p", [Frames]),
     [ begin lager:info("F: ~p", [F]),  Transport:send(Socket, F) end || F <- Frames].
+
+-spec to_binary(data()) -> iodata().
+to_binary(#data{data=D}) ->
+    D.
 
 %    L = byte_size(Data),
 %    case L >= 16384 of

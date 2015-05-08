@@ -20,7 +20,9 @@
          start_link/0,
          send_binary/2,
          send_frames/2,
-         send_request/3
+         send_unaltered_frames/2,
+         send_request/3,
+         get_frames/2
         ]).
 
 %% gen_server callbacks
@@ -62,7 +64,7 @@ send_binary(Pid, Binary) ->
 %% SECOND CONTINUATION frame will have it set to 1.
 -spec send_frames(pid(), [frame()]) -> stub.
 send_frames(Pid, Frames) ->
-    %% Process Frames
+    %% TODO Process Frames
     MassagedFrames = Frames,
     %% Then Send
     send_unaltered_frames(Pid, MassagedFrames).
@@ -72,9 +74,10 @@ send_frames(Pid, Frames) ->
 %% desgined for testing error conditions by giving you the freedom to
 %% create bad sets of frames. This will problably only be exported
 %% ifdef(TEST)
--spec send_unaltered_frames(pid(), [frame()]) -> stub.
+-spec send_unaltered_frames(pid(), [frame()]) -> ok.
 send_unaltered_frames(Pid, Frames) ->
-    stub.
+    [ send_binary(Pid, http2_frame:to_binary(F)) || F <- Frames],
+    ok.
 
 %% send_request takes a set of headers and a possible body. It's
 %% broken up into HEADERS, CONTINUATIONS, and DATA frames, and that
@@ -98,6 +101,8 @@ send_request(Pid, Headers, Body) ->
     %% Pull data off the wire. How?
     {[],<<>>}.
 
+get_frames(Pid, StreamId) ->
+    gen_server:call(Pid, {get_frames, StreamId}).
 
 %% gen_server callbacks
 
@@ -107,7 +112,6 @@ send_request(Pid, Headers, Body) ->
                       ignore |
                       {stop, any()}.
 init([]) ->
-    %% TODO: Open a socket
     Host = "localhost",
     {ok, Port} = application:get_env(chatterbox, port),
     ClientOptions = [
@@ -126,7 +130,7 @@ init([]) ->
     lager:debug("Transport: ~p", [Transport]),
     {ok, Socket} = Transport:connect(Host, Port, Options),
     %% Send the preamble
-    ssl:send(Socket, <<?PREAMBLE>>),
+    Transport:send(Socket, <<?PREAMBLE>>),
 
     %% Settings Handshake
     {_SSH, ServerSettings}  = http2_frame:read({Transport, Socket}),
@@ -158,6 +162,9 @@ handle_call(new_stream_id, _From, #http2c_state{next_available_stream_id=Next}=S
     {reply, Next, State#http2c_state{next_available_stream_id=Next+2}};
 handle_call(encode_context, _From, #http2c_state{encode_context=EC}=State) ->
     {reply, EC, State};
+handle_call({get_frames, StreamId}, _From, #http2c_state{incoming_frames=IF}=S) ->
+    {ToReturn, ToPutBack} = lists:partition(fun({#frame_header{stream_id=SId},_}) -> StreamId =:= SId end, IF),
+    {reply, ToReturn, S#http2c_state{incoming_frames=ToPutBack}};
 handle_call(_Request, _From, State) ->
     Reply = ok,
     {reply, Reply, State}.

@@ -6,7 +6,8 @@
 
 -export([
     format/1,
-    read_binary/2
+    read_binary/2,
+    to_binary/1
     ]).
 
 -spec format(push_promise()) -> iodata().
@@ -24,3 +25,11 @@ read_binary(Bin, H=#frame_header{length=L}) ->
                  block_fragment=BlockFragment
                 },
     {ok, Payload, Rem}.
+
+-spec to_binary(push_promise()) -> iodata().
+to_binary(#push_promise{
+             promised_stream_id=PSID,
+             block_fragment=BF
+            }) ->
+    %% TODO: allow for padding as per HTTP/2 SPEC
+    <<0:1,PSID:31,BF>>.

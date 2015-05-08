@@ -7,6 +7,13 @@
 -define(SETTINGS_MAX_FRAME_SIZE,            <<16#5>>).
 -define(SETTINGS_MAX_HEADER_LIST_SIZE,      <<16#6>>).
 
+-define(SETTING_NAMES, [?SETTINGS_HEADER_TABLE_SIZE,
+                        ?SETTINGS_ENABLE_PUSH,
+                        ?SETTINGS_MAX_CONCURRENT_STREAMS,
+                        ?SETTINGS_INITIAL_WINDOW_SIZE,
+                        ?SETTINGS_MAX_FRAME_SIZE,
+                        ?SETTINGS_MAX_HEADER_LIST_SIZE]).
+
 -include("http2.hrl").
 
 -behaviour(http2_frame).
@@ -15,7 +22,8 @@
          format/1,
          read_binary/2,
          send/2,
-         ack/1
+         ack/1,
+         to_binary/1
         ]).
 
 -spec format(settings()|binary()) -> iodata().
@@ -81,3 +89,33 @@ send({Transport, Socket}, _Settings) ->
 -spec ack(socket()) -> ok | {error, term()}.
 ack({Transport,Socket}) ->
     Transport:send(Socket, <<0:24,4:8,1:8,0:1,0:31>>).
+
+-spec to_binary(settings()) -> iodata().
+to_binary(#settings{}=Settings) ->
+    [to_binary(S, Settings) || S <- ?SETTING_NAMES].
+
+-spec to_binary(pos_integer(), settings()) -> iodata().
+to_binary(?SETTINGS_HEADER_TABLE_SIZE, #settings{header_table_size=undefined}) ->
+    <<>>;
+to_binary(?SETTINGS_HEADER_TABLE_SIZE, #settings{header_table_size=HTS}) ->
+    <<16#1:16,HTS:32>>;
+to_binary(?SETTINGS_ENABLE_PUSH, #settings{enable_push=undefined}) ->
+    <<>>;
+to_binary(?SETTINGS_ENABLE_PUSH, #settings{enable_push=EP}) ->
+    <<16#2:16,EP:32>>;
+to_binary(?SETTINGS_MAX_CONCURRENT_STREAMS, #settings{max_concurrent_streams=undefined}) ->
+    <<>>;
+to_binary(?SETTINGS_MAX_CONCURRENT_STREAMS, #settings{max_concurrent_streams=MCS}) ->
+    <<16#3:16,MCS:32>>;
+to_binary(?SETTINGS_INITIAL_WINDOW_SIZE, #settings{initial_window_size=undefined}) ->
+    <<>>;
+to_binary(?SETTINGS_INITIAL_WINDOW_SIZE, #settings{initial_window_size=IWS}) ->
+    <<16#4:16,IWS:32>>;
+to_binary(?SETTINGS_MAX_FRAME_SIZE, #settings{max_frame_size=undefined}) ->
+    <<>>;
+to_binary(?SETTINGS_MAX_FRAME_SIZE, #settings{max_frame_size=MFS}) ->
+    <<16#5:16,MFS:32>>;
+to_binary(?SETTINGS_MAX_HEADER_LIST_SIZE, #settings{max_header_list_size=undefined}) ->
+    <<>>;
+to_binary(?SETTINGS_MAX_HEADER_LIST_SIZE, #settings{max_header_list_size=MHLS}) ->
+    <<16#6:16,MHLS:32>>.

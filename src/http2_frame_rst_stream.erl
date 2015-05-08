@@ -2,7 +2,8 @@
 
 -export([
     format/1,
-    read_binary/2
+    read_binary/2,
+    to_binary/1
     ]).
 
 -include("http2.hrl").
@@ -25,3 +26,7 @@ read_binary(<<ErrorCode:4,Rem/bits>>, #frame_header{length=4}) ->
     {ok, Payload, Rem};
 read_binary(_, #frame_header{stream_id=0}) ->
     {error, frame_size_error}.
+
+-spec to_binary(rst_stream()) -> iodata().
+to_binary(#rst_stream{error_code=C}) ->
+    <<C:32>>.

@@ -8,7 +8,8 @@
     format/1,
     read_binary/2,
     to_frame/3,
-    send/4
+    send/4,
+    to_binary/1
   ]).
 
 -spec format(headers()) -> iodata().
@@ -52,3 +53,15 @@ send({Transport, Socket}, StreamId, Headers, EncodeContext) ->
     {Bytes, NewContext} = to_frame(StreamId, Headers, EncodeContext),
     Transport:send(Socket, Bytes),
     NewContext.
+
+-spec to_binary(headers()) -> iodata().
+to_binary(#headers{
+             priority=P,
+             block_fragment=BF
+            }) ->
+    case P of
+        undefined ->
+            BF;
+        _ ->
+            [http2_frame_priority:to_binary(P), BF]
+    end.

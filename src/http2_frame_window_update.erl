@@ -7,7 +7,8 @@
 -export([
          format/1,
          read_binary/2,
-         send/3
+         send/3,
+         to_binary/1
 ]).
 
 -spec format(window_update()) -> iodata().
@@ -30,3 +31,9 @@ send({Transport, Socket}, #window_update{window_size_increment=Payload}, StreamI
     Transport:send(Socket, [
         <<4:24,?WINDOW_UPDATE:8,0:8,0:1,StreamId:31>>,
         <<0:1,Payload:31>>]).
+
+-spec to_binary(window_update()) -> iodata().
+to_binary(#window_update{
+        window_size_increment=I
+    }) ->
+    <<0:1,I:31>>.

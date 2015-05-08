@@ -5,7 +5,8 @@
 -export([
          format/1,
          read_binary/2,
-         read_priority/1
+         read_priority/1,
+         to_binary/1
         ]).
 
 -behaviour(http2_frame).
@@ -30,3 +31,11 @@ read_priority(Binary) ->
         weight = Weight
     },
     {Payload, Rem}.
+
+-spec to_binary(priority()) -> iodata().
+to_binary(#priority{
+             exclusive=E,
+             stream_id=StreamId,
+             weight=W
+            }) ->
+    <<E:1,StreamId:31,W:8>>.

@@ -6,7 +6,8 @@
 
 -export([
     format/1,
-    read_binary/2
+    read_binary/2,
+    to_binary/1
     ]).
 
 -spec format(goaway()) -> iodata().
@@ -24,3 +25,11 @@ read_binary(Bin, #frame_header{length=L}) ->
                  additional_debug_data = Extra
                 },
     {ok, Payload, Rem}.
+
+-spec to_binary(goaway()) -> iodata().
+to_binary(#goaway{
+             last_stream_id=LSID,
+             error_code=EC,
+             additional_debug_data=ADD
+            }) ->
+    <<0:1,LSID:31,EC:32,ADD>>.

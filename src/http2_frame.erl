@@ -7,7 +7,9 @@
          from_binary/1,
          format_header/1,
          format_payload/1,
-         format/1
+         format/1,
+         to_binary/1,
+         header_to_binary/1
 ]).
 
 %% Each frame type should be able to be read off a binary stream. If
@@ -19,7 +21,11 @@
                       Header::frame_header()) ->
     {ok, payload(), Remainder::binary()} | {error, term()}.
 
+%% For io:formating
 -callback format(payload()) -> iodata().
+
+%% convert payload to binary
+-callback to_binary(payload()) -> iodata().
 
 %% TODO: some kind of callback for sending frames
 %-callback send(port(), payload()) -> ok | {error, term()}.
@@ -27,7 +33,10 @@
 -spec read(socket()) -> {frame_header(), payload()}.
 read(Socket) ->
     {H, <<>>} = read_header(Socket),
+    lager:debug("HeaderBytes: ~p", [H]),
     {ok, Payload, <<>>} = read_payload(Socket, H),
+    lager:debug("PayloadBytes: ~p", [Payload]),
+
     lager:debug(format({H, Payload})),
     {H, Payload}.
 
@@ -124,3 +133,32 @@ format_payload({#frame_header{type=?CONTINUATION}, P}) ->
 format({Header, Payload}) ->
     lists:flatten(io_lib:format("~s | ~s", [format_header(Header), format_payload({Header, Payload})]));
 format(<<>>) -> "".
+
+-spec to_binary(frame()) -> iodata().
+to_binary({Header, Payload}) ->
+    HeaderBin = header_to_binary(Header),
+    lager:debug("HeaderBin: ~p", [HeaderBin]),
+    PayloadBin = payload_to_binary(Payload),
+    lager:debug("PayloadBin: ~p", [PayloadBin]),
+    [HeaderBin, PayloadBin].
+
+-spec header_to_binary(frame_header()) -> iodata().
+header_to_binary(#frame_header{
+        length=L,
+        type=T,
+        flags=F,
+        stream_id=StreamId
+    }) ->
+    <<L:24,T:8,F:8,0:1,StreamId:31>>.
+
+-spec payload_to_binary(payload()) -> iodata().
+payload_to_binary(P=#data{})          -> http2_frame_data:to_binary(P);
+payload_to_binary(P=#headers{})       -> http2_frame_headers:to_binary(P);
+payload_to_binary(P=#priority{})      -> http2_frame_priority:to_binary(P);
+payload_to_binary(P=#rst_stream{})    -> http2_frame_rst_stream:to_binary(P);
+payload_to_binary(P=#settings{})      -> http2_frame_settings:to_binary(P);
+payload_to_binary(P=#push_promise{})  -> http2_frame_push_promise:to_binary(P);
+payload_to_binary(P=#ping{})          -> http2_frame_ping:to_binary(P);
+payload_to_binary(P=#goaway{})        -> http2_frame_goaway:to_binary(P);
+payload_to_binary(P=#window_update{}) -> http2_frame_window_update:to_binary(P);
+payload_to_binary(P=#continuation{})  -> http2_frame_continuation:to_binary(P).

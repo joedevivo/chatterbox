@@ -6,7 +6,8 @@
 
 -export([
     format/1,
-    read_binary/2
+    read_binary/2,
+    to_binary/1
     ]).
 
 -spec read_binary(binary(), frame_header()) ->
@@ -21,3 +22,7 @@ read_binary(Bin, #frame_header{length=Length}) ->
 -spec format(continuation()) -> iodata().
 format(Payload) ->
     io_lib:format("[Continuation: ~p ]", [Payload]).
+
+-spec to_binary(continuation()) -> iodata().
+to_binary(#continuation{block_fragment=BF}) ->
+    BF.

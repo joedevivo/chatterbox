@@ -10,3 +10,4 @@ relx
 .rebar
 erln8.config
 .DS_Store
+common_test/logs

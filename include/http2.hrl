@@ -96,8 +96,6 @@
   }).
 -type data() :: #data{}.
 
-%% TODO: It's terrible that I have 'header' and 'headers'
-%% records. Need to do a refactor of 'header' -> 'frame_header'
 -record(headers, {
           priority = undefined :: priority() | undefined,
           block_fragment :: binary()
