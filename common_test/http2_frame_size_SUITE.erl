@@ -26,8 +26,12 @@ frame_too_big(Config) ->
     %% How do I get the response? Should be GOAWAY with FRAME_SIZE_ERROR
     timer:sleep(10000),
 
-    Resp = http2c:get_frames(Client, 3),
+    Resp = http2c:get_frames(Client, 0),
     ct:pal("Resp: ~p", [Resp]),
 
     ?assertEqual(1, length(Resp)),
+
+    [{_GoAwayH, GoAway}] = Resp,
+    ?FRAME_SIZE_ERROR = GoAway#goaway.error_code,
+
     ok.

@@ -15,7 +15,13 @@
   {mod, { chatterbox_app, []}},
   {env, [
     {port, 80},
-    {concurrent_acceptors, 20}
+    {concurrent_acceptors, 20},
+    {header_table_size, 4096},
+    {enable_push, 1},
+    {max_concurrent_streams, unlimited},
+    {initial_window_size, 65535},
+    {max_frame_size, 16384},
+    {max_header_list_size, unlimited}
   ]}
  ]}.
 %% vim: set filetype=erlang tabstop=2

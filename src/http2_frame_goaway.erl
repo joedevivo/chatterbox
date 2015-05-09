@@ -32,4 +32,4 @@ to_binary(#goaway{
              error_code=EC,
              additional_debug_data=ADD
             }) ->
-    <<0:1,LSID:31,EC:32,ADD>>.
+    [<<0:1,LSID:31,EC:32>>,ADD].

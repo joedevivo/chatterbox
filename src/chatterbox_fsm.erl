@@ -9,7 +9,7 @@
         frame_backlog = [],
         settings_backlog = [],
         client_settings = undefined,
-        server_settings = #settings{},
+        server_settings = chatterbox:settings() ::settings(),
         next_available_stream_id = 2 :: stream_id(),
         streams = [] :: [proplists:property()],
         decode_context = hpack:new_decode_context() :: hpack:decode_context(),
@@ -30,7 +30,9 @@
 
 -export([accept/2,
          settings_handshake/2,
-         connected/2]).
+         connected/2,
+         closing/2
+        ]).
 
 start_link(Socket) ->
     gen_fsm:start_link(?MODULE, Socket, []).
@@ -157,11 +159,29 @@ connected(start_frame, S = #chatterbox_fsm_state{socket=Socket}) ->
     gen_fsm:send_event(self(), start_frame),
     Response.
 
+closing(StateName, State) ->
+    lager:debug("[closing] ~p", [StateName]),
+    {next_state, StateName, State}.
 %% Maybe use something like this for readability later
 %% -define(SOCKET_PM, #chatterbox_fsm_state{socket=Socket}).
 
 -spec route_frame(frame(), #chatterbox_fsm_state{}) ->
     {next_state, connected, #chatterbox_fsm_state{}}.
+route_frame({#frame_header{length=L}, _},
+            S = #chatterbox_fsm_state{socket={T,Socket},
+                                      server_settings=#settings{max_frame_size=MFS},
+                                      next_available_stream_id=NAS})
+    when L > MFS ->
+    GoAway = #goaway{
+                last_stream_id=NAS,
+                error_code=?FRAME_SIZE_ERROR
+               },
+    GoAwayBin = http2_frame:to_binary({#frame_header{
+                                         stream_id=0
+                                         }, GoAway}),
+    T:send(Socket, GoAwayBin),
+    {next_state, closing, S};
+
 route_frame({H=#frame_header{stream_id=StreamId}, _Payload}, S = #chatterbox_fsm_state{socket=_Socket})
     when H#frame_header.type == ?DATA ->
     lager:debug("Received DATA Frame for Stream ~p", [StreamId]),

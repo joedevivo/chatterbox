@@ -137,7 +137,7 @@
 -record(goaway, {
           last_stream_id :: stream_id(),
           error_code :: error_code(),
-          additional_debug_data :: binary()
+          additional_debug_data = <<>> :: binary()
 }).
 -type goaway() :: #goaway{}.
 

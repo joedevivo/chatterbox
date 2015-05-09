@@ -33,10 +33,9 @@
 -spec read(socket()) -> {frame_header(), payload()}.
 read(Socket) ->
     {H, <<>>} = read_header(Socket),
-    lager:debug("HeaderBytes: ~p", [H]),
+    %%lager:debug("HeaderBytes: ~p", [H]),
     {ok, Payload, <<>>} = read_payload(Socket, H),
-    lager:debug("PayloadBytes: ~p", [Payload]),
-
+    %%lager:debug("PayloadBytes: ~p", [Payload]),
     lager:debug(format({H, Payload})),
     {H, Payload}.
 
@@ -136,9 +135,13 @@ format(<<>>) -> "".
 
 -spec to_binary(frame()) -> iodata().
 to_binary({Header, Payload}) ->
-    HeaderBin = header_to_binary(Header),
+    {Type, PayloadBin} = payload_to_binary(Payload),
+    NewHeader = Header#frame_header{
+                  length = iodata_size(PayloadBin),
+                  type = Type
+                 },
+    HeaderBin = header_to_binary(NewHeader),
     lager:debug("HeaderBin: ~p", [HeaderBin]),
-    PayloadBin = payload_to_binary(Payload),
     lager:debug("PayloadBin: ~p", [PayloadBin]),
     [HeaderBin, PayloadBin].
 
@@ -149,16 +152,24 @@ header_to_binary(#frame_header{
         flags=F,
         stream_id=StreamId
     }) ->
+    lager:debug("H: ~p", [L]),
     <<L:24,T:8,F:8,0:1,StreamId:31>>.
 
--spec payload_to_binary(payload()) -> iodata().
-payload_to_binary(P=#data{})          -> http2_frame_data:to_binary(P);
-payload_to_binary(P=#headers{})       -> http2_frame_headers:to_binary(P);
-payload_to_binary(P=#priority{})      -> http2_frame_priority:to_binary(P);
-payload_to_binary(P=#rst_stream{})    -> http2_frame_rst_stream:to_binary(P);
-payload_to_binary(P=#settings{})      -> http2_frame_settings:to_binary(P);
-payload_to_binary(P=#push_promise{})  -> http2_frame_push_promise:to_binary(P);
-payload_to_binary(P=#ping{})          -> http2_frame_ping:to_binary(P);
-payload_to_binary(P=#goaway{})        -> http2_frame_goaway:to_binary(P);
-payload_to_binary(P=#window_update{}) -> http2_frame_window_update:to_binary(P);
-payload_to_binary(P=#continuation{})  -> http2_frame_continuation:to_binary(P).
+-spec payload_to_binary(payload()) -> {frame_type(), iodata()}.
+payload_to_binary(P=#data{})          -> {?DATA, http2_frame_data:to_binary(P)};
+payload_to_binary(P=#headers{})       -> {?HEADERS, http2_frame_headers:to_binary(P)};
+payload_to_binary(P=#priority{})      -> {?PRIORITY, http2_frame_priority:to_binary(P)};
+payload_to_binary(P=#rst_stream{})    -> {?RST_STREAM, http2_frame_rst_stream:to_binary(P)};
+payload_to_binary(P=#settings{})      -> {?SETTINGS, http2_frame_settings:to_binary(P)};
+payload_to_binary(P=#push_promise{})  -> {?PUSH_PROMISE, http2_frame_push_promise:to_binary(P)};
+payload_to_binary(P=#ping{})          -> {?PING, http2_frame_ping:to_binary(P)};
+payload_to_binary(P=#goaway{})        -> {?GOAWAY, http2_frame_goaway:to_binary(P)};
+payload_to_binary(P=#window_update{}) -> {?WINDOW_UPDATE, http2_frame_window_update:to_binary(P)};
+payload_to_binary(P=#continuation{})  -> {?CONTINUATION, http2_frame_continuation:to_binary(P)}.
+
+iodata_size(L) when is_list(L) ->
+    lists:foldl(fun(X, Acc) ->
+                        Acc + iodata_size(X)
+                end, 0, L);
+iodata_size(B) when is_binary(B) ->
+    byte_size(B).
