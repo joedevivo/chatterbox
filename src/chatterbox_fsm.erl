@@ -246,12 +246,49 @@ route_frame({H=#frame_header{stream_id=StreamId}, _Payload}, S = #chatterbox_fsm
     {next_state, connected, S};
 %% Got a settings frame, need to ACK
 route_frame({H, Payload}, S = #chatterbox_fsm_state{
-                                 connection=C=#connection_state{socket=Socket}})
+                                 connection=C=#connection_state{
+                                                 socket=Socket,
+                                                 send_settings=SS=#settings{
+                                                                     initial_window_size=OldIWS
+                                                                    }
+                                                },
+                                 streams = Streams
+                                })
     when H#frame_header.type == ?SETTINGS,
          ?NOT_FLAG(H#frame_header.flags, ?FLAG_ACK) ->
     lager:debug("Received SETTINGS"),
+
+    %% Need a way of processing settings so I know which ones came in on this one payload.
+    {settings, PList} = Payload,
+    Delta = case proplists:get_value(?SETTINGS_INITIAL_WINDOW_SIZE, PList) of
+        undefined ->
+            0;
+        NewIWS ->
+            OldIWS - NewIWS
+    end,
+    NewSendSettings = http2_frame_settings:overlay(SS, Payload),
+
+    %% Adjust all open and half_closed_remote streams send_window_size
+    %% TODO: This will probably come in handy on the client side too
+    NewStreams = lists:map(fun({StreamId, Stream=#stream_state{state=open,send_window_size=SWS}}) ->
+                               {StreamId, Stream#stream_state{
+                                            send_window_size=SWS - Delta
+                                           }};
+                              ({StreamId, Stream=#stream_state{state=half_closed_remote,send_window_size=SWS}}) ->
+                               {StreamId, Stream#stream_state{
+                                            send_window_size=SWS - Delta
+                                           }};
+                              (X) -> X
+                           end, Streams),
+
     http2_frame_settings:ack(Socket),
-    {next_state, connected, S#chatterbox_fsm_state{connection=C#connection_state{send_settings=Payload}}};
+    {next_state, connected, S#chatterbox_fsm_state{
+                              connection=C#connection_state{
+                                           send_settings=NewSendSettings
+                                          },
+                              streams=NewStreams
+                          }
+    };
 %% Got settings ACK
 route_frame({H, _Payload}, S = #chatterbox_fsm_state{
                                   connection=#connection_state{socket=_Socket}})

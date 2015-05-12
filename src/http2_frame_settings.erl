@@ -1,18 +1,6 @@
 -module(http2_frame_settings).
 
--define(SETTINGS_HEADER_TABLE_SIZE,         <<16#1>>).
--define(SETTINGS_ENABLE_PUSH,               <<16#2>>).
--define(SETTINGS_MAX_CONCURRENT_STREAMS,    <<16#3>>).
--define(SETTINGS_INITIAL_WINDOW_SIZE,       <<16#4>>).
--define(SETTINGS_MAX_FRAME_SIZE,            <<16#5>>).
--define(SETTINGS_MAX_HEADER_LIST_SIZE,      <<16#6>>).
 
--define(SETTING_NAMES, [?SETTINGS_HEADER_TABLE_SIZE,
-                        ?SETTINGS_ENABLE_PUSH,
-                        ?SETTINGS_MAX_CONCURRENT_STREAMS,
-                        ?SETTINGS_INITIAL_WINDOW_SIZE,
-                        ?SETTINGS_MAX_FRAME_SIZE,
-                        ?SETTINGS_MAX_HEADER_LIST_SIZE]).
 
 -include("http2.hrl").
 
@@ -23,10 +11,11 @@
          read_binary/2,
          send/2,
          ack/1,
-         to_binary/1
+         to_binary/1,
+         overlay/2
         ]).
 
--spec format(settings()|binary()) -> iodata().
+-spec format(settings()|binary()|{settings, [proplists:property()]}) -> iodata().
 format(<<>>) -> "Ack!";
 format(#settings{
         header_table_size        = HTS,
@@ -43,7 +32,23 @@ format(#settings{
         " max_concurrent_streams   = ~p,"
         " initial_window_size      = ~p,"
         " max_frame_size           = ~p,"
-        " max_header_list_size     = ~p~n]", [HTS,EP,MCS,IWS,MFS,MHLS])).
+        " max_header_list_size     = ~p~n]", [HTS,EP,MCS,IWS,MFS,MHLS]));
+format({settings, PList}) ->
+    L = lists:map(fun({?SETTINGS_HEADER_TABLE_SIZE,V}) ->
+                      {header_table_size,V};
+                 ({?SETTINGS_ENABLE_PUSH,V}) ->
+                      {enable_push,V};
+                 ({?SETTINGS_MAX_CONCURRENT_STREAMS,V}) ->
+                      {max_concurrent_streams,V};
+                 ({?SETTINGS_INITIAL_WINDOW_SIZE,V}) ->
+                      {initial_window_size, V};
+                 ({?SETTINGS_MAX_FRAME_SIZE,V}) ->
+                      {max_frame_size,V};
+                 ({?SETTINGS_MAX_HEADER_LIST_SIZE,V}) ->
+                      {max_header_list_size,V}
+              end,
+              PList),
+    io_lib:format("~p", [L]).
 
 -spec read_binary(binary(), frame_header()) ->
     {ok, payload(), binary()} |
@@ -53,21 +58,47 @@ read_binary(Bin, _Header = #frame_header{length=0}) ->
 read_binary(Bin, _Header = #frame_header{length=Length}) ->
     <<SettingsBin:Length/binary,Rem/bits>> = Bin,
     Settings = parse_settings(SettingsBin),
-    {ok, Settings, Rem}.
+    {ok, {settings, Settings}, Rem}.
 
--spec parse_settings(binary()) -> settings().
+-spec parse_settings(binary()) -> [proplists:property()].
 parse_settings(Bin) ->
-    parse_settings(Bin, #settings{}).
+    lists:reverse(parse_settings(Bin, [])).
 
--spec parse_settings(binary(), settings()) -> settings().
+-spec parse_settings(binary(), [proplists:property()]) ->  [proplists:property()].
+parse_settings(<<0,1,Val:4/binary,T/binary>>, S) ->
+    parse_settings(T, [{?SETTINGS_HEADER_TABLE_SIZE, binary:decode_unsigned(Val)}|S]);
+parse_settings(<<0,2,Val:4/binary,T/binary>>, S) ->
+    parse_settings(T, [{?SETTINGS_ENABLE_PUSH, binary:decode_unsigned(Val)}|S]);
 parse_settings(<<0,3,Val:4/binary,T/binary>>, S) ->
-    parse_settings(T, S#settings{max_concurrent_streams=binary:decode_unsigned(Val)});
+    parse_settings(T, [{?SETTINGS_MAX_CONCURRENT_STREAMS, binary:decode_unsigned(Val)}|S]);
 parse_settings(<<0,4,Val:4/binary,T/binary>>, S) ->
-    parse_settings(T, S#settings{initial_window_size=binary:decode_unsigned(Val)});
+    parse_settings(T, [{?SETTINGS_INITIAL_WINDOW_SIZE, binary:decode_unsigned(Val)}|S]);
 parse_settings(<<0,5,Val:4/binary,T/binary>>, S) ->
-    parse_settings(T, S#settings{max_frame_size=binary:decode_unsigned(Val)});
+    parse_settings(T, [{?SETTINGS_MAX_FRAME_SIZE, binary:decode_unsigned(Val)}|S]);
+parse_settings(<<0,6,Val:4/binary,T/binary>>, S)->
+    parse_settings(T, [{?SETTINGS_MAX_HEADER_LIST_SIZE, binary:decode_unsigned(Val)}|S]);
 parse_settings(<<>>, Settings) ->
     Settings.
+
+-spec overlay(settings(), {settings, [proplists:property()]}) -> settings().
+overlay(S, {settings, [{?SETTINGS_HEADER_TABLE_SIZE, Val}|PList]}) ->
+    overlay(S#settings{header_table_size=Val}, {settings, PList});
+overlay(S, {settings, [{?SETTINGS_ENABLE_PUSH, Val}|PList]}) ->
+    overlay(S#settings{enable_push=Val}, {settings, PList});
+overlay(S, {settings, [{?SETTINGS_MAX_CONCURRENT_STREAMS, Val}|PList]}) ->
+    overlay(S#settings{max_concurrent_streams=Val}, {settings, PList});
+overlay(S, {settings, [{?SETTINGS_INITIAL_WINDOW_SIZE, Val}|PList]}) ->
+    overlay(S#settings{initial_window_size=Val}, {settings, PList});
+overlay(S, {settings, [{?SETTINGS_MAX_FRAME_SIZE, Val}|PList]}) ->
+    overlay(S#settings{max_frame_size=Val}, {settings, PList});
+overlay(S, {settings, [{?SETTINGS_MAX_HEADER_LIST_SIZE, Val}|PList]}) ->
+    overlay(S#settings{max_header_list_size=Val}, {settings, PList});
+overlay(S, {settings, []}) ->
+    S.
+
+
+
+
 
 -spec send(socket(), settings()) -> ok | {error, term()}.
 send({Transport, Socket}, _Settings) ->

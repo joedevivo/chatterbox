@@ -153,7 +153,7 @@
 
 -type payload() :: data()
                  | headers()
-                 | settings()
+                 | settings() | {settings, [proplists:property()]}
                  | priority()
                  | settings()
                  | push_promise()
@@ -202,3 +202,17 @@
 }).
 
 -type stream_state() :: #stream_state{}.
+
+-define(SETTINGS_HEADER_TABLE_SIZE,         <<16#1>>).
+-define(SETTINGS_ENABLE_PUSH,               <<16#2>>).
+-define(SETTINGS_MAX_CONCURRENT_STREAMS,    <<16#3>>).
+-define(SETTINGS_INITIAL_WINDOW_SIZE,       <<16#4>>).
+-define(SETTINGS_MAX_FRAME_SIZE,            <<16#5>>).
+-define(SETTINGS_MAX_HEADER_LIST_SIZE,      <<16#6>>).
+
+-define(SETTING_NAMES, [?SETTINGS_HEADER_TABLE_SIZE,
+                        ?SETTINGS_ENABLE_PUSH,
+                        ?SETTINGS_MAX_CONCURRENT_STREAMS,
+                        ?SETTINGS_INITIAL_WINDOW_SIZE,
+                        ?SETTINGS_MAX_FRAME_SIZE,
+                        ?SETTINGS_MAX_HEADER_LIST_SIZE]).
