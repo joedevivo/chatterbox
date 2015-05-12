@@ -10,6 +10,8 @@
 -type header() :: {atom(), binary()}.
 -type headers():: [header()].
 
+-export_type([headers/0,header/0]).
+
 -compile(export_all).
 
 -record(decode_context, {

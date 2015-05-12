@@ -30,12 +30,8 @@
          terminate/2, code_change/3]).
 
 -record(http2c_state, {
-          socket :: {gen_tcp | ssl, port()},
+          connection = #connection_state{} :: connection_state(),
           next_available_stream_id = 1 :: pos_integer(),
-          client_settings = #settings{},
-          server_settings = undefined,
-          decode_context = hpack:new_decode_context() :: hpack:decode_context(),
-          encode_context = hpack:new_encode_context() :: hpack:encode_context(),
           incoming_frames = [] :: [frame()]
 }).
 
@@ -145,9 +141,11 @@ init([]) ->
     Transport:setopts(Socket, [{active, true}]),
 
     {ok, #http2c_state{
-            socket = {Transport, Socket},
-            client_settings = ClientSettings,
-            server_settings = ServerSettings
+            connection = #connection_state{
+                            socket = {Transport, Socket},
+                            recv_settings = ClientSettings,
+                            send_settings = ServerSettings
+                           }
            }}.
 
 %% Handling call messages
@@ -160,7 +158,7 @@ init([]) ->
                          {stop, any(), #http2c_state{}}.
 handle_call(new_stream_id, _From, #http2c_state{next_available_stream_id=Next}=State) ->
     {reply, Next, State#http2c_state{next_available_stream_id=Next+2}};
-handle_call(encode_context, _From, #http2c_state{encode_context=EC}=State) ->
+handle_call(encode_context, _From, #http2c_state{connection=#connection_state{encode_context=EC}}=State) ->
     {reply, EC, State};
 handle_call({get_frames, StreamId}, _From, #http2c_state{incoming_frames=IF}=S) ->
     {ToReturn, ToPutBack} = lists:partition(fun({#frame_header{stream_id=SId},_}) -> StreamId =:= SId end, IF),
@@ -174,12 +172,12 @@ handle_call(_Request, _From, State) ->
                          {noreply, #http2c_state{}} |
                          {noreply, #http2c_state{}, timeout()} |
                          {stop, any(), #http2c_state{}}.
-handle_cast({send_bin, Bin}, #http2c_state{socket={Transport, Socket}}=State) ->
+handle_cast({send_bin, Bin}, #http2c_state{connection=#connection_state{socket={Transport, Socket}}}=State) ->
     lager:debug("Sending ~p", [Bin]),
     Transport:send(Socket, Bin),
     {noreply, State};
-handle_cast({encode_context, EC}, State) ->
-    {noreply, State#http2c_state{encode_context=EC}};
+handle_cast({encode_context, EC}, State=#http2c_state{connection=C}) ->
+    {noreply, State#http2c_state{connection=C#connection_state{encode_context=EC}}};
 handle_cast(_Msg, State) ->
     {noreply, State}.
 

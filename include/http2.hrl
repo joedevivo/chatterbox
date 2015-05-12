@@ -169,3 +169,31 @@
 -type socket() :: {transport(), port()}.
 
 -define(PREAMBLE, "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n").
+
+-record(connection_state, {
+          socket = {undefined, undefined} :: {gen_tcp | ssl, port()},
+          send_settings = #settings{} :: settings(),
+          recv_settings = #settings{} :: settings(),
+          decode_context = hpack:new_decode_context() :: hpack:decode_context(),
+          encode_context = hpack:new_encode_context() :: hpack:encode_context()
+}).
+
+-type connection_state() :: #connection_state{}.
+
+
+-type stream_state_name() :: 'idle'
+                           | 'open'
+                           | 'closed'
+                           | 'reserved_local'
+                           | 'reserved_remote'
+                           | 'half_closed_local'
+                           | 'half_closed_remote'.
+
+-record(stream_state, {
+          stream_id = undefined :: stream_id(),
+          state = idle :: stream_state_name(),
+          send_window_size = 65536 :: integer(),
+          recv_window_size = 65536 :: integer()
+}).
+
+-type stream_state() :: #stream_state{}.
