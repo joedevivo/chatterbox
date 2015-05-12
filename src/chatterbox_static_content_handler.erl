@@ -2,19 +2,23 @@
 
 -include("http2.hrl").
 
--export([handle/3]).
+-export([
+         handle/3,
+         send_while_window_open/2
+        ]).
 
 %% TODO lots about this module to make configurable. biggest one is priv_dir tho. Barfolomew
 
 -spec handle(connection_state(), hpack:headers(), http2_stream:stream_state()) -> {connection_state(), http2_stream:stream_state()}.
 handle(C = #connection_state{
          socket=Socket,
-         encode_context=EncodeContext
+         encode_context=EncodeContext,
+         send_settings=SS
         }, Headers, Stream = #stream_state{stream_id=StreamId}) ->
     Path = binary_to_list(proplists:get_value(<<":path">>, Headers)),
     File = code:priv_dir(chatterbox) ++ Path,
     lager:debug("serving ~p", [File]),
-    NewEncodeContext = case filelib:is_file(File) of
+    {NewEncodeContext, NewStream} = case filelib:is_file(File) of
         true ->
             Ext = filename:extension(File),
             MimeType = case Ext of
@@ -32,15 +36,33 @@ handle(C = #connection_state{
                 {<<"content-type">>, MimeType}
             ],
             NewContext = http2_frame_headers:send(Socket, StreamId, ResponseHeaders, EncodeContext),
-            http2_frame_data:send(Socket, StreamId, Data),
-            NewContext;
+            %% TODO: We know how much we can send, so send that and wait for a flow control update?
+            Frames = http2_frame_data:to_frames(StreamId, Data, SS),
+
+            NStream = send_while_window_open(Stream#stream_state{queued_frames=Frames}, C),
+
+            {NewContext, NStream};
         false ->
             ResponseHeaders = [
                 {<<":status">>, <<"404">>}
             ],
             NewContext = http2_frame_headers:send(Socket, StreamId, ResponseHeaders, EncodeContext),
 
-            http2_frame_data:send(Socket, StreamId, <<>>),
-            NewContext
+            http2_frame_data:send(Socket, StreamId, <<>>, SS),
+            {NewContext, Stream}
         end,
-    {C#connection_state{encode_context=NewEncodeContext}, Stream}.
+    {C#connection_state{encode_context=NewEncodeContext}, NewStream}.
+
+send_while_window_open(
+                       S = #stream_state{
+                                         stream_id = StreamId,
+                                         send_window_size=SWS,
+                              queued_frames = [F=[<<L:24,_/binary>>, _]|Frames]
+                             },
+                      C = #connection_state{socket={Transport,Socket}}) when SWS >= L ->
+    Transport:send(Socket, F),
+    NewSendWindow = SWS - L,
+    lager:info("Stream ~p send window now: ~p", [StreamId, NewSendWindow]),
+    send_while_window_open(S#stream_state{send_window_size=NewSendWindow, queued_frames=Frames}, C);
+send_while_window_open(S, _C) ->
+    S.

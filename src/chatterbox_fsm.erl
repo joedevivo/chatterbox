@@ -187,6 +187,7 @@ route_frame({#frame_header{length=L}, _},
     T:send(Socket, GoAwayBin),
     {next_state, closing, S};
 
+%% TODO Route data frames to streams. POST!
 route_frame({H=#frame_header{stream_id=StreamId}, _Payload},
             S = #chatterbox_fsm_state{connection=#connection_state{
                                                     socket=_Socket}})
@@ -194,13 +195,15 @@ route_frame({H=#frame_header{stream_id=StreamId}, _Payload},
     lager:debug("Received DATA Frame for Stream ~p", [StreamId]),
     lager:error("Chatterbox doesn't support streams. Throwing this DATA away"),
     {next_state, connected, S};
+%% HEADER frame with END_HEADERS flag
 route_frame({H=#frame_header{stream_id=StreamId}, Payload},
         S = #chatterbox_fsm_state{
                connection=C=#connection_state{
                              decode_context=DecodeContext,
                              recv_settings=#settings{initial_window_size=RecvWindowSize},
                              send_settings=#settings{initial_window_size=SendWindowSize}
-                             }
+                             },
+               streams = Streams
            })
     when H#frame_header.type == ?HEADERS,
          ?IS_FLAG(H#frame_header.flags, ?FLAG_END_HEADERS) ->
@@ -214,22 +217,20 @@ route_frame({H=#frame_header{stream_id=StreamId}, Payload},
 
     %% TODO: Make this module name configurable
     %% Make content_handler a behavior with handle/3
-    {NewConnectionState, _NewStreamState} =
+    {NewConnectionState, NewStreamState} =
         chatterbox_static_content_handler:handle(
           C#connection_state{decode_context=NewDecodeContext},
           Headers,
           Stream),
 
-    %%{ok, StreamPid} = http2_stream:start_link(self(), Socket,  StreamId),
-
     %% send it this headers frame which should transition it into the open state
-    %% gen_fsm:send_event(StreamPid, {recv, {H, Payload}}),
     %% Add that pid to the set of streams in our state
-    %%{next_state, connected, S#chatterbox_fsm_state{streams=[{StreamId, StreamPid}|Streams],decode_context=NewDecodeContext}};
     {next_state, connected, S#chatterbox_fsm_state{
-                              connection=NewConnectionState
+                              connection=NewConnectionState,
+                              streams = [{StreamId, NewStreamState}|Streams]
                                            }
                              };
+%% TODO: HEADERS frame with no END_HEADERS flag
 route_frame({H, _Payload}, S = #chatterbox_fsm_state{
                                   connection=#connection_state{socket=_Socket}})
     when H#frame_header.type == ?PRIORITY,
@@ -278,11 +279,33 @@ route_frame({H=#frame_header{stream_id=StreamId}, _Payload}, S = #chatterbox_fsm
     lager:debug("Received GOAWAY Frame for Stream ~p", [StreamId]),
     lager:error("Chatterbox doesn't support streams. Throwing this GOAWAY away"),
     {next_state, connected, S};
-route_frame({H=#frame_header{stream_id=StreamId}, _Payload}, S = #chatterbox_fsm_state{connection=#connection_state{socket=_Socket}})
+route_frame({H=#frame_header{stream_id=0}, #window_update{window_size_increment=WSI}},
+            S = #chatterbox_fsm_state{
+                   connection=C=#connection_state{
+                                 socket=_Socket,
+                                 send_window_size=SWS
+                                }
+                  })
+    when H#frame_header.type == ?WINDOW_UPDATE ->
+    lager:debug("Stream 0 Window Update: ~p", [WSI]),
+    {next_state, connected, S#chatterbox_fsm_state{connection=C#connection_state{send_window_size=SWS+WSI}}};
+route_frame({H=#frame_header{stream_id=StreamId}, #window_update{window_size_increment=WSI}},
+            S = #chatterbox_fsm_state{
+                   streams=Streams,
+                   connection=C=#connection_state{socket=_Socket}})
     when H#frame_header.type == ?WINDOW_UPDATE ->
     lager:debug("Received WINDOW_UPDATE Frame for Stream ~p", [StreamId]),
-    lager:error("Chatterbox doesn't support streams. Throwing this WINDOW_UPDATE away"),
-    {next_state, connected, S};
+    {StreamId, Stream} = lists:keyfind(StreamId, 1, Streams),
+    lager:info("Stream(~p): ~p", [StreamId, Stream]),
+    lager:info("Streams: ~p", [Streams]),
+    NewStreamsTail = lists:keydelete(StreamId, 1, Streams),
+    NewSendWindow = WSI+Stream#stream_state.send_window_size,
+    lager:info("Stream ~p send window now: ~p", [StreamId, NewSendWindow]),
+
+    NStream = chatterbox_static_content_handler:send_while_window_open(Stream#stream_state{send_window_size=NewSendWindow}, C),
+    %%NewStreams = [{StreamId, Stream#stream_state{send_window_size=NewSendWindow}}|NewStreamsTail],
+    NewStreams = [{StreamId, NStream}|NewStreamsTail],
+    {next_state, connected, S#chatterbox_fsm_state{streams=NewStreams}};
 route_frame({H=#frame_header{stream_id=StreamId}, _Payload}, S = #chatterbox_fsm_state{connection=#connection_state{socket=_Socket}})
     when H#frame_header.type == ?CONTINUATION ->
     lager:debug("Received CONTINUATION Frame for Stream ~p", [StreamId]),
