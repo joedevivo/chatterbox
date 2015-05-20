@@ -52,6 +52,22 @@ recv_frame({_FH = #frame_header{
       stream_id = StreamId,
       state = open
      };
+
+%% TODO : More ?DATA when L > RWS and when ?IS_FLAG(END_STREAM)
+recv_frame(F={_FH=#frame_header{
+                   length=L,
+                   type=?DATA,
+                   flags=Flags
+                  }, _P},
+          S = #stream_state{
+                 recv_window_size=RWS,
+                 incoming_frames=IF
+                })
+  when ?NOT_FLAG(Flags, ?FLAG_END_STREAM) ->
+    S#stream_state{
+      recv_window_size=RWS-L,
+      incoming_frames=IF ++ [F]
+     };
 recv_frame(_F, S) ->
     S.
 
