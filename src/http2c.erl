@@ -189,9 +189,9 @@ handle_cast(_Msg, State) ->
 handle_info({ssl, _, Bin}, #http2c_state{
                               incoming_frames = Frames
                              } =  State) when is_binary(Bin) ->
-    lager:debug("Incoming to http2c: ~p", [Bin]),
+    %lager:debug("Incoming to http2c: ~p", [Bin]),
     [F] = http2_frame:from_binary(Bin),
-    lager:debug("Cli Frame: ~p", [F]),
+    %lager:debug("Cli Frame: ~p", [F]),
     {noreply, State#http2c_state{incoming_frames = Frames ++ [F]}};
 handle_info(Info, State) ->
     lager:debug("unexpected []: ~p~n", [Info]),

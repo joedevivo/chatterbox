@@ -96,10 +96,6 @@ overlay(S, {settings, [{?SETTINGS_MAX_HEADER_LIST_SIZE, Val}|PList]}) ->
 overlay(S, {settings, []}) ->
     S.
 
-
-
-
-
 -spec send(socket(), settings()) -> ok | {error, term()}.
 send({Transport, Socket}, _Settings) ->
     %% TODO: hard coded settings frame. needs to be figured out from

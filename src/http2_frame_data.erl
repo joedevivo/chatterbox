@@ -14,7 +14,8 @@
 
 -spec format(data()) -> iodata().
 format(Payload) ->
-    io_lib:format("[Data: ~p]", [Payload]).
+    <<Start:32/binary,_/binary>> = Payload#data.data,
+    io_lib:format("[Data: {data: ~p ...}]", [Start]).
 
 -spec read_binary(binary(), frame_header()) ->
     {ok, payload(), binary()} |

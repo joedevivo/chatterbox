@@ -26,12 +26,10 @@ new(StreamId, {SendWindowSize, RecvWindowSize}) ->
        recv_window_size = RecvWindowSize
       }.
 
-
-
 -spec recv_frame(frame(), stream_state()) -> stream_state().
 %% First clause will handle transitions from idle to
 %% half_closed_remote, via HEADERS frame with END_STREAM flag set
-recv_frame({FH = #frame_header{
+recv_frame(F={FH = #frame_header{
               stream_id=StreamId,
               type=?HEADERS
              }, _Payload},
@@ -39,18 +37,31 @@ recv_frame({FH = #frame_header{
 when ?IS_FLAG(FH#frame_header.flags, ?FLAG_END_STREAM) ->
     State#stream_state{
       stream_id = StreamId,
-      state = half_closed_remote
+      state = half_closed_remote,
+      incoming_frames = [F]
      };
 %% This one goes to open, because it's a headers frame, but not the
 %% end of stream
-recv_frame({_FH = #frame_header{
+recv_frame(F={_FH = #frame_header{
               stream_id=StreamId,
               type=?HEADERS
              }, _Payload},
            State = #stream_state{state=idle}) ->
     State#stream_state{
       stream_id = StreamId,
-      state = open
+      state = open,
+      incoming_frames = [F]
+     };
+recv_frame(F={#frame_header{
+                 stream_id=StreamId,
+                 type=?CONTINUATION
+                }, _Payload},
+           State = #stream_state{
+                      stream_id=StreamId,
+                      incoming_frames=Frames
+                     }) ->
+    State#stream_state{
+      incoming_frames = [F|Frames]
      };
 
 %% TODO : More ?DATA when L > RWS and when ?IS_FLAG(END_STREAM)

@@ -9,7 +9,8 @@
           frame_backlog = [],
           settings_backlog = [],
           next_available_stream_id = 2 :: stream_id(),
-          streams = [] :: [{stream_id(), stream_state()}]
+          streams = [] :: [{stream_id(), stream_state()}],
+          continuation_stream_id = undefined :: stream_id() | undefined
     }).
 
 -export([start_link/1]).
@@ -27,6 +28,7 @@
 -export([accept/2,
          settings_handshake/2,
          connected/2,
+         continuation/2,
          closing/2
         ]).
 
@@ -34,13 +36,13 @@ start_link(Socket) ->
     gen_fsm:start_link(?MODULE, Socket, []).
 
 init(Socket) ->
-    lager:debug("Starting chatterbox_fsm"),
+    %%lager:debug("Starting chatterbox_fsm"),
     gen_fsm:send_event(self(), start),
     {ok, accept, #chatterbox_fsm_state{connection=#connection_state{socket=Socket}}}.
 
 %% accepting connection state:
 accept(start, S = #chatterbox_fsm_state{connection=#connection_state{socket={Transport,ListenSocket}}}) ->
-    lager:debug("chatterbox_fsm accept"),
+    %%lager:debug("chatterbox_fsm accept"),
 
     Socket = case Transport of
         gen_tcp ->
@@ -136,8 +138,9 @@ settings_handshake_loop(State = #chatterbox_fsm_state{
       Acc,
       State).
 
-settings_handshake_loop({?SETTINGS,false},{_Header,ClientSettings}, {ReceivedAck,false},
+settings_handshake_loop({?SETTINGS,false},{_Header,CSettings}, {ReceivedAck,false},
                         State = #chatterbox_fsm_state{connection=C=#connection_state{socket=S}}) ->
+    ClientSettings = http2_frame_settings:overlay(#settings{}, CSettings),
     lager:debug(
       "[settings_handshake] got client_settings: ~p",
       [http2_frame_settings:format(ClientSettings)]),
@@ -188,7 +191,24 @@ connected(start_frame,
     %% is not yet in the State. Test it once those are implemented
     %% ahahaahahaha
     gen_fsm:send_event(self(), start_frame),
+    lager:debug("Incoming frame? ~p", [Response]),
     Response.
+
+%% we're locked waiting for contiunation frames now
+continuation(start_frame,
+             S = #chatterbox_fsm_state{
+                 connection=#connection_state{
+                               socket=Socket
+                              }
+                }) ->
+    Frame = http2_frame:read(Socket),
+    lager:debug("[continuation] [start_frame] ~p", [http2_frame:format(Frame)]),
+    Response = route_frame(Frame, S),
+    gen_fsm:send_event(self(), start_frame),
+    Response;
+continuation(_, State) ->
+    %% Send error. Don't know what type yet
+    {next_state, closing, State}.
 
 closing(StateName, State) ->
     lager:debug("[closing] ~p", [StateName]),
@@ -196,8 +216,12 @@ closing(StateName, State) ->
 %% Maybe use something like this for readability later
 %% -define(SOCKET_PM, #chatterbox_fsm_state{socket=Socket}).
 
+%% route_frame's job needs to be "now that we've read a frame off the
+%% wire, do connection based things to it and/or forward it to the
+%% http2 stream processor (http2_stream:recv_frame)
 -spec route_frame(frame(), #chatterbox_fsm_state{}) ->
     {next_state, connected, #chatterbox_fsm_state{}}.
+%% Bad Length of frame, exceedes maximum allowed size
 route_frame({#frame_header{length=L}, _},
             S = #chatterbox_fsm_state{
                    connection=#connection_state{
@@ -207,7 +231,7 @@ route_frame({#frame_header{length=L}, _},
                    next_available_stream_id=NAS})
     when L > MFS ->
     GoAway = #goaway{
-                last_stream_id=NAS,
+                last_stream_id=NAS, %% maybe not the best idea.
                 error_code=?FRAME_SIZE_ERROR
                },
     GoAwayBin = http2_frame:to_binary({#frame_header{
@@ -247,8 +271,35 @@ route_frame(F={H=#frame_header{
                                           }
                              }
     };
+
+%% HEADERS frame can have an ?FLAG_END_STREAM but no ?FLAG_END_HEADERS
+%% in which case, CONTINUATION frame may follow that have an
+%% ?FLAG_END_HEADERS. RFC7540:8.1
+
+%% If there CONTINUATIONS, they must all follow the HEADERS frame with
+%% no frames from other streams or types in between RFC7540:8.1
+
+%% HEADERS frame with no END_HEADERS flag, expect continuations
+route_frame({H=#frame_header{stream_id=StreamId}, _Payload}=Frame,
+            S = #chatterbox_fsm_state{
+                   connection=#connection_state{
+                                 recv_settings=#settings{initial_window_size=RecvWindowSize},
+                                 send_settings=#settings{initial_window_size=SendWindowSize}
+                                },
+               streams = Streams
+            })
+  when H#frame_header.type == ?HEADERS,
+       ?NOT_FLAG(H#frame_header.flags, ?FLAG_END_HEADERS) ->
+    lager:debug("Received HEADERS Frame for Stream ~p, no END in sight", [StreamId]),
+    NewStream = http2_stream:new(StreamId, {SendWindowSize, RecvWindowSize}),
+    NewStream1 = http2_stream:recv_frame(Frame, NewStream),
+    {next_state, continuation, S#chatterbox_fsm_state{
+                                 streams = [{StreamId, NewStream1}|Streams],
+                                 continuation_stream_id = StreamId
+                                }
+    };
 %% HEADER frame with END_HEADERS flag
-route_frame({H=#frame_header{stream_id=StreamId}, Payload},
+route_frame(F={H=#frame_header{stream_id=StreamId}, _Payload},
         S = #chatterbox_fsm_state{
                connection=C=#connection_state{
                              decode_context=DecodeContext,
@@ -259,9 +310,9 @@ route_frame({H=#frame_header{stream_id=StreamId}, Payload},
            })
     when H#frame_header.type == ?HEADERS,
          ?IS_FLAG(H#frame_header.flags, ?FLAG_END_HEADERS) ->
-    %% lager:debug("Received HEADERS Frame for Stream ~p", [StreamId]),
-    {Headers, NewDecodeContext} = hpack:decode(Payload#headers.block_fragment,
-            DecodeContext),
+    lager:debug("Received HEADERS Frame for Stream ~p", [StreamId]),
+    HeadersBin = http2_frame_headers:from_frames([F]),
+    {Headers, NewDecodeContext} = hpack:decode(HeadersBin, DecodeContext),
     %%lager:debug("Headers decoded: ~p", [Headers]),
     Stream = http2_stream:new(StreamId, {SendWindowSize, RecvWindowSize}),
 
@@ -282,13 +333,69 @@ route_frame({H=#frame_header{stream_id=StreamId}, Payload},
                               streams = [{StreamId, NewStreamState}|Streams]
                                            }
                              };
-%% TODO: HEADERS frame with no END_HEADERS flag
+%% Might as well do continuations here since they're related code:
+route_frame(F={H=#frame_header{stream_id=StreamId}, _Payload},
+            S = #chatterbox_fsm_state{
+                   connection=#connection_state{
+                                 socket=_Socket
+                                },
+                   streams = Streams
+                  })
+  when H#frame_header.type == ?CONTINUATION,
+       ?NOT_FLAG(H#frame_header.flags, ?FLAG_END_HEADERS) ->
+    lager:debug("Received CONTINUATION Frame for Stream ~p", [StreamId]),
+
+    {Stream, NewStreamsTail} = get_stream(StreamId, Streams),
+
+    NewStream = http2_stream:recv_frame(F, Stream),
+
+    %% TODO: NewStreams = replace old stream
+    NewStreams = [{StreamId,NewStream}|NewStreamsTail],
+
+    {next_state, connected, S#chatterbox_fsm_state{
+                              streams = NewStreams
+                             }};
+
+route_frame(F={H=#frame_header{stream_id=StreamId}, _Payload},
+            S = #chatterbox_fsm_state{
+                   connection=C=#connection_state{
+                                   decode_context=DecodeContext,
+                                   socket=_Socket
+                                },
+                   streams = Streams
+                  })
+  when H#frame_header.type == ?CONTINUATION,
+       ?IS_FLAG(H#frame_header.flags, ?FLAG_END_HEADERS) ->
+    lager:debug("Received CONTINUATION Frame for Stream ~p", [StreamId]),
+
+    {Stream, NewStreamsTail} = get_stream(StreamId, Streams),
+
+    NewStream = http2_stream:recv_frame(F, Stream),
+
+    HeaderFrames = lists:reverse(NewStream#stream_state.incoming_frames),
+    HeadersBin = http2_frame_headers:from_frames(HeaderFrames),
+    {Headers, NewDecodeContext} = hpack:decode(HeadersBin, DecodeContext),
+
+    %% I think this might be wrong because ?END_HEADERS doesn't mean
+    %% data has posted but baby steps
+    {NewConnectionState, NewStreamState} =
+        chatterbox_static_content_handler:handle(
+          C#connection_state{decode_context=NewDecodeContext},
+          Headers,
+          NewStream),
+
+    NewStreams = [{StreamId,NewStreamState}|NewStreamsTail],
+
+    {next_state, connected, S#chatterbox_fsm_state{
+                              connection = NewConnectionState,
+                              streams = NewStreams
+                             }};
+
 route_frame({H, _Payload}, S = #chatterbox_fsm_state{
                                   connection=#connection_state{socket=_Socket}})
     when H#frame_header.type == ?PRIORITY,
          H#frame_header.stream_id == 16#0 ->
-    lager:debug("Received PRIORITY Frame"),
-    lager:error("Chatterbox doesn't support PRIORITY"),
+    lager:debug("Received PRIORITY Frame, but it's only a suggestion anyway..."),
     {next_state, connected, S};
 route_frame({H=#frame_header{stream_id=StreamId}, _Payload}, S = #chatterbox_fsm_state{
                                                                     connection=#connection_state{socket=_Socket}})
@@ -395,12 +502,10 @@ route_frame({H=#frame_header{stream_id=StreamId}, #window_update{window_size_inc
     %%NewStreams = [{StreamId, Stream#stream_state{send_window_size=NewSendWindow}}|NewStreamsTail],
     NewStreams = [{StreamId, NStream}|NewStreamsTail],
     {next_state, connected, S#chatterbox_fsm_state{streams=NewStreams}};
-route_frame({H=#frame_header{stream_id=StreamId}, _Payload}, S = #chatterbox_fsm_state{connection=#connection_state{socket=_Socket}})
-    when H#frame_header.type == ?CONTINUATION ->
-    lager:debug("Received CONTINUATION Frame for Stream ~p", [StreamId]),
-    lager:error("Chatterbox doesn't support streams. Throwing this CONTINUATION away"),
-    {next_state, connected, S};
-route_frame(_, State) ->
+
+route_frame(Frame, State) ->
+    lager:debug("OOPS! ~p", [Frame]),
+    lager:debug("OOPS! ~p", [State]),
     %% TODO Connection Error here, since pattern matches should cover the rules
     {next_state, connected, State}.
 

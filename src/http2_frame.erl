@@ -141,8 +141,8 @@ to_binary({Header, Payload}) ->
                   type = Type
                  },
     HeaderBin = header_to_binary(NewHeader),
-    lager:debug("HeaderBin: ~p", [HeaderBin]),
-    lager:debug("PayloadBin: ~p", [PayloadBin]),
+%    lager:debug("HeaderBin: ~p", [HeaderBin]),
+%    lager:debug("PayloadBin: ~p", [PayloadBin]),
     [HeaderBin, PayloadBin].
 
 -spec header_to_binary(frame_header()) -> iodata().
@@ -152,7 +152,7 @@ header_to_binary(#frame_header{
         flags=F,
         stream_id=StreamId
     }) ->
-    lager:debug("H: ~p", [L]),
+ %   lager:debug("H: ~p", [L]),
     <<L:24,T:8,F:8,0:1,StreamId:31>>.
 
 -spec payload_to_binary(payload()) -> {frame_type(), iodata()}.

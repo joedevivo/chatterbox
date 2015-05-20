@@ -6,6 +6,7 @@
 
 -export([
     format/1,
+    from_frames/1,
     read_binary/2,
     to_frame/3,
     send/4,
@@ -43,6 +44,7 @@ is_priority(_) ->
 
 -spec to_frame(pos_integer(), [headers:header()], hpack:encode_context()) ->
                       {binary(), hpack:encode_context()}.
+%% Maybe break this up into continuations like the data frame
 to_frame(StreamId, Headers, EncodeContext) ->
     {HeadersToSend, NewContext} = hpack:encode(Headers, EncodeContext),
     L = byte_size(HeadersToSend),
@@ -65,3 +67,12 @@ to_binary(#headers{
         _ ->
             [http2_frame_priority:to_binary(P), BF]
     end.
+
+-spec from_frames([frame()], binary()) -> binary().
+from_frames([{#frame_header{type=?HEADERS},#headers{block_fragment=BF}}|Continuations]) ->
+    from_frames(Continuations, BF).
+
+from_frames([], Acc) ->
+    Acc;
+from_frames([{#frame_header{type=?CONTINUATION},#continuation{block_fragment=BF}}|Continuations], Acc) ->
+    from_frames(Continuations, <<Acc/binary,BF/binary>>).

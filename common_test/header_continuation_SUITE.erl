@@ -1,0 +1,53 @@
+-module(header_continuation_SUITE).
+
+-include("http2.hrl").
+-include_lib("eunit/include/eunit.hrl").
+-include_lib("common_test/include/ct.hrl").
+-compile([export_all]).
+
+all() -> [basic_continuation].
+
+init_per_testcase(_, Config) ->
+    lager_common_test_backend:bounce(debug),
+    Config0 = chatterbox_test_buddy:start(Config),
+    Config0.
+
+end_per_test_case(_, Config) ->
+    chatterbox_test_buddy:stop(Config),
+    ok.
+
+basic_continuation(_Config) ->
+    {ok, Client} = http2c:start_link(),
+
+    %% build some headers
+    Headers = [
+               {<<":method">>, <<"GET">>},
+               {<<":path">>, <<"/index.html">>},
+               {<<":scheme">>, <<"http">>},
+               {<<":authority">>, <<"localhost:8080">>},
+               {<<"accept">>, <<"*/*">>},
+               {<<"accept-encoding">>, <<"gzip, deflate">>},
+               {<<"user-agent">>, <<"nghttp2/0.7.7">>}
+              ],
+
+    {HeadersBin, _NewContext} = hpack:encode(Headers, hpack:new_encode_context()),
+
+    <<H1:8/binary,H2:8/binary,H3/binary>> = HeadersBin,
+
+    %% break them up into 3 frames
+
+    Frames = [
+              {#frame_header{length=8,type=?HEADERS,stream_id=3},#headers{block_fragment=H1}},
+              {#frame_header{length=8,type=?CONTINUATION,stream_id=3},#continuation{block_fragment=H2}},
+              {#frame_header{length=8,type=?CONTINUATION,flags=?FLAG_END_HEADERS,stream_id=3},#continuation{block_fragment=H3}}
+    ],
+    http2c:send_unaltered_frames(Client, Frames),
+
+    timer:sleep(1000),
+
+    Resp = http2c:get_frames(Client, 3),
+    ct:pal("Resp: ~p", [Resp]),
+
+    ?assertEqual(2, length(Resp)),
+
+    ok.
