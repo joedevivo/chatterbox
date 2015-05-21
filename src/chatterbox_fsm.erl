@@ -201,14 +201,19 @@ continuation(start_frame,
                                socket=Socket
                               }
                 }) ->
-    Frame = http2_frame:read(Socket),
+    Frame = {FH,_} = http2_frame:read(Socket),
     lager:debug("[continuation] [start_frame] ~p", [http2_frame:format(Frame)]),
-    Response = route_frame(Frame, S),
+
+    Response = case FH#frame_header.type of
+                   ?CONTINUATION ->
+                       route_frame(Frame, S);
+                   _ ->
+                       go_error(?PROTOCOL_ERROR, S)
+               end,
     gen_fsm:send_event(self(), start_frame),
     Response;
 continuation(_, State) ->
-    %% Send error. Don't know what type yet
-    {next_state, closing, State}.
+    go_error(?PROTOCOL_ERROR, State).
 
 closing(StateName, State) ->
     lager:debug("[closing] ~p", [StateName]),
@@ -230,15 +235,7 @@ route_frame({#frame_header{length=L}, _},
                                 },
                    next_available_stream_id=NAS})
     when L > MFS ->
-    GoAway = #goaway{
-                last_stream_id=NAS, %% maybe not the best idea.
-                error_code=?FRAME_SIZE_ERROR
-               },
-    GoAwayBin = http2_frame:to_binary({#frame_header{
-                                         stream_id=0
-                                         }, GoAway}),
-    T:send(Socket, GoAwayBin),
-    {next_state, closing, S};
+    go_error(?FRAME_SIZE_ERROR, S);
 
 %%TODO Data to stream 0 bad
 %% TODO Route data frames to streams. POST!
@@ -352,7 +349,7 @@ route_frame(F={H=#frame_header{stream_id=StreamId}, _Payload},
     %% TODO: NewStreams = replace old stream
     NewStreams = [{StreamId,NewStream}|NewStreamsTail],
 
-    {next_state, connected, S#chatterbox_fsm_state{
+    {next_state, continuation, S#chatterbox_fsm_state{
                               streams = NewStreams
                              }};
 
@@ -550,3 +547,21 @@ get_stream(StreamId, Streams) ->
                         end,
                         Streams),
     {Stream, Leftovers}.
+
+-spec go_error(error_code(), #chatterbox_fsm_state{}) -> {next_state, closing, #chatterbox_fsm_state{}}.
+go_error(ErrorCode,
+         State = #chatterbox_fsm_state{
+                    connection=#connection_state{
+                                  socket={T,Socket}
+                                 },
+                    next_available_stream_id=NAS
+                   }) ->
+    GoAway = #goaway{
+                last_stream_id=NAS, %% maybe not the best idea.
+                error_code=ErrorCode
+               },
+    GoAwayBin = http2_frame:to_binary({#frame_header{
+                                          stream_id=0
+                                         }, GoAway}),
+    T:send(Socket, GoAwayBin),
+    {next_state, closing, State}.
