@@ -10,7 +10,8 @@
           settings_backlog = [],
           next_available_stream_id = 2 :: stream_id(),
           streams = [] :: [{stream_id(), stream_state()}],
-          continuation_stream_id = undefined :: stream_id() | undefined
+          continuation_stream_id = undefined :: stream_id() | undefined,
+          content_handler = chatterbox_static_content_handler :: module()
     }).
 
 -export([start_link/1]).
@@ -42,8 +43,6 @@ init(Socket) ->
 
 %% accepting connection state:
 accept(start, S = #chatterbox_fsm_state{connection=#connection_state{socket={Transport,ListenSocket}}}) ->
-    %%lager:debug("chatterbox_fsm accept"),
-
     Socket = case Transport of
         gen_tcp ->
             %%TCP Version
@@ -230,10 +229,8 @@ closing(StateName, State) ->
 route_frame({#frame_header{length=L}, _},
             S = #chatterbox_fsm_state{
                    connection=#connection_state{
-                                 socket={T,Socket},
                                  recv_settings=#settings{max_frame_size=MFS}
-                                },
-                   next_available_stream_id=NAS})
+                                }})
     when L > MFS ->
     go_error(?FRAME_SIZE_ERROR, S);
 
@@ -251,7 +248,6 @@ route_frame(F={H=#frame_header{
                   })
     when H#frame_header.type == ?DATA ->
     lager:debug("Received DATA Frame for Stream ~p", [StreamId]),
-    %% TODO recv flow control
 
     {Stream, NewStreamsTail} = get_stream(StreamId, Streams),
 
@@ -303,7 +299,8 @@ route_frame(F={H=#frame_header{stream_id=StreamId}, _Payload},
                              recv_settings=#settings{initial_window_size=RecvWindowSize},
                              send_settings=#settings{initial_window_size=SendWindowSize}
                              },
-               streams = Streams
+               streams = Streams,
+               content_handler = Handler
            })
     when H#frame_header.type == ?HEADERS,
          ?IS_FLAG(H#frame_header.flags, ?FLAG_END_HEADERS) ->
@@ -315,10 +312,15 @@ route_frame(F={H=#frame_header{stream_id=StreamId}, _Payload},
 
     %% Now this stream should be 'open' and because we've gotten ?END_HEADERS we can start processing it.
 
+    %% TODO: Or can we? We should be able to handle data frames here, so maybe
+    %% ?END_STREAM is what we should be looking for
+
     %% TODO: Make this module name configurable
     %% Make content_handler a behavior with handle/3
     {NewConnectionState, NewStreamState} =
-        chatterbox_static_content_handler:handle(
+
+
+        Handler:handle(
           C#connection_state{decode_context=NewDecodeContext},
           Headers,
           Stream),

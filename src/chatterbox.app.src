@@ -21,7 +21,8 @@
     {max_concurrent_streams, unlimited},
     {initial_window_size, 65535},
     {max_frame_size, 16384},
-    {max_header_list_size, unlimited}
+    {max_header_list_size, unlimited},
+    {content_handler, chatterbox_static_content_handler}
   ]}
  ]}.
 %% vim: set filetype=erlang tabstop=2
