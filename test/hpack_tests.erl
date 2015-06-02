@@ -170,3 +170,32 @@ decode_c_4_test() ->
     ?assertEqual({<<":authority">>, <<"www.example.com">>}, R3H4),
     ?assertEqual({<<"custom-key">>, <<"custom-value">>}   , R3H5),
     ok.
+
+hpack_c_1_1_test() ->
+    Encoded = hpack:encode_integer(10, 5),
+    ?assertEqual(<<10:5>>, Encoded),
+    ok.
+
+hpack_c_1_2_test() ->
+    Encoded = hpack:encode_integer(1337, 5),
+    ?assertEqual(<<252,208,10:5>>, Encoded),
+    ok.
+
+hpack_c_2_4_test() ->
+    EncodedInt = hpack:encode_integer(2,7),
+    ?assertEqual(<<2:7>>, EncodedInt),
+    {Encoded, _} = hpack:encode([{<<":method">>, <<"GET">>}], hpack:new_encode_context()),
+    ?assertEqual(<<16#82>>, Encoded),
+    ok.
+
+encode_integer_test() ->
+    ?assertEqual(<<62:6>>, hpack:encode_integer(62,6)),
+    ?assertEqual(<<63:6,1:8>>, hpack:encode_integer(64,6)),
+    ?assertEqual(<<63:6,0:8>>, hpack:encode_integer(63,6)),
+    ok.
+
+%%encode_indexed_test() ->
+%%    ?assertEqual(<<2#11111110>>, hpack:encode_indexed(62)),
+%%    ?assertEqual(<<2#11111111>>, hpack:encode_indexed(63)),
+%%
+%%    ok.

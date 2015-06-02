@@ -32,7 +32,10 @@
 -record(http2c_state, {
           connection = #connection_state{} :: connection_state(),
           next_available_stream_id = 1 :: pos_integer(),
-          incoming_frames = [] :: [frame()]
+          incoming_frames = [] :: [frame()],
+          working_frame_header = undefined :: undefined | frame_header(),
+          working_frame_payload = <<>> :: binary(),
+          working_length = 0 :: non_neg_integer()
 }).
 
 %% Starts a server. Should probably take args eventually
@@ -125,6 +128,27 @@ init([]) ->
     end,
     lager:debug("Transport: ~p", [Transport]),
     {ok, Socket} = Transport:connect(Host, Port, Options),
+
+    %random:seed(),
+    %MasterSecret = list_to_binary([random:uniform(255) || _ <- lists:seq(1,48)]),
+    %MSStr = string:to_lower([ hd(erlang:integer_to_list(Nibble, 16)) || << Nibble:4 >> <= MasterSecret ]),
+    %{ok, ClientRandom} = ssl:prf(Socket, master_secret, MasterSecret, [client_random], 32),
+    %CRStr = string:to_lower([ hd(erlang:integer_to_list(Nibble, 16)) || << Nibble:4 >> <= ClientRandom ]),
+%
+    %_Bytes = io_lib:format("CLIENT_RANDOM ~s ~s~n", [CRStr, MSStr]),
+    %Filename = "/Users/joe/Desktop/ssloutput.log",
+    %case file:open(Filename, [append]) of
+    %    {ok, IoDevice} ->
+    %        file:write(IoDevice, Bytes),
+    %        file:close(IoDevice);
+    %    {error, Reason} ->
+    %        lager:error("~s open error  reason:~s~n", [Filename, Reason])
+    %end,
+    %%{ok, Cert1} = ssl:peercert(Socket),
+    %%lager:error("Cert1: ~p", [Cert1]),
+    %%W = public_key:pkix_decode_cert(Cert1, plain),
+    %%lager:error("Cert1: decoded  ~p", [W]),
+
     %% Send the preamble
     Transport:send(Socket, <<?PREAMBLE>>),
 
@@ -138,8 +162,12 @@ init([]) ->
     Ack =  ?IS_FLAG(AH#frame_header.flags, ?FLAG_ACK),
     lager:debug("Ack: ~p", [Ack]),
 
-    Transport:setopts(Socket, [{active, true}]),
-
+    case Transport of
+        ssl ->
+            ssl:setopts(Socket, [{active, true}]);
+        gen_tcp ->
+            inet:setopts(Socket, [{active, true}])
+    end,
     {ok, #http2c_state{
             connection = #connection_state{
                             socket = {Transport, Socket},
@@ -176,6 +204,21 @@ handle_cast({send_bin, Bin}, #http2c_state{connection=#connection_state{socket={
     lager:debug("Sending ~p", [Bin]),
     Transport:send(Socket, Bin),
     {noreply, State};
+handle_cast(recv, #http2c_state{
+        incoming_frames = Frames,
+        connection=#connection_state{socket={Transport, Socket}}
+        }=State) ->
+    lager:info("recv"),
+
+
+    RawHeader = Transport:recv(Socket, 9),
+    {FHeader, <<>>} = http2_frame:read_binary_frame_header(RawHeader),
+    lager:info("http2c recv ~p", [FHeader]),
+    RawBody = Transport:recv(Socket, FHeader#frame_header.length),
+    {Payload, <<>>} = http2_frame:read_binary_payload(RawBody, FHeader),
+    F = {FHeader, Payload},
+    gen_server:cast(self(), recv),
+    {noreply, State#http2c_state{incoming_frames = Frames ++ [F]}};
 handle_cast({encode_context, EC}, State=#http2c_state{connection=C}) ->
     {noreply, State#http2c_state{connection=C#connection_state{encode_context=EC}}};
 handle_cast(_Msg, State) ->
@@ -186,15 +229,19 @@ handle_cast(_Msg, State) ->
                          {noreply, #http2c_state{}} |
                          {noreply, #http2c_state{}, timeout()} |
                          {stop, any(), #http2c_state{}}.
-handle_info({ssl, _, Bin}, #http2c_state{
-                              incoming_frames = Frames
-                             } =  State) when is_binary(Bin) ->
-    %lager:debug("Incoming to http2c: ~p", [Bin]),
-    [F] = http2_frame:from_binary(Bin),
-    %lager:debug("Cli Frame: ~p", [F]),
-    {noreply, State#http2c_state{incoming_frames = Frames ++ [F]}};
+handle_info({_, _, Bin}, #http2c_state{
+        incoming_frames = Frames,
+        working_frame_header = WHeader,
+        working_frame_payload = WPayload
+    } = State) ->
+    {NewFrames, Header, Rem} = process_binary(Bin, WHeader, WPayload, Frames),
+    {noreply, State#http2c_state{
+        incoming_frames = NewFrames,
+        working_frame_header = Header,
+        working_frame_payload = Rem
+    }};
 handle_info(Info, State) ->
-    lager:debug("unexpected []: ~p~n", [Info]),
+    lager:debug("unexpected [http2c]: ~p~n", [Info]),
     {noreply, State}.
 
 %% This function is called by a gen_server when it is about to
@@ -214,3 +261,33 @@ code_change(_OldVsn, State, _Extra) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+-spec process_binary(
+    binary(),
+    frame_header() | undefined,
+    binary(),
+    [frame()]) -> {[frame()], frame_header() | undefined, binary() | undefined}.
+%%OMG probably a monad
+process_binary(<<>>, undefined, <<>>, Frames) -> {Frames, undefined, <<>>};
+
+process_binary(<<HeaderBin:9/binary,Bin/binary>>, undefined, <<>>, Frames) ->
+    {Header, <<>>} = http2_frame:read_binary_frame_header(HeaderBin),
+    L = Header#frame_header.length,
+    case byte_size(Bin) >= L of
+        true ->
+            {ok, Payload, Rem} = http2_frame:read_binary_payload(Bin, Header),
+            process_binary(Rem, undefined, <<>>, Frames ++ [{Header,Payload}]);
+        false ->
+            {Frames, Header, Bin}
+    end;
+process_binary(Bin, Header, <<>>, Frames) ->
+    lager:info("process_binary(~p,~p,~p,~p", [Bin,Header,<<>>,Frames]),
+    L = Header#frame_header.length,
+    case byte_size(Bin) >= L of
+        true ->
+            {ok, Payload, Rem} = http2_frame:read_binary_payload(Bin, Header),
+            process_binary(Rem, undefined, <<>>, Frames ++ [{Header,Payload}]);
+        false ->
+            {Frames, Header, Bin}
+    end;
+process_binary(Bin, Header, Payload, Frames) ->
+    process_binary(iolist_to_binary([Payload, Bin]), Header, <<>>, Frames).

@@ -37,7 +37,7 @@ start_link(Socket) ->
     gen_fsm:start_link(?MODULE, Socket, []).
 
 init(Socket) ->
-    %%lager:debug("Starting chatterbox_fsm"),
+    lager:debug("Starting chatterbox_fsm: ~p",[Socket]),
     gen_fsm:send_event(self(), start),
     {ok, accept, #chatterbox_fsm_state{connection=#connection_state{socket=Socket}}}.
 
@@ -47,6 +47,7 @@ accept(start, S = #chatterbox_fsm_state{connection=#connection_state{socket={Tra
         gen_tcp ->
             %%TCP Version
             {ok, AcceptSocket} = Transport:accept(ListenSocket),
+            inet:setopts(AcceptSocket, [{active, once}]),
             AcceptSocket;
         ssl ->
             %% SSL conditional stuff

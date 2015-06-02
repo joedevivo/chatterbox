@@ -6,7 +6,7 @@ start(Config) ->
     application:load(chatterbox),
     Settings = [
     {port, 8081},
-    {ssl, true},
+    {ssl, false},
     {ssl_options, [{certfile,   "../../../config/server.crt"},
                    {keyfile,    "../../../config/server.key"},
                    {cacertfile, "../../../config/server-ca.crt"},

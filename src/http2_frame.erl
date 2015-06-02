@@ -4,6 +4,8 @@
 
 -export([
          read/1,
+         read_binary_frame_header/1,
+         read_binary_payload/2,
          from_binary/1,
          format_header/1,
          format_payload/1,

@@ -25,8 +25,19 @@ handle(C = #connection_state{
     %% Directory browsing?
     File = RootDir ++ Path,
     lager:debug("serving ~p", [File]),
-    {NewEncodeContext, NewStream} = case filelib:is_file(File) of
-        true ->
+    lager:info("Request Headers: ~p", [Headers]),
+    {NewEncodeContext, NewStream} = case {filelib:is_file(File), filelib:is_dir(File)} of
+        {_, true} ->
+            ResponseHeaders = [
+                               {<<":status">>,<<"403">>}
+                              ],
+
+            NewContext = http2_frame_headers:send(Socket, StreamId, ResponseHeaders, EncodeContext),
+            %% TODO: We know how much we can send, so send that and wait for a flow control update?
+            Frames = http2_frame_data:to_frames(StreamId, <<"No soup for you!">>, SS),
+            NStream = send_while_window_open(Stream#stream_state{queued_frames=Frames}, C),
+            {NewContext, NStream};
+        {true, false} ->
             Ext = filename:extension(File),
             MimeType = case Ext of
                 ".js" -> <<"text/javascript">>;
@@ -49,7 +60,7 @@ handle(C = #connection_state{
             NStream = send_while_window_open(Stream#stream_state{queued_frames=Frames}, C),
 
             {NewContext, NStream};
-        false ->
+        {false, false} ->
             ResponseHeaders = [
                 {<<":status">>, <<"404">>}
             ],
@@ -64,9 +75,10 @@ send_while_window_open(
                        S = #stream_state{
                                          stream_id = StreamId,
                                          send_window_size=SWS,
-                              queued_frames = [F=[<<L:24,_/binary>>, _]|Frames]
+                              queued_frames = [F=[<<L:24,_/binary>>, X]|Frames]
                              },
                       C = #connection_state{socket={Transport,Socket}}) when SWS >= L ->
+    lager:info("Sending ~p over ~p", [byte_size(X), Transport]),
     Transport:send(Socket, F),
     NewSendWindow = SWS - L,
     lager:info("Stream ~p send window now: ~p", [StreamId, NewSendWindow]),

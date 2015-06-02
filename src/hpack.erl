@@ -192,19 +192,28 @@ decode_integer(<<0:1,Int:7,Rem/binary>>, M, I) ->
 encode_integer(Int, Prefix) ->
     PrefixMask = 1 bsl Prefix - 1,
     Remaining = Int - PrefixMask,
-    case Remaining < 0 of
-        true ->
-            {<<Int:Prefix>>, <<>>};
-        false ->
-            {<<Int:Prefix>>, encode_integer_(Remaining, <<>>)}
+    case {Remaining < 0, Int =:= PrefixMask} of
+        {_, true} ->
+            <<Int:Prefix,0:8>>;
+        {true, false} ->
+            <<Int:Prefix>>;
+        _ ->
+            Bin = encode_integer_(Remaining, <<>>),
+            <<PrefixMask:Prefix, Bin/binary>>
     end.
 
 encode_integer_(0, BinAcc) ->
     BinAcc;
 encode_integer_(I, BinAcc) ->
     Rem = I bsr 7,
-    This = I band 255,
-    encode_integer_(Rem, <<BinAcc/binary, This/binary>>).
+    This = (I rem 128),
+    ThisByte = case Rem =:= 0 of
+        true ->
+            This;
+        _ ->
+            128 + This
+    end,
+    encode_integer_(Rem, <<BinAcc/binary, ThisByte>>).
 
 -spec encode([{binary(), binary()}], binary(), encode_context()) -> {binary(), encode_context()}.
 encode([], Acc, Context) ->
@@ -212,29 +221,40 @@ encode([], Acc, Context) ->
 encode([{HeaderName, HeaderValue}|Tail], B, Context = #encode_context{dynamic_table=T}) ->
     {BinToAdd, NewContext} = case headers:match({HeaderName, HeaderValue}, T) of
         {indexed, I} ->
+            lager:error("Indexed: ~p ~p", [I, HeaderName]),
+            lager:error("T: ~p", [T]),
             {encode_indexed(I), Context};
         {literal_with_indexing, I} ->
             {encode_literal_indexed(I, HeaderValue),
              Context#encode_context{dynamic_table=headers:add(HeaderName, HeaderValue, T)}};
-        {literal_wo_indexing, _} ->
+        {literal_wo_indexing, X} ->
             {encode_literal_wo_index(HeaderName, HeaderValue),
              Context#encode_context{dynamic_table=headers:add(HeaderName, HeaderValue, T)}}
     end,
-    encode(Tail, <<B/binary,BinToAdd/binary>>, NewContext).
+    NewB = <<B/binary,BinToAdd/binary>>,
+
+    %NewB = try <<B/binary,BinToAdd/binary>> of
+    %    B4 -> B4
+    %catch
+    %    _:_ ->
+    %        lager:error("BinToAdd ~p", [BinToAdd])
+    %end,
+
+    encode(Tail, NewB, NewContext).
 
 encode_indexed(I) when I < 63 ->
     <<2#1:1,I:7>>;
 encode_indexed(I) ->
     Encoded = encode_integer(I, 7),
-    <<2#11111111, Encoded/binary>>.
+    <<2#1:1, Encoded/bits>>.
 
 encode_literal_indexed(I, Value) when I < 63 ->
     BinToAdd = encode_literal(Value),
     <<2#01:2,I:6,BinToAdd/binary>>;
 encode_literal_indexed(I, Value) ->
-    {_, Index} = encode_integer(I, 6),
+    Index = encode_integer(I, 6),
     BinToAdd = encode_literal(Value),
-    <<2#01111111:8,Index/binary,BinToAdd/binary>>.
+    <<2#01:2,Index/bits,BinToAdd/binary>>.
 
 encode_literal(Value) ->
     L = size(Value),
@@ -246,6 +266,7 @@ encode_literal(Value) ->
             <<127:8,BigL/binary,Value/binary>>
     end.
 
-%%TODO: does nothing :(
-encode_literal_wo_index(_Name, _Value) ->
-    <<>>.
+encode_literal_wo_index(Name, Value) ->
+    EncName = encode_literal(Name),
+    EncValue = encode_literal(Value),
+    <<2#01000000,EncName/binary,EncValue/binary>>.

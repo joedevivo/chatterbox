@@ -25,7 +25,7 @@ read_binary(_, #frame_header{stream_id=0}) ->
 read_binary(Bin, _H=#frame_header{length=0}) ->
     {ok, #data{data= <<>>}, Bin};
 read_binary(Bin, H=#frame_header{length=L}) ->
-    lager:info("read_binary L: ~p", [L]),
+    lager:info("read_binary L: ~p, actually: ~p", [L, byte_size(Bin)]),
     <<PayloadBin:L/binary,Rem/bits>> = Bin,
     Data = http2_padding:read_possibly_padded_payload(PayloadBin, H),
     {ok, #data{data=Data}, Rem}.
