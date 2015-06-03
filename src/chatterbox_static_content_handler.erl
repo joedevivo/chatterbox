@@ -17,13 +17,19 @@ handle(C = #connection_state{
         }, Headers, Stream = #stream_state{stream_id=StreamId}) ->
     Path = binary_to_list(proplists:get_value(<<":path">>, Headers)),
 
+    %% QueryString Hack?
+    Path2 = case string:chr(Path, $?) of
+        0 -> Path;
+        X -> string:substr(Path, 1, X-1)
+    end,
+
     %% TODO: Should have a better way of extracting root_dir (i.e. not on every request)
     StaticHandlerSettings = application:get_env(chatterbox, ?MODULE, []),
     RootDir = proplists:get_value(root_dir, StaticHandlerSettings, code:priv_dir(chatterbox)),
 
     %% TODO: Logic about "/" vs "index.html", "index.htm", etc...
     %% Directory browsing?
-    File = RootDir ++ Path,
+    File = RootDir ++ Path2,
     lager:debug("serving ~p", [File]),
     lager:info("Request Headers: ~p", [Headers]),
     {NewEncodeContext, NewStream} = case {filelib:is_file(File), filelib:is_dir(File)} of

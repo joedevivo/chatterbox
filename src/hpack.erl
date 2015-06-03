@@ -227,7 +227,7 @@ encode([{HeaderName, HeaderValue}|Tail], B, Context = #encode_context{dynamic_ta
         {literal_with_indexing, I} ->
             {encode_literal_indexed(I, HeaderValue),
              Context#encode_context{dynamic_table=headers:add(HeaderName, HeaderValue, T)}};
-        {literal_wo_indexing, X} ->
+        {literal_wo_indexing, _X} ->
             {encode_literal_wo_index(HeaderName, HeaderValue),
              Context#encode_context{dynamic_table=headers:add(HeaderName, HeaderValue, T)}}
     end,
