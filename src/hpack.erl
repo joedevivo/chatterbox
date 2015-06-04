@@ -221,8 +221,6 @@ encode([], Acc, Context) ->
 encode([{HeaderName, HeaderValue}|Tail], B, Context = #encode_context{dynamic_table=T}) ->
     {BinToAdd, NewContext} = case headers:match({HeaderName, HeaderValue}, T) of
         {indexed, I} ->
-            lager:error("Indexed: ~p ~p", [I, HeaderName]),
-            lager:error("T: ~p", [T]),
             {encode_indexed(I), Context};
         {literal_with_indexing, I} ->
             {encode_literal_indexed(I, HeaderValue),

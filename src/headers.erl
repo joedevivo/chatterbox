@@ -47,9 +47,7 @@ add(Name, Value, DT) ->
 -spec add(header_name(), header_value(), pos_integer(), dynamic_table()) -> dynamic_table().
 add(Name, Value, EntrySize, DT=#dynamic_table{table=T, size=S, max_size=MS})
     when EntrySize + S =< MS ->
-    lager:info("old table ~p", [T]),
     TPlus = lists:map(fun({N,H,V}) -> {N+1, H,V} end, T),
-    lager:info("new table ~p", [[{?DYNAMIC_TABLE_MIN_INDEX, Name, Value}|TPlus]]),
     DT#dynamic_table{size=S+EntrySize, table=[{?DYNAMIC_TABLE_MIN_INDEX, Name, Value}|TPlus]};
 add(Name, Value, EntrySize, DT=#dynamic_table{size=S, max_size=MS})
     when EntrySize + S > MS ->

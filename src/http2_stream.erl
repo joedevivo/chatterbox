@@ -84,5 +84,6 @@ recv_frame(_F, S) ->
 
 
 -spec send_frame(frame(), stream_state()) -> stream_state().
+
 send_frame(_F, S) ->
     S.

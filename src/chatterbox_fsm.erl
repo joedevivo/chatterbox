@@ -314,6 +314,7 @@ route_frame(F={H=#frame_header{stream_id=StreamId}, _Payload},
     {Headers, NewDecodeContext} = hpack:decode(HeadersBin, DecodeContext),
     %%lager:debug("Headers decoded: ~p", [Headers]),
     Stream = http2_stream:new(StreamId, {SendWindowSize, RecvWindowSize}),
+    Stream2 = http2_stream:recv_frame(F, Stream),
 
     %% Now this stream should be 'open' and because we've gotten ?END_HEADERS we can start processing it.
 
@@ -328,7 +329,7 @@ route_frame(F={H=#frame_header{stream_id=StreamId}, _Payload},
         Handler:handle(
           C#connection_state{decode_context=NewDecodeContext},
           Headers,
-          Stream),
+          Stream2),
 
     %% send it this headers frame which should transition it into the open state
     %% Add that pid to the set of streams in our state

@@ -9,7 +9,11 @@
 
 %% TODO lots about this module to make configurable. biggest one is priv_dir tho. Barfolomew
 
--spec handle(connection_state(), hpack:headers(), http2_stream:stream_state()) -> {connection_state(), http2_stream:stream_state()}.
+-spec handle(connection_state(),
+             hpack:headers(),
+             http2_stream:stream_state()) -> {
+              connection_state(),
+              http2_stream:stream_state()}.
 handle(C = #connection_state{
          socket=Socket,
          encode_context=EncodeContext,
@@ -79,15 +83,15 @@ handle(C = #connection_state{
 
 send_while_window_open(
                        S = #stream_state{
-                                         stream_id = StreamId,
-                                         send_window_size=SWS,
+                              stream_id = StreamId,
+                              send_window_size=SWS,
                               queued_frames = [F=[<<L:24,_/binary>>, X]|Frames]
                              },
                       C = #connection_state{socket={Transport,Socket}}) when SWS >= L ->
-    lager:info("Sending ~p over ~p", [byte_size(X), Transport]),
+    %%lager:info("Sending ~p over ~p", [byte_size(X), Transport]),
     Transport:send(Socket, F),
     NewSendWindow = SWS - L,
-    lager:info("Stream ~p send window now: ~p", [StreamId, NewSendWindow]),
+    %%lager:info("Stream ~p send window now: ~p", [StreamId, NewSendWindow]),
     send_while_window_open(S#stream_state{send_window_size=NewSendWindow, queued_frames=Frames}, C);
 send_while_window_open(S, _C) ->
     S.
