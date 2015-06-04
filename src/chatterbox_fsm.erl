@@ -177,7 +177,7 @@ connected(start_frame,
                               }
                 }
          ) ->
-    lager:debug("[connected] Incoming Frame"),
+    lager:debug("[connected] Waiting for next frame"),
     {_Header, _Payload} = Frame = http2_frame:read(Socket),
 
     lager:debug("[connected] [start_frame] ~p", [http2_frame:format(Frame)]),
@@ -191,7 +191,7 @@ connected(start_frame,
     %% is not yet in the State. Test it once those are implemented
     %% ahahaahahaha
     gen_fsm:send_event(self(), start_frame),
-    lager:debug("Incoming frame? ~p", [Response]),
+    %%lager:debug("Incoming frame? ~p", [Response]),
     Response.
 
 %% we're locked waiting for contiunation frames now
@@ -199,25 +199,29 @@ continuation(start_frame,
              S = #chatterbox_fsm_state{
                  connection=#connection_state{
                                socket=Socket
-                              }
+                              },
+                 continuation_stream_id = StreamId
                 }) ->
     Frame = {FH,_} = http2_frame:read(Socket),
     lager:debug("[continuation] [start_frame] ~p", [http2_frame:format(Frame)]),
 
-    Response = case FH#frame_header.type of
-                   ?CONTINUATION ->
+    Response = case {FH#frame_header.stream_id, FH#frame_header.type} of
+                   {StreamId, ?CONTINUATION} ->
                        route_frame(Frame, S);
                    _ ->
-                       go_error(?PROTOCOL_ERROR, S)
+                       go_away(?PROTOCOL_ERROR, S)
                end,
     gen_fsm:send_event(self(), start_frame),
     Response;
 continuation(_, State) ->
-    go_error(?PROTOCOL_ERROR, State).
+    go_away(?PROTOCOL_ERROR, State).
 
-closing(StateName, State) ->
-    lager:debug("[closing] ~p", [StateName]),
-    {next_state, StateName, State}.
+%% The closing state should deal with frames on the wire still, I
+%% think. But we should just close it up now.
+%% TODO: Rethink cleanup.
+closing(Message, State) ->
+    lager:debug("[closing] ~p", [Message]),
+    {stop, normal, State}.
 %% Maybe use something like this for readability later
 %% -define(SOCKET_PM, #chatterbox_fsm_state{socket=Socket}).
 
@@ -233,7 +237,7 @@ route_frame({#frame_header{length=L}, _},
                                  recv_settings=#settings{max_frame_size=MFS}
                                 }})
     when L > MFS ->
-    go_error(?FRAME_SIZE_ERROR, S);
+    go_away(?FRAME_SIZE_ERROR, S);
 
 %%TODO Data to stream 0 bad
 %% TODO Route data frames to streams. POST!
@@ -395,6 +399,10 @@ route_frame({H, _Payload}, S = #chatterbox_fsm_state{
                                   connection=#connection_state{socket=_Socket}})
     when H#frame_header.type == ?PRIORITY,
          H#frame_header.stream_id == 16#0 ->
+    go_away(?PROTOCOL_ERROR, S);
+route_frame({H, _Payload}, S = #chatterbox_fsm_state{
+                                  connection=#connection_state{socket=_Socket}})
+    when H#frame_header.type == ?PRIORITY ->
     lager:debug("Received PRIORITY Frame, but it's only a suggestion anyway..."),
     {next_state, connected, S};
 route_frame({H=#frame_header{stream_id=StreamId}, _Payload}, S = #chatterbox_fsm_state{
@@ -460,16 +468,36 @@ route_frame({H=#frame_header{stream_id=StreamId}, _Payload}, S = #chatterbox_fsm
     lager:debug("Received PUSH_PROMISE Frame for Stream ~p", [StreamId]),
     lager:error("Chatterbox doesn't support streams. Throwing this PUSH_PROMISE away"),
     {next_state, connected, S};
-route_frame({H, _Payload}, S = #chatterbox_fsm_state{connection=#connection_state{socket=_Socket}})
+
+%% The case for PING
+
+%% If not stream 0, then connection error
+route_frame({H, _Payload}, S)
+    when H#frame_header.type == ?PING,
+         H#frame_header.stream_id =/= 0 ->
+    go_away(?PROTOCOL_ERROR, S);
+%% If length != 8, FRAME_SIZE_ERROR
+route_frame({H, _Payload}, S)
+    when H#frame_header.type == ?PING,
+         H#frame_header.length =/= 8 ->
+    go_away(?FRAME_SIZE_ERROR, S);
+%% If PING && !ACK, must ACK
+route_frame({H, Ping}, S = #chatterbox_fsm_state{connection=#connection_state{socket={Transport,Socket}}})
     when H#frame_header.type == ?PING,
          ?NOT_FLAG(#frame_header.flags, ?FLAG_ACK) ->
     lager:debug("Received PING"),
+    Ack = http2_frame_ping:ack(Ping),
+    Transport:send(Socket, http2_frame:to_binary(Ack)),
     {next_state, connected, S};
 route_frame({H, _Payload}, S = #chatterbox_fsm_state{connection=#connection_state{socket=_Socket}})
     when H#frame_header.type == ?PING,
          ?IS_FLAG(H#frame_header.flags, ?FLAG_ACK) ->
     lager:debug("Received PING ACK"),
     {next_state, connected, S};
+route_frame({H=#frame_header{stream_id=0}, _Payload}, S = #chatterbox_fsm_state{connection=#connection_state{socket=_Socket}})
+    when H#frame_header.type == ?GOAWAY ->
+    lager:debug("Received GOAWAY Frame for Stream 0"),
+    go_away(?NO_ERROR, S);
 route_frame({H=#frame_header{stream_id=StreamId}, _Payload}, S = #chatterbox_fsm_state{connection=#connection_state{socket=_Socket}})
     when H#frame_header.type == ?GOAWAY ->
     lager:debug("Received GOAWAY Frame for Stream ~p", [StreamId]),
@@ -504,11 +532,10 @@ route_frame({H=#frame_header{stream_id=StreamId}, #window_update{window_size_inc
     {next_state, connected, S#chatterbox_fsm_state{streams=NewStreams}};
 
 route_frame(Frame, State) ->
-    lager:debug("OOPS! ~p", [Frame]),
-    lager:debug("OOPS! ~p", [State]),
-    %% TODO Connection Error here, since pattern matches should cover the rules
-    {next_state, connected, State}.
-
+    lager:error("Frame condition not covered by pattern match"),
+    lager:error("OOPS! ~p", [Frame]),
+    lager:error("OOPS! ~p", [State]),
+    go_away(?PROTOCOL_ERROR, State).
 
 handle_event(_E, StateName, State) ->
     {next_state, StateName, State}.
@@ -551,8 +578,8 @@ get_stream(StreamId, Streams) ->
                         Streams),
     {Stream, Leftovers}.
 
--spec go_error(error_code(), #chatterbox_fsm_state{}) -> {next_state, closing, #chatterbox_fsm_state{}}.
-go_error(ErrorCode,
+-spec go_away(error_code(), #chatterbox_fsm_state{}) -> {next_state, closing, #chatterbox_fsm_state{}}.
+go_away(ErrorCode,
          State = #chatterbox_fsm_state{
                     connection=#connection_state{
                                   socket={T,Socket}

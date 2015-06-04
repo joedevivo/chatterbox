@@ -7,7 +7,8 @@
 -export([
     format/1,
     read_binary/2,
-    to_binary/1
+    to_binary/1,
+    ack/1
     ]).
 
 -spec format(ping()) -> iodata().
@@ -25,3 +26,12 @@ read_binary(<<Data:8/binary,Rem/bits>>, #frame_header{length=8}) ->
 -spec to_binary(ping()) -> iodata().
 to_binary(#ping{opaque_data=D}) ->
     D.
+
+-spec ack(ping()) -> {frame_header(), ping()}.
+ack(Ping) ->
+    {#frame_header{
+        length = 8,
+        type = ?PING,
+        flags = ?FLAG_ACK,
+        stream_id = 0
+       }, Ping}.
