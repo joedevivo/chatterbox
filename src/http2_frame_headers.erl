@@ -43,16 +43,26 @@ is_priority(_) ->
     false.
 
 -spec to_frame(pos_integer(), [headers:header()], hpack:encode_context()) ->
-                      {binary(), hpack:encode_context()}.
+                      {{frame_header(), headers()}, hpack:encode_context()}.
 %% Maybe break this up into continuations like the data frame
 to_frame(StreamId, Headers, EncodeContext) ->
     {HeadersToSend, NewContext} = hpack:encode(Headers, EncodeContext),
     L = byte_size(HeadersToSend),
-    {[<<L:24,?HEADERS:8,?FLAG_END_HEADERS:8,0:1,StreamId:31>>,HeadersToSend],
+    {{#frame_header{
+         length=L,
+         type=?HEADERS,
+         flags=?FLAG_END_HEADERS,
+         stream_id=StreamId
+        },
+      #headers{
+         block_fragment=HeadersToSend
+        }},
+    %%{[<<L:24,?HEADERS:8,?FLAG_END_HEADERS:8,0:1,StreamId:31>>,HeadersToSend],
     NewContext}.
 
 send({Transport, Socket}, StreamId, Headers, EncodeContext) ->
-    {Bytes, NewContext} = to_frame(StreamId, Headers, EncodeContext),
+    {Frame, NewContext} = to_frame(StreamId, Headers, EncodeContext),
+    Bytes = http2_frame:to_binary(Frame),
     Transport:send(Socket, Bytes),
     NewContext.
 
