@@ -49,9 +49,6 @@ decode(<<2#1:1,_/bits>>=B, HeaderAcc, Context) ->
 %% http://http2.github.io/http2-spec/compression.html#rfc.section.6.2.1
 decode(<<2#01:2,_/bits>>=B, HeaderAcc, Context) ->
     decode_literal_header_with_indexing(B, HeaderAcc, Context);
-% this is a redundant pattern i think
-%decode(<<2#01000000:8,_/bits>>=B, HeaderAcc) ->
-%    decode_literal_nonindexed_field(B, HeaderAcc);
 
 %% First four bits are '0000' so it's a 'Literal Header Field without Indexing'
 %% http://http2.github.io/http2-spec/compression.html#rfc.section.6.2.2

@@ -37,7 +37,6 @@ start_link(Socket) ->
     gen_fsm:start_link(?MODULE, Socket, []).
 
 init(Socket) ->
-    lager:debug("Starting chatterbox_fsm: ~p",[Socket]),
     gen_fsm:send_event(self(), start),
     {ok, accept, #chatterbox_fsm_state{connection=#connection_state{socket=Socket}}}.
 
@@ -514,10 +513,9 @@ route_frame({H=#frame_header{stream_id=0}, #window_update{window_size_increment=
     when H#frame_header.type == ?WINDOW_UPDATE ->
     lager:debug("Stream 0 Window Update: ~p", [WSI]),
     {next_state, connected, S#chatterbox_fsm_state{connection=C#connection_state{send_window_size=SWS+WSI}}};
-route_frame(F={H=#frame_header{stream_id=StreamId}, #window_update{window_size_increment=WSI}},
+route_frame(F={H=#frame_header{stream_id=StreamId}, #window_update{}},
             S = #chatterbox_fsm_state{
-                   streams=Streams,
-                   connection=C=#connection_state{socket=_Socket}})
+                   streams=Streams})
     when H#frame_header.type == ?WINDOW_UPDATE ->
     lager:debug("Received WINDOW_UPDATE Frame for Stream ~p", [StreamId]),
     {StreamId, Stream} = lists:keyfind(StreamId, 1, Streams),
