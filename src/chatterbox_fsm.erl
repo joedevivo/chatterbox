@@ -281,6 +281,7 @@ route_frame(F={H=#frame_header{
 route_frame({H=#frame_header{stream_id=StreamId}, _Payload}=Frame,
             S = #chatterbox_fsm_state{
                    connection=#connection_state{
+                                 socket=Socket,
                                  recv_settings=#settings{initial_window_size=RecvWindowSize},
                                  send_settings=#settings{initial_window_size=SendWindowSize}
                                 },
@@ -289,7 +290,7 @@ route_frame({H=#frame_header{stream_id=StreamId}, _Payload}=Frame,
   when H#frame_header.type == ?HEADERS,
        ?NOT_FLAG(H#frame_header.flags, ?FLAG_END_HEADERS) ->
     lager:debug("Received HEADERS Frame for Stream ~p, no END in sight", [StreamId]),
-    NewStream = http2_stream:new(StreamId, {SendWindowSize, RecvWindowSize}),
+    NewStream = http2_stream:new(StreamId, {SendWindowSize, RecvWindowSize}, Socket),
     NewStream1 = http2_stream:recv_frame(Frame, NewStream),
     {next_state, continuation, S#chatterbox_fsm_state{
                                  streams = [{StreamId, NewStream1}|Streams],
@@ -302,7 +303,8 @@ route_frame(F={H=#frame_header{stream_id=StreamId}, _Payload},
                connection=C=#connection_state{
                              decode_context=DecodeContext,
                              recv_settings=#settings{initial_window_size=RecvWindowSize},
-                             send_settings=#settings{initial_window_size=SendWindowSize}
+                             send_settings=#settings{initial_window_size=SendWindowSize},
+                             socket=Socket
                              },
                streams = Streams,
                content_handler = Handler
@@ -313,7 +315,7 @@ route_frame(F={H=#frame_header{stream_id=StreamId}, _Payload},
     HeadersBin = http2_frame_headers:from_frames([F]),
     {Headers, NewDecodeContext} = hpack:decode(HeadersBin, DecodeContext),
     %%lager:debug("Headers decoded: ~p", [Headers]),
-    Stream = http2_stream:new(StreamId, {SendWindowSize, RecvWindowSize}),
+    Stream = http2_stream:new(StreamId, {SendWindowSize, RecvWindowSize}, Socket),
     Stream2 = http2_stream:recv_frame(F, Stream),
 
     %% Now this stream should be 'open' and because we've gotten ?END_HEADERS we can start processing it.
@@ -324,8 +326,6 @@ route_frame(F={H=#frame_header{stream_id=StreamId}, _Payload},
     %% TODO: Make this module name configurable
     %% Make content_handler a behavior with handle/3
     {NewConnectionState, NewStreamState} =
-
-
         Handler:handle(
           C#connection_state{decode_context=NewDecodeContext},
           Headers,
@@ -514,20 +514,21 @@ route_frame({H=#frame_header{stream_id=0}, #window_update{window_size_increment=
     when H#frame_header.type == ?WINDOW_UPDATE ->
     lager:debug("Stream 0 Window Update: ~p", [WSI]),
     {next_state, connected, S#chatterbox_fsm_state{connection=C#connection_state{send_window_size=SWS+WSI}}};
-route_frame({H=#frame_header{stream_id=StreamId}, #window_update{window_size_increment=WSI}},
+route_frame(F={H=#frame_header{stream_id=StreamId}, #window_update{window_size_increment=WSI}},
             S = #chatterbox_fsm_state{
                    streams=Streams,
                    connection=C=#connection_state{socket=_Socket}})
     when H#frame_header.type == ?WINDOW_UPDATE ->
     lager:debug("Received WINDOW_UPDATE Frame for Stream ~p", [StreamId]),
     {StreamId, Stream} = lists:keyfind(StreamId, 1, Streams),
-    lager:info("Stream(~p): ~p", [StreamId, Stream]),
-    lager:info("Streams: ~p", [Streams]),
+    %lager:info("Stream(~p): ~p", [StreamId, Stream]),
+    %lager:info("Streams: ~p", [Streams]),
     NewStreamsTail = lists:keydelete(StreamId, 1, Streams),
-    NewSendWindow = WSI+Stream#stream_state.send_window_size,
-    lager:info("Stream ~p send window now: ~p", [StreamId, NewSendWindow]),
+    %NewSendWindow = WSI+Stream#stream_state.send_window_size,
 
-    NStream = chatterbox_static_content_handler:send_while_window_open(Stream#stream_state{send_window_size=NewSendWindow}, C),
+
+    NStream = http2_stream:recv_frame(F, Stream),
+    %%NStream = chatterbox_static_content_handler:send_while_window_open(Stream#stream_state{send_window_size=NewSendWindow}, C),
     %%NewStreams = [{StreamId, Stream#stream_state{send_window_size=NewSendWindow}}|NewStreamsTail],
     NewStreams = [{StreamId, NStream}|NewStreamsTail],
     {next_state, connected, S#chatterbox_fsm_state{streams=NewStreams}};

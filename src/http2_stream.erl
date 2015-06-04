@@ -2,7 +2,7 @@
 
 -include("http2.hrl").
 
--export([recv_frame/2, send_frame/2, new/2]).
+-export([recv_frame/2, send_frame/2, new/3]).
 
 %% Yodawg_fsm. Abstracted here for readability and possible reuse on
 %% the client side. !NO! This module will need understanding of the
@@ -18,12 +18,13 @@
 %% were idle are considered closed. Where we'll account for this? who
 %% knows? probably in the chatterbox_fsm
 
--spec new(stream_id(), {pos_integer(), pos_integer()}) -> stream_state().
-new(StreamId, {SendWindowSize, RecvWindowSize}) ->
+-spec new(stream_id(), {pos_integer(), pos_integer()}, {gen_tcp|ssl, port()}) -> stream_state().
+new(StreamId, {SendWindowSize, RecvWindowSize}, Socket) ->
     #stream_state{
        stream_id=StreamId,
        send_window_size = SendWindowSize,
-       recv_window_size = RecvWindowSize
+       recv_window_size = RecvWindowSize,
+       socket = Socket
       }.
 
 -spec recv_frame(frame(), stream_state()) -> stream_state().
@@ -79,11 +80,67 @@ recv_frame(F={_FH=#frame_header{
       recv_window_size=RWS-L,
       incoming_frames=IF ++ [F]
      };
+%% needs a WINDOW_UPDATE clause badly
+recv_frame({#frame_header{
+               type=?WINDOW_UPDATE,
+               stream_id=StreamId
+              },
+            #window_update{
+               window_size_increment=WSI
+              }
+           },State=#stream_state{
+                      stream_id=StreamId,
+                      send_window_size=SWS,
+                      queued_frames=QF
+                     }) ->
+    NewSendWindow = WSI + SWS,
+    NewState = State#stream_state{
+                 send_window_size=NewSendWindow,
+                 queued_frames=[]
+                },
+    lager:info("Stream ~p send window now: ~p", [StreamId, NewSendWindow]),
+    lists:foldl(
+      fun(Frame, Stream) -> send_frame(Frame, Stream) end,
+      NewState,
+      QF);
 recv_frame(_F, S) ->
     S.
 
 
 -spec send_frame(frame(), stream_state()) -> stream_state().
-
+send_frame(F={#frame_header{
+                 type=?HEADERS
+                },_},
+           State = #stream_state{
+                      socket={Transport,Socket}
+                     }) ->
+    Transport:send(Socket, http2_frame:to_binary(F)),
+    State;
+send_frame(F={#frame_header{
+                 length=L,
+                 type=?DATA
+                },_Data},
+           State = #stream_state{
+                      send_window_size=SWS,
+                      socket={Transport,Socket}
+                     })
+  when SWS >= L ->
+    Transport:send(Socket, http2_frame:to_binary(F)),
+    NewSendWindow = SWS - L,
+    State#stream_state{
+       send_window_size=NewSendWindow
+      };
+send_frame(F={#frame_header{
+                 length=L,
+                 type=?DATA
+                },_Data},
+           State = #stream_state{
+                      send_window_size=SWS,
+                      queued_frames = QF
+                     })
+  when SWS < L ->
+    State#stream_state{
+       queued_frames=QF ++ [F]
+      };
 send_frame(_F, S) ->
     S.

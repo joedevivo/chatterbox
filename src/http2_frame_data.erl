@@ -34,12 +34,23 @@ read_binary(Bin, H=#frame_header{length=L}) ->
 to_frames(StreamId, Data, S=#settings{max_frame_size=MFS}) ->
     L = byte_size(Data),
     case L >= MFS of
-        %%TODO this is hard coded, pull from #send settings max_frame size, and only send enough until window size. HOW!?
         false ->
-            [[<<L:24,?DATA:8,?FLAG_END_STREAM:8,0:1,StreamId:31>>,Data]];
+            [{#frame_header{
+                 length=L,
+                 type=?DATA,
+                 flags=?FLAG_END_STREAM,
+                 stream_id=StreamId
+                }, #data{data=Data}}];
+            %%[[<<L:24,?DATA:8,?FLAG_END_STREAM:8,0:1,StreamId:31>>,Data]];
         true ->
             <<ToSend:MFS/binary,Rest/binary>> = Data,
-            [[<<MFS:24,?DATA:8,0:8,0:1,StreamId:31>>,ToSend] | to_frames(StreamId, Rest, S)]
+            [{#frame_header{
+                 length=MFS,
+                 type=?DATA,
+                 stream_id=StreamId
+                },
+              #data{data=ToSend}} | to_frames(StreamId, Rest, S)]
+            %%[[<<MFS:24,?DATA:8,0:8,0:1,StreamId:31>>,ToSend] | to_frames(StreamId, Rest, S)]
     end.
 
 %% TODO for POC response, Hardcoded
