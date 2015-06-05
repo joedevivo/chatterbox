@@ -1,10 +1,10 @@
--module(chatterbox_fsm).
+-module(http2_connection).
 
 -behaviour(gen_fsm).
 
 -include("http2.hrl").
 
--record(chatterbox_fsm_state, {
+-record(http2_connection_state, {
           connection= #connection_state{} :: connection_state(),
           frame_backlog :: queue:queue(frame()),
           next_available_stream_id = 2 :: stream_id(),
@@ -37,7 +37,7 @@ start_link(Socket) ->
 
 init(Socket) ->
     gen_fsm:send_event(self(), start),
-    {ok, accept, #chatterbox_fsm_state{
+    {ok, accept, #http2_connection_state{
                     connection=#connection_state{
                                   socket=Socket
                                  }
@@ -45,7 +45,7 @@ init(Socket) ->
     }.
 
 %% accepting connection state:
-accept(start, S=#chatterbox_fsm_state{
+accept(start, S=#http2_connection_state{
                    connection=#connection_state{
                                  socket={Transport,ListenSocket}
                                 }
@@ -75,14 +75,14 @@ accept(start, S=#chatterbox_fsm_state{
     chatterbox_sup:start_socket(),
 
     {next_state, settings_handshake,
-     S#chatterbox_fsm_state{connection=#connection_state{socket={Transport,Socket}}}}.
+     S#http2_connection_state{connection=#connection_state{socket={Transport,Socket}}}}.
 
 %% From Section 6.5 of the HTTP/2 Specification
 %% A SETTINGS frame MUST be sent by both endpoints at the start of a
 %% connection, and MAY be sent at any other time by either endpoint
 %% over the lifetime of the connection. Implementations MUST support
 %% all of the parameters defined by this specification.
-settings_handshake({start_frame, Bin}, S = #chatterbox_fsm_state{
+settings_handshake({start_frame, Bin}, S = #http2_connection_state{
                                               connection=#connection_state{
                                                             socket=Socket,
                                                             recv_settings=ServerSettings
@@ -116,7 +116,7 @@ settings_handshake({start_frame, Bin}, S = #chatterbox_fsm_state{
     %% if something else comes in, let's store them in a backlog until
     %% we can deal with them
 
-    NewState = S#chatterbox_fsm_state{
+    NewState = S#http2_connection_state{
                  frame_backlog=InitialOtherFrames
                 },
 
@@ -129,8 +129,8 @@ settings_handshake({start_frame, Bin}, S = #chatterbox_fsm_state{
 -spec settings_handshake_loop(
         {ReceivedAck :: boolean(), ReceivedClientSettings :: boolean()},
         [{frame_header(), settings()}],
-        #chatterbox_fsm_state{}) ->
-                      {next_state, connected, #chatterbox_fsm_state{}}.
+        #http2_connection_state{}) ->
+                      {next_state, connected, #http2_connection_state{}}.
 
 %% We're done, transition to connected and start processing the
 %% backlog
@@ -140,7 +140,7 @@ settings_handshake_loop({true, true}, [], State) ->
 %% We're done with anything we received on the initial packet, read
 %% another, and put it on the backlog. We don't really need to do
 %% this, except it lets us only write the conditional logic once
-settings_handshake_loop(Done, [], State=#chatterbox_fsm_state{
+settings_handshake_loop(Done, [], State=#http2_connection_state{
                                     connection=#connection_state{
                                                   socket=Socket
                                                  },
@@ -154,7 +154,7 @@ settings_handshake_loop(Done, [], State=#chatterbox_fsm_state{
             settings_handshake_loop(Done, [Frame], State);
         _ ->
             %% loop right back into this state after putting one on the backlog
-            settings_handshake_loop(Done, [], State#chatterbox_fsm_state{
+            settings_handshake_loop(Done, [], State#http2_connection_state{
                                                 frame_backlog=queue:in(Frame, FB)
                                                })
     end;
@@ -167,20 +167,20 @@ settings_handshake_loop({_ReceivedAck, ReceivedClientSettings},
                             State);
 settings_handshake_loop({ReceivedAck, _ReceivedClientSettings},
                        [{_FH, FPayload}|SettingsFramesTail],
-                       State=#chatterbox_fsm_state{connection=C}) ->
+                       State=#http2_connection_state{connection=C}) ->
     ClientSettings = http2_frame_settings:overlay(C#connection_state.send_settings, FPayload),
     http2_frame_settings:ack(C#connection_state.socket),
 
     settings_handshake_loop({ReceivedAck, true},
                             SettingsFramesTail,
-                            State#chatterbox_fsm_state{
+                            State#http2_connection_state{
                               connection=C#connection_state{
                                            send_settings=ClientSettings
                                           }
                               }).
 
 %% Process the backlog during the handshake until there's none
-connected(backlog, S = #chatterbox_fsm_state{frame_backlog=FB}) ->
+connected(backlog, S = #http2_connection_state{frame_backlog=FB}) ->
     lager:debug("[connected] Processing backlog, length: ~p", [queue:len(FB)]),
     case queue:out(FB) of
         %% Once the backlog is empty, start processing frames as they come in
@@ -189,12 +189,12 @@ connected(backlog, S = #chatterbox_fsm_state{frame_backlog=FB}) ->
             {next_state, connected, S};
         %% After settings handshake, process any backlogged frames
         {{value, F}, T} ->
-            Response = route_frame(F, S#chatterbox_fsm_state{frame_backlog=T}),
+            Response = route_frame(F, S#http2_connection_state{frame_backlog=T}),
             gen_fsm:send_event(self(), backlog),
             Response
     end;
 connected(start_frame,
-          S = #chatterbox_fsm_state{
+          S = #http2_connection_state{
                  connection=#connection_state{
                                socket=Socket
                               }
@@ -214,7 +214,7 @@ connected(start_frame,
 %% with no ?END_HEADERS flag set, we're locked waiting for contiunation
 %% frames on the same stream to preserve the decoding context state
 continuation(start_frame,
-             S = #chatterbox_fsm_state{
+             S = #http2_connection_state{
                  connection=#connection_state{
                                socket=Socket
                               },
@@ -241,16 +241,16 @@ closing(Message, State) ->
     lager:debug("[closing] ~p", [Message]),
     {stop, normal, State}.
 %% Maybe use something like this for readability later
-%% -define(SOCKET_PM, #chatterbox_fsm_state{socket=Socket}).
+%% -define(SOCKET_PM, #http2_connection_state{socket=Socket}).
 
 %% route_frame's job needs to be "now that we've read a frame off the
 %% wire, do connection based things to it and/or forward it to the
 %% http2 stream processor (http2_stream:recv_frame)
--spec route_frame(frame(), #chatterbox_fsm_state{}) ->
-    {next_state, connected, #chatterbox_fsm_state{}}.
+-spec route_frame(frame(), #http2_connection_state{}) ->
+    {next_state, connected, #http2_connection_state{}}.
 %% Bad Length of frame, exceedes maximum allowed size
 route_frame({#frame_header{length=L}, _},
-            S = #chatterbox_fsm_state{
+            S = #http2_connection_state{
                    connection=#connection_state{
                                  recv_settings=#settings{max_frame_size=MFS}
                                 }})
@@ -262,7 +262,7 @@ route_frame({#frame_header{length=L}, _},
 route_frame(F={H=#frame_header{
                   length=L,
                   stream_id=StreamId}, _Payload},
-            S = #chatterbox_fsm_state{
+            S = #http2_connection_state{
                    streams=Streams,
                    connection=C=#connection_state{
                                    socket=_Socket,
@@ -280,7 +280,7 @@ route_frame(F={H=#frame_header{
     %% Decrement stream recv_window L happens in http2_stream:recv_frame
     FinalStream = http2_stream:recv_frame(F, Stream),
 
-    {next_state, connected, S#chatterbox_fsm_state{
+    {next_state, connected, S#http2_connection_state{
                               streams=[{StreamId,FinalStream}|NewStreamsTail],
                               connection=C#connection_state{
                                            recv_window_size=NewRWS
@@ -297,7 +297,7 @@ route_frame(F={H=#frame_header{
 
 %% HEADERS frame with no END_HEADERS flag, expect continuations
 route_frame({H=#frame_header{stream_id=StreamId}, _Payload}=Frame,
-            S = #chatterbox_fsm_state{
+            S = #http2_connection_state{
                    connection=#connection_state{
                                  socket=Socket,
                                  recv_settings=#settings{initial_window_size=RecvWindowSize},
@@ -310,14 +310,14 @@ route_frame({H=#frame_header{stream_id=StreamId}, _Payload}=Frame,
     lager:debug("Received HEADERS Frame for Stream ~p, no END in sight", [StreamId]),
     NewStream = http2_stream:new(StreamId, {SendWindowSize, RecvWindowSize}, Socket),
     NewStream1 = http2_stream:recv_frame(Frame, NewStream),
-    {next_state, continuation, S#chatterbox_fsm_state{
+    {next_state, continuation, S#http2_connection_state{
                                  streams = [{StreamId, NewStream1}|Streams],
                                  continuation_stream_id = StreamId
                                 }
     };
 %% HEADER frame with END_HEADERS flag
 route_frame(F={H=#frame_header{stream_id=StreamId}, _Payload},
-        S = #chatterbox_fsm_state{
+        S = #http2_connection_state{
                connection=C=#connection_state{
                              decode_context=DecodeContext,
                              recv_settings=#settings{initial_window_size=RecvWindowSize},
@@ -351,14 +351,14 @@ route_frame(F={H=#frame_header{stream_id=StreamId}, _Payload},
 
     %% send it this headers frame which should transition it into the open state
     %% Add that pid to the set of streams in our state
-    {next_state, connected, S#chatterbox_fsm_state{
+    {next_state, connected, S#http2_connection_state{
                               connection=NewConnectionState,
                               streams = [{StreamId, NewStreamState}|Streams]
                                            }
                              };
 %% Might as well do continuations here since they're related code:
 route_frame(F={H=#frame_header{stream_id=StreamId}, _Payload},
-            S = #chatterbox_fsm_state{
+            S = #http2_connection_state{
                    connection=#connection_state{
                                  socket=_Socket
                                 },
@@ -375,12 +375,12 @@ route_frame(F={H=#frame_header{stream_id=StreamId}, _Payload},
     %% TODO: NewStreams = replace old stream
     NewStreams = [{StreamId,NewStream}|NewStreamsTail],
 
-    {next_state, continuation, S#chatterbox_fsm_state{
+    {next_state, continuation, S#http2_connection_state{
                               streams = NewStreams
                              }};
 
 route_frame(F={H=#frame_header{stream_id=StreamId}, _Payload},
-            S = #chatterbox_fsm_state{
+            S = #http2_connection_state{
                    connection=C=#connection_state{
                                    decode_context=DecodeContext,
                                    socket=_Socket
@@ -409,29 +409,29 @@ route_frame(F={H=#frame_header{stream_id=StreamId}, _Payload},
 
     NewStreams = [{StreamId,NewStreamState}|NewStreamsTail],
 
-    {next_state, connected, S#chatterbox_fsm_state{
+    {next_state, connected, S#http2_connection_state{
                               connection = NewConnectionState,
                               streams = NewStreams
                              }};
 
-route_frame({H, _Payload}, S = #chatterbox_fsm_state{
+route_frame({H, _Payload}, S = #http2_connection_state{
                                   connection=#connection_state{socket=_Socket}})
     when H#frame_header.type == ?PRIORITY,
          H#frame_header.stream_id == 16#0 ->
     go_away(?PROTOCOL_ERROR, S);
-route_frame({H, _Payload}, S = #chatterbox_fsm_state{
+route_frame({H, _Payload}, S = #http2_connection_state{
                                   connection=#connection_state{socket=_Socket}})
     when H#frame_header.type == ?PRIORITY ->
     lager:debug("Received PRIORITY Frame, but it's only a suggestion anyway..."),
     {next_state, connected, S};
-route_frame({H=#frame_header{stream_id=StreamId}, _Payload}, S = #chatterbox_fsm_state{
+route_frame({H=#frame_header{stream_id=StreamId}, _Payload}, S = #http2_connection_state{
                                                                     connection=#connection_state{socket=_Socket}})
     when H#frame_header.type == ?RST_STREAM ->
     lager:debug("Received RST_STREAM Frame for Stream ~p", [StreamId]),
     lager:error("Chatterbox doesn't support streams. Throwing this RST_STREAM away"),
     {next_state, connected, S};
 %% Got a settings frame, need to ACK
-route_frame({H, Payload}, S = #chatterbox_fsm_state{
+route_frame({H, Payload}, S = #http2_connection_state{
                                  connection=C=#connection_state{
                                                  socket=Socket,
                                                  send_settings=SS=#settings{
@@ -468,7 +468,7 @@ route_frame({H, Payload}, S = #chatterbox_fsm_state{
                            end, Streams),
 
     http2_frame_settings:ack(Socket),
-    {next_state, connected, S#chatterbox_fsm_state{
+    {next_state, connected, S#http2_connection_state{
                               connection=C#connection_state{
                                            send_settings=NewSendSettings
                                           },
@@ -476,13 +476,13 @@ route_frame({H, Payload}, S = #chatterbox_fsm_state{
                           }
     };
 %% Got settings ACK
-route_frame({H, _Payload}, S = #chatterbox_fsm_state{
+route_frame({H, _Payload}, S = #http2_connection_state{
                                   connection=#connection_state{socket=_Socket}})
     when H#frame_header.type == ?SETTINGS,
          ?IS_FLAG(H#frame_header.flags, ?FLAG_ACK) ->
     lager:debug("Received SETTINGS ACK"),
     {next_state, connected, S};
-route_frame({H=#frame_header{stream_id=StreamId}, _Payload}, S = #chatterbox_fsm_state{connection=#connection_state{socket=_Socket}})
+route_frame({H=#frame_header{stream_id=StreamId}, _Payload}, S = #http2_connection_state{connection=#connection_state{socket=_Socket}})
     when H#frame_header.type == ?PUSH_PROMISE ->
     lager:debug("Received PUSH_PROMISE Frame for Stream ~p", [StreamId]),
     lager:error("Chatterbox doesn't support streams. Throwing this PUSH_PROMISE away"),
@@ -501,29 +501,29 @@ route_frame({H, _Payload}, S)
          H#frame_header.length =/= 8 ->
     go_away(?FRAME_SIZE_ERROR, S);
 %% If PING && !ACK, must ACK
-route_frame({H, Ping}, S = #chatterbox_fsm_state{connection=#connection_state{socket={Transport,Socket}}})
+route_frame({H, Ping}, S = #http2_connection_state{connection=#connection_state{socket={Transport,Socket}}})
     when H#frame_header.type == ?PING,
          ?NOT_FLAG(#frame_header.flags, ?FLAG_ACK) ->
     lager:debug("Received PING"),
     Ack = http2_frame_ping:ack(Ping),
     Transport:send(Socket, http2_frame:to_binary(Ack)),
     {next_state, connected, S};
-route_frame({H, _Payload}, S = #chatterbox_fsm_state{connection=#connection_state{socket=_Socket}})
+route_frame({H, _Payload}, S = #http2_connection_state{connection=#connection_state{socket=_Socket}})
     when H#frame_header.type == ?PING,
          ?IS_FLAG(H#frame_header.flags, ?FLAG_ACK) ->
     lager:debug("Received PING ACK"),
     {next_state, connected, S};
-route_frame({H=#frame_header{stream_id=0}, _Payload}, S = #chatterbox_fsm_state{connection=#connection_state{socket=_Socket}})
+route_frame({H=#frame_header{stream_id=0}, _Payload}, S = #http2_connection_state{connection=#connection_state{socket=_Socket}})
     when H#frame_header.type == ?GOAWAY ->
     lager:debug("Received GOAWAY Frame for Stream 0"),
     go_away(?NO_ERROR, S);
-route_frame({H=#frame_header{stream_id=StreamId}, _Payload}, S = #chatterbox_fsm_state{connection=#connection_state{socket=_Socket}})
+route_frame({H=#frame_header{stream_id=StreamId}, _Payload}, S = #http2_connection_state{connection=#connection_state{socket=_Socket}})
     when H#frame_header.type == ?GOAWAY ->
     lager:debug("Received GOAWAY Frame for Stream ~p", [StreamId]),
     lager:error("Chatterbox doesn't support streams. Throwing this GOAWAY away"),
     {next_state, connected, S};
 route_frame({H=#frame_header{stream_id=0}, #window_update{window_size_increment=WSI}},
-            S = #chatterbox_fsm_state{
+            S = #http2_connection_state{
                    connection=C=#connection_state{
                                  socket=_Socket,
                                  send_window_size=SWS
@@ -531,9 +531,9 @@ route_frame({H=#frame_header{stream_id=0}, #window_update{window_size_increment=
                   })
     when H#frame_header.type == ?WINDOW_UPDATE ->
     lager:debug("Stream 0 Window Update: ~p", [WSI]),
-    {next_state, connected, S#chatterbox_fsm_state{connection=C#connection_state{send_window_size=SWS+WSI}}};
+    {next_state, connected, S#http2_connection_state{connection=C#connection_state{send_window_size=SWS+WSI}}};
 route_frame(F={H=#frame_header{stream_id=StreamId}, #window_update{}},
-            S = #chatterbox_fsm_state{
+            S = #http2_connection_state{
                    streams=Streams})
     when H#frame_header.type == ?WINDOW_UPDATE ->
     lager:debug("Received WINDOW_UPDATE Frame for Stream ~p", [StreamId]),
@@ -548,7 +548,7 @@ route_frame(F={H=#frame_header{stream_id=StreamId}, #window_update{}},
     %%NStream = chatterbox_static_content_handler:send_while_window_open(Stream#stream_state{send_window_size=NewSendWindow}, C),
     %%NewStreams = [{StreamId, Stream#stream_state{send_window_size=NewSendWindow}}|NewStreamsTail],
     NewStreams = [{StreamId, NStream}|NewStreamsTail],
-    {next_state, connected, S#chatterbox_fsm_state{streams=NewStreams}};
+    {next_state, connected, S#http2_connection_state{streams=NewStreams}};
 
 route_frame(Frame, State) ->
     lager:error("Frame condition not covered by pattern match"),
@@ -597,9 +597,9 @@ get_stream(StreamId, Streams) ->
                         Streams),
     {Stream, Leftovers}.
 
--spec go_away(error_code(), #chatterbox_fsm_state{}) -> {next_state, closing, #chatterbox_fsm_state{}}.
+-spec go_away(error_code(), #http2_connection_state{}) -> {next_state, closing, #http2_connection_state{}}.
 go_away(ErrorCode,
-         State = #chatterbox_fsm_state{
+         State = #http2_connection_state{
                     connection=#connection_state{
                                   socket={T,Socket}
                                  },

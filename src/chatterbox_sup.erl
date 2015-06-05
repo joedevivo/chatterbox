@@ -37,7 +37,7 @@ init([]) ->
     {ok, ListenSocket} = Transport:listen(Port, Options),
     Restart = {simple_one_for_one, 60, 3600},
     Children = [{socket,
-                {chatterbox_fsm, start_link, [{Transport, ListenSocket}]}, % pass the socket!
+                {http2_connection, start_link, [{Transport, ListenSocket}]}, % pass the socket!
                 temporary, 1000, worker, [chatterbox_fsm]}],
     {ok, {Restart, Children}}.
 
