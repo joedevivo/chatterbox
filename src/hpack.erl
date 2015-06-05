@@ -24,6 +24,8 @@
     }).
 -type encode_context() :: #encode_context{}.
 
+-export_type([decode_context/0,encode_context/0]).
+
 -spec new_encode_context() -> encode_context().
 new_encode_context() -> #encode_context{}.
 
@@ -145,11 +147,13 @@ decode_literal_header_never_indexed(<<2#0001:4,Index:4,B1/bits>>, Acc,
     {Name,_}= headers:lookup(Index, T),
     decode(B2, Acc ++ [{Name, Str}], Context).
 
-decode_dynamic_table_size_update(<<2#001:3,2#11111:5,Bin/binary>>, Acc, Context) ->
+decode_dynamic_table_size_update(<<2#001:3,2#11111:5,Bin/binary>>, Acc,
+    Context = #decode_context{dynamic_table=T}) ->
     {NewSize, Rem} = decode_integer(Bin,5),
-    decode(Rem, Acc, headers:resize(NewSize, Context));
-decode_dynamic_table_size_update(<<2#001:3,NewSize:5,Bin/binary>>, Acc, Context) ->
-    decode(Bin, Acc, headers:resize(NewSize, Context)).
+    decode(Rem, Acc, Context#decode_context{dynamic_table=headers:resize(NewSize, T)});
+decode_dynamic_table_size_update(<<2#001:3,NewSize:5,Bin/binary>>, Acc,
+    Context = #decode_context{dynamic_table=T}) ->
+    decode(Bin, Acc, Context#decode_context{dynamic_table=headers:resize(NewSize, T)}).
 
 get_literal(<<>>) ->
     {<<>>, <<>>};
@@ -171,6 +175,10 @@ get_literal(<<Huff:1,Length:7,Bin/binary>>) ->
 %| 0 | 0 | 0 | 0 | 1 | 0 | 1 | 0 |  10<128, encode(10), done
 %+---+---+---+---+---+---+---+---+
 
+%% TODO: This function should have the Bin include the prefix bits,
+%% and if it's less than 1 bsl Prefix -1, that's just the number,
+%% also, remeber the O byte that follows when the interger we want ==
+%% prefix bits
 decode_integer(Bin, Prefix) ->
     I = 1 bsl Prefix - 1,
     {I2, Rem} = decode_integer(Bin, 0, 0),
@@ -227,14 +235,6 @@ encode([{HeaderName, HeaderValue}|Tail], B, Context = #encode_context{dynamic_ta
              Context#encode_context{dynamic_table=headers:add(HeaderName, HeaderValue, T)}}
     end,
     NewB = <<B/binary,BinToAdd/binary>>,
-
-    %NewB = try <<B/binary,BinToAdd/binary>> of
-    %    B4 -> B4
-    %catch
-    %    _:_ ->
-    %        lager:error("BinToAdd ~p", [BinToAdd])
-    %end,
-
     encode(Tail, NewB, NewContext).
 
 encode_indexed(I) when I < 63 ->
@@ -252,14 +252,8 @@ encode_literal_indexed(I, Value) ->
     <<2#01:2,Index/bits,BinToAdd/binary>>.
 
 encode_literal(Value) ->
-    L = size(Value),
-    case L < 127 of
-        true ->
-            <<2#0:1,L:7,Value/binary>>;
-        false ->
-            {_,BigL} = encode_integer(L, 7),
-            <<127:8,BigL/binary,Value/binary>>
-    end.
+    L = encode_integer(size(Value),7),
+    <<2#0:1,L/bits,Value/binary>>.
 
 encode_literal_wo_index(Name, Value) ->
     EncName = encode_literal(Name),

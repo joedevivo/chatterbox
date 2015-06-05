@@ -156,6 +156,7 @@
                  | settings() | {settings, [proplists:property()]}
                  | priority()
                  | settings()
+                 | rst_stream()
                  | push_promise()
                  | ping()
                  | goaway()
@@ -166,15 +167,15 @@
 
 
 -type transport() :: gen_tcp | ssl.
--type socket() :: {transport(), port()}.
+-type socket() :: {gen_tcp, gen_tcp:socket()} | {ssl, ssl:sslsocket()}.
 
 -define(PREAMBLE, "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n").
 
 -define(DEFAULT_INITIAL_WINDOW_SIZE, 65535).
 
 -record(connection_state, {
-          socket = {undefined, undefined} :: {gen_tcp | ssl, port()},
-          send_settings = #settings{} :: settings(),
+          socket = {undefined, undefined} :: socket(),
+           send_settings = #settings{} :: settings(),
           recv_settings = #settings{} :: settings(),
           send_window_size = ?DEFAULT_INITIAL_WINDOW_SIZE :: integer(),
           recv_window_size = ?DEFAULT_INITIAL_WINDOW_SIZE :: integer(),
@@ -183,7 +184,6 @@
 }).
 
 -type connection_state() :: #connection_state{}.
-
 
 -type stream_state_name() :: 'idle'
                            | 'open'
@@ -200,7 +200,7 @@
           recv_window_size = ?DEFAULT_INITIAL_WINDOW_SIZE :: integer(),
           queued_frames = [] :: [frame()],
           incoming_frames = [] :: [frame()],
-          socket = {undefined, undefined} :: {gen_tcp | ssl, port()}
+          socket = {undefined, undefined} :: socket()
 }).
 
 -type stream_state() :: #stream_state{}.

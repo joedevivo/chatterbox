@@ -520,7 +520,8 @@ encode(<<252:8,T/binary>>, Acc) -> encode(T, << 16#7ffffee:27,Acc/binary>>);
 encode(<<253:8,T/binary>>, Acc) -> encode(T, << 16#7ffffef:27,Acc/binary>>);
 encode(<<254:8,T/binary>>, Acc) -> encode(T, << 16#7fffff0:27,Acc/binary>>);
 encode(<<255:8,T/binary>>, Acc) -> encode(T, << 16#3ffffee:26,Acc/binary>>);
-encode(<<256:8,T/binary>>, Acc) -> encode(T, <<16#3fffffff:30,Acc/binary>>);
+%%TODO: This "256" EOS Behavior. I really need to dig into it.
+encode(<<256:9,T/binary>>, Acc) -> encode(T, <<16#3fffffff:30,Acc/binary>>);
 encode(<<>>, Acc) when bit_size(Acc) < 8 ->
     Padding = 8 rem bit_size(Acc),
     encode(<<>>, Acc, Padding);
@@ -530,7 +531,3 @@ encode(<<>>, Acc) ->
 encode(<<>>, Acc, Padding) ->
     Bits = round(math:pow(2,Padding) - 1),
     <<Acc/bits,Bits:Padding>>.
-
-
-
-

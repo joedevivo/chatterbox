@@ -59,7 +59,7 @@ droplast(DT=#dynamic_table{table=T, size=S}) ->
     [Last|NewTR] = lists:reverse(T),
     DT#dynamic_table{size=S-entry_size(Last), table=lists:reverse(NewTR)}.
 
--spec lookup(pos_integer(), dynamic_table()) -> header().
+-spec lookup(pos_integer(), dynamic_table()) -> header() | undefined.
 lookup(1 , _) -> {<<":authority">>, <<>>};
 lookup(2 , _) -> {<<":method">>, <<"GET">>};
 lookup(3 , _) -> {<<":method">>, <<"POST">>};
@@ -140,7 +140,7 @@ resize(NewSize, DT) ->
 -spec table_size(dynamic_table()) -> pos_integer().
 table_size(#dynamic_table{size=S}) -> S.
 
--spec match(header(), dynamic_table()) -> {atom(), pos_integer()}.
+-spec match(header(), dynamic_table()) -> {atom(), pos_integer()|undefined}.
 match({<<":authority">>, <<>>}, _) ->                     {indexed, 1 };
 match({<<":method">>, <<"GET">>}, _) ->                   {indexed, 2 };
 match({<<":method">>, <<"POST">>}, _) ->                  {indexed, 3 };
@@ -221,7 +221,7 @@ match({Name, Value}, #dynamic_table{table=T}) ->
             {literal_wo_indexing, undefined}
     end.
 
--spec static_match(header_name()) -> pos_integer().
+-spec static_match(header_name()) -> pos_integer() | undefined.
 static_match(<<":authority">>) ->                      1 ;
 static_match(<<":method">>) ->                         2 ;
 static_match(<<":path">>) ->                           4 ;

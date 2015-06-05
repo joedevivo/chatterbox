@@ -50,7 +50,7 @@ start_link() ->
 
 %% send_binary/2 is the lowest level API. It just puts bits on the
 %% wire
--spec send_binary(pid(), binary()) -> ok.
+-spec send_binary(pid(), iodata()) -> ok.
 send_binary(Pid, Binary) ->
     gen_server:cast(Pid, {send_bin, Binary}).
 
@@ -61,7 +61,7 @@ send_binary(Pid, Binary) ->
 %% frame headers, it will make sure that the HEADERS frame and the
 %% FIRST CONTINUATION frame have the END_HEADERS flag set to 0 and the
 %% SECOND CONTINUATION frame will have it set to 1.
--spec send_frames(pid(), [frame()]) -> stub.
+-spec send_frames(pid(), [frame()]) -> ok.
 send_frames(Pid, Frames) ->
     %% TODO Process Frames
     MassagedFrames = Frames,
@@ -90,14 +90,14 @@ send_request(Pid, Headers, Body) ->
     %% Which means getting one from the gen_server state
     NewStreamId = gen_server:call(Pid, new_stream_id),
     EncodeContext = gen_server:call(Pid, encode_context),
+    SendSettings = gen_server:call(Pid, send_settings),
     %% Use that to make frames
-    {HeaderBin, NewEncodeContext} = http2_frame_headers:to_frame(NewStreamId, Headers, EncodeContext),
+    {HeaderFrame, NewEncodeContext} = http2_frame_headers:to_frame(NewStreamId, Headers, EncodeContext),
     gen_server:cast(Pid, {encode_context, NewEncodeContext}),
-    DataBin = http2_frame_data:to_frame(NewStreamId, Body),
+    DataFrames = http2_frame_data:to_frames(NewStreamId, Body, SendSettings),
+    send_frames(Pid, [HeaderFrame|DataFrames]),
 
-    send_binary(Pid, [HeaderBin,DataBin]),
-
-    %% Pull data off the wire. How?
+    %% Pull data off the wire. How? Right now we just do a separent call
     {[],<<>>}.
 
 get_frames(Pid, StreamId) ->
@@ -118,6 +118,7 @@ init([]) ->
                {packet, raw},
                {active, false}
               ],
+    %% TODO: Stealing from the server config here :/
     {ok, SSLEnabled} = application:get_env(chatterbox, ssl),
     {Transport, Options} = case SSLEnabled of
         true ->
@@ -128,26 +129,6 @@ init([]) ->
     end,
     lager:debug("Transport: ~p", [Transport]),
     {ok, Socket} = Transport:connect(Host, Port, Options),
-
-    %random:seed(),
-    %MasterSecret = list_to_binary([random:uniform(255) || _ <- lists:seq(1,48)]),
-    %MSStr = string:to_lower([ hd(erlang:integer_to_list(Nibble, 16)) || << Nibble:4 >> <= MasterSecret ]),
-    %{ok, ClientRandom} = ssl:prf(Socket, master_secret, MasterSecret, [client_random], 32),
-    %CRStr = string:to_lower([ hd(erlang:integer_to_list(Nibble, 16)) || << Nibble:4 >> <= ClientRandom ]),
-%
-    %_Bytes = io_lib:format("CLIENT_RANDOM ~s ~s~n", [CRStr, MSStr]),
-    %Filename = "/Users/joe/Desktop/ssloutput.log",
-    %case file:open(Filename, [append]) of
-    %    {ok, IoDevice} ->
-    %        file:write(IoDevice, Bytes),
-    %        file:close(IoDevice);
-    %    {error, Reason} ->
-    %        lager:error("~s open error  reason:~s~n", [Filename, Reason])
-    %end,
-    %%{ok, Cert1} = ssl:peercert(Socket),
-    %%lager:error("Cert1: ~p", [Cert1]),
-    %%W = public_key:pkix_decode_cert(Cert1, plain),
-    %%lager:error("Cert1: decoded  ~p", [W]),
 
     %% Send the preamble
     Transport:send(Socket, <<?PREAMBLE>>),
@@ -172,12 +153,12 @@ init([]) ->
             connection = #connection_state{
                             socket = {Transport, Socket},
                             recv_settings = ClientSettings,
-                            send_settings = ServerSettings
+                            send_settings = http2_frame_settings:overlay(#settings{},  ServerSettings)
                            }
            }}.
 
 %% Handling call messages
--spec handle_call(term(), pid(), #http2c_state{}) ->
+-spec handle_call(term(), {pid(), term()} , #http2c_state{}) ->
                          {reply, any(), #http2c_state{}} |
                          {reply, any(), #http2c_state{}, timeout()} |
                          {noreply, #http2c_state{}} |
@@ -191,6 +172,8 @@ handle_call(encode_context, _From, #http2c_state{connection=#connection_state{en
 handle_call({get_frames, StreamId}, _From, #http2c_state{incoming_frames=IF}=S) ->
     {ToReturn, ToPutBack} = lists:partition(fun({#frame_header{stream_id=SId},_}) -> StreamId =:= SId end, IF),
     {reply, ToReturn, S#http2c_state{incoming_frames=ToPutBack}};
+handle_call(send_settings, _From, #http2c_state{connection=C}) ->
+    {reply, C#connection_state.send_settings};
 handle_call(_Request, _From, State) ->
     Reply = ok,
     {reply, Reply, State}.
@@ -215,7 +198,7 @@ handle_cast(recv, #http2c_state{
     {FHeader, <<>>} = http2_frame:read_binary_frame_header(RawHeader),
     lager:info("http2c recv ~p", [FHeader]),
     RawBody = Transport:recv(Socket, FHeader#frame_header.length),
-    {Payload, <<>>} = http2_frame:read_binary_payload(RawBody, FHeader),
+    {ok, Payload, <<>>} = http2_frame:read_binary_payload(RawBody, FHeader),
     F = {FHeader, Payload},
     gen_server:cast(self(), recv),
     {noreply, State#http2c_state{incoming_frames = Frames ++ [F]}};

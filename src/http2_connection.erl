@@ -32,9 +32,15 @@
          closing/2
         ]).
 
+-spec start_link({gen_tcp, socket()}|{ssl, ssl:sslsocket()}) ->
+                        {ok, pid()} |
+                        ignore |
+                        {error, term()}.
 start_link(Socket) ->
     gen_fsm:start_link(?MODULE, Socket, []).
 
+-spec init({gen_tcp, socket()}|{ssl, ssl:sslsocket()}) ->
+                  {ok, accept, #http2_connection_state{}}.
 init(Socket) ->
     gen_fsm:send_event(self(), start),
     {ok, accept, #http2_connection_state{
@@ -45,6 +51,8 @@ init(Socket) ->
     }.
 
 %% accepting connection state:
+-spec accept(start, #http2_connection_state{}) ->
+                    {next_state, settings_handshake, #http2_connection_state{}}.
 accept(start, S=#http2_connection_state{
                    connection=#connection_state{
                                  socket={Transport,ListenSocket}
@@ -128,7 +136,7 @@ settings_handshake({start_frame, Bin}, S = #http2_connection_state{
 
 -spec settings_handshake_loop(
         {ReceivedAck :: boolean(), ReceivedClientSettings :: boolean()},
-        [{frame_header(), settings()}],
+        [frame()], %% this should be a settings frame, but dialyzer hates on that
         #http2_connection_state{}) ->
                       {next_state, connected, #http2_connection_state{}}.
 

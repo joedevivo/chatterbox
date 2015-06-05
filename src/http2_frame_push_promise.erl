@@ -32,4 +32,4 @@ to_binary(#push_promise{
              block_fragment=BF
             }) ->
     %% TODO: allow for padding as per HTTP/2 SPEC
-    <<0:1,PSID:31,BF>>.
+    <<0:1,PSID:31,BF/binary>>.

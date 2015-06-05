@@ -4,6 +4,8 @@
 
 -export([recv_frame/2, send_frame/2, new/3]).
 
+-export_type([stream_state/0]).
+
 %% Yodawg_fsm. Abstracted here for readability and possible reuse on
 %% the client side. !NO! This module will need understanding of the
 %% underlying state which will be chatterbox_fsm_state OR http2c_state

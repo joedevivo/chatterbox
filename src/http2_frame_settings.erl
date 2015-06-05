@@ -1,7 +1,5 @@
 -module(http2_frame_settings).
 
-
-
 -include("http2.hrl").
 
 -behaviour(http2_frame).
@@ -121,7 +119,7 @@ ack({Transport,Socket}) ->
 to_binary(#settings{}=Settings) ->
     [to_binary(S, Settings) || S <- ?SETTING_NAMES].
 
--spec to_binary(pos_integer(), settings()) -> iodata().
+-spec to_binary(binary(), settings()) -> binary().
 to_binary(?SETTINGS_HEADER_TABLE_SIZE, #settings{header_table_size=undefined}) ->
     <<>>;
 to_binary(?SETTINGS_HEADER_TABLE_SIZE, #settings{header_table_size=HTS}) ->
