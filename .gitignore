@@ -11,3 +11,5 @@ relx
 erln8.config
 .DS_Store
 common_test/logs
+.edts
+erl_crash.dump

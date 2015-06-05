@@ -6,8 +6,7 @@
 
 -record(chatterbox_fsm_state, {
           connection= #connection_state{} :: connection_state(),
-          frame_backlog = [],
-          settings_backlog = [],
+          frame_backlog :: queue:queue(frame()),
           next_available_stream_id = 2 :: stream_id(),
           streams = [] :: [{stream_id(), stream_state()}],
           continuation_stream_id = undefined :: stream_id() | undefined,
@@ -38,10 +37,19 @@ start_link(Socket) ->
 
 init(Socket) ->
     gen_fsm:send_event(self(), start),
-    {ok, accept, #chatterbox_fsm_state{connection=#connection_state{socket=Socket}}}.
+    {ok, accept, #chatterbox_fsm_state{
+                    connection=#connection_state{
+                                  socket=Socket
+                                 }
+                   }
+    }.
 
 %% accepting connection state:
-accept(start, S = #chatterbox_fsm_state{connection=#connection_state{socket={Transport,ListenSocket}}}) ->
+accept(start, S=#chatterbox_fsm_state{
+                   connection=#connection_state{
+                                 socket={Transport,ListenSocket}
+                                }
+                  }) ->
     Socket = case Transport of
         gen_tcp ->
             %%TCP Version
@@ -81,19 +89,19 @@ settings_handshake({start_frame, Bin}, S = #chatterbox_fsm_state{
                                                            }
                                       }) ->
     %% We just triggered this from the handle info of the HTTP/2 preamble
-
-    %% It's possible we got more. Thanks, Nagle.
-    NewState = case Bin of
-        <<>> ->
-            S;
+    %% It's possible we got more.
+    {InitialSettingsFrames, InitialOtherFrames} =
+        case Bin of
+            <<>> ->
+            {[], queue:new()};
         _ ->
             OtherFrames = http2_frame:from_binary(Bin),
             {SettingsBacklog, FB} = lists:partition(
                 fun({X,_}) -> X#frame_header.type =:= ?SETTINGS end,
                 OtherFrames),
-            S#chatterbox_fsm_state{frame_backlog=FB, settings_backlog=SettingsBacklog}
+            {SettingsBacklog, queue:from_list(FB)}
     end,
-
+    lager:debug("Initial Other Frames: ~p", [InitialOtherFrames]),
     %% Assemble our settings and send them
     http2_frame_settings:send(Socket, ServerSettings),
 
@@ -108,67 +116,83 @@ settings_handshake({start_frame, Bin}, S = #chatterbox_fsm_state{
     %% if something else comes in, let's store them in a backlog until
     %% we can deal with them
 
-    settings_handshake_loop(NewState, {false, false}).
+    NewState = S#chatterbox_fsm_state{
+                 frame_backlog=InitialOtherFrames
+                },
 
-settings_handshake_loop(State=#chatterbox_fsm_state{frame_backlog=FB}, {true, true}) ->
+    settings_handshake_loop({false,false}, InitialSettingsFrames, NewState).
+
+%% The Accumulator {boolean(), boolean()} is {true, true} when the
+%% SETTINGS handshake is complete. {ReceivedAck,
+%% ReceivedClientSettings}
+
+-spec settings_handshake_loop(
+        {ReceivedAck :: boolean(), ReceivedClientSettings :: boolean()},
+        [{frame_header(), settings()}],
+        #chatterbox_fsm_state{}) ->
+                      {next_state, connected, #chatterbox_fsm_state{}}.
+
+%% We're done, transition to connected and start processing the
+%% backlog
+settings_handshake_loop({true, true}, [], State) ->
     gen_fsm:send_event(self(), backlog),
-    {next_state, connected, State#chatterbox_fsm_state{frame_backlog=lists:reverse(FB)}};
-settings_handshake_loop(State = #chatterbox_fsm_state{
-                                   settings_backlog=[{H,P}|T]
-                                  },
-                        Acc) ->
-    lager:debug("[settings_handshake] Backlogged Frame"),
-    settings_handshake_loop({H#frame_header.type, ?IS_FLAG(H#frame_header.flags, ?FLAG_ACK)},
-                            {H, P},
-                            Acc,
-                            State#chatterbox_fsm_state{settings_backlog=T});
-settings_handshake_loop(State = #chatterbox_fsm_state{
-                                   connection=#connection_state{
-                                                 socket=Socket
-                                                },
-                                   settings_backlog=[]
-                                  },
-                        Acc) ->
-    lager:debug("[settings_handshake] Incoming Frame"),
-    {H, Payload} = http2_frame:read(Socket),
-    settings_handshake_loop(
-      {H#frame_header.type,?IS_FLAG(H#frame_header.flags, ?FLAG_ACK)},
-      {H, Payload},
-      Acc,
-      State).
+    {next_state, connected, State};
+%% We're done with anything we received on the initial packet, read
+%% another, and put it on the backlog. We don't really need to do
+%% this, except it lets us only write the conditional logic once
+settings_handshake_loop(Done, [], State=#chatterbox_fsm_state{
+                                    connection=#connection_state{
+                                                  socket=Socket
+                                                 },
+                                    frame_backlog=FB
+                                   }) ->
+    Frame = {FH, _} = http2_frame:read(Socket),
+    lager:debug("SHL: Got frame " ++ http2_frame:format_header(FH)),
 
-settings_handshake_loop({?SETTINGS,false},{_Header,CSettings}, {ReceivedAck,false},
-                        State = #chatterbox_fsm_state{connection=C=#connection_state{socket=S}}) ->
-    ClientSettings = http2_frame_settings:overlay(#settings{}, CSettings),
-    lager:debug(
-      "[settings_handshake] got client_settings: ~p",
-      [http2_frame_settings:format(ClientSettings)]),
-    http2_frame_settings:ack(S),
-    settings_handshake_loop(
-      State#chatterbox_fsm_state{
-        connection=C#connection_state{
-                     send_settings=ClientSettings
-                    }
-       },
-      {ReceivedAck,true}
-     );
-settings_handshake_loop({?SETTINGS,true},{_,_},{false,ReceivedClientSettings},State) ->
-    lager:debug("[settings_handshake] got server_settings ack"),
-    settings_handshake_loop(State,{true,ReceivedClientSettings});
-settings_handshake_loop(_,FrameToBacklog,Acc,State=#chatterbox_fsm_state{frame_backlog=FB}) ->
-    lager:debug("[settings_handshake] got rando frame"),
-    settings_handshake_loop(State#chatterbox_fsm_state{frame_backlog=[FrameToBacklog|FB]}, Acc).
+    case FH#frame_header.type of
+        ?SETTINGS ->
+            settings_handshake_loop(Done, [Frame], State);
+        _ ->
+            %% loop right back into this state after putting one on the backlog
+            settings_handshake_loop(Done, [], State#chatterbox_fsm_state{
+                                                frame_backlog=queue:in(Frame, FB)
+                                               })
+    end;
+settings_handshake_loop({_ReceivedAck, ReceivedClientSettings},
+                       [{FH, _FPayload}|SettingsFramesTail],
+                       State)
+  when ?IS_FLAG(FH#frame_header.flags, ?FLAG_ACK) ->
+    settings_handshake_loop({true, ReceivedClientSettings},
+                            SettingsFramesTail,
+                            State);
+settings_handshake_loop({ReceivedAck, _ReceivedClientSettings},
+                       [{_FH, FPayload}|SettingsFramesTail],
+                       State=#chatterbox_fsm_state{connection=C}) ->
+    ClientSettings = http2_frame_settings:overlay(C#connection_state.send_settings, FPayload),
+    http2_frame_settings:ack(C#connection_state.socket),
 
-%% After settings handshake, process any backlogged frames
-connected(backlog, S = #chatterbox_fsm_state{frame_backlog=[F|T]}) ->
-    Response = route_frame(F, S#chatterbox_fsm_state{frame_backlog=T}),
-    gen_fsm:send_event(self(), backlog),
-    Response;
-%% Once the backlog is empty, start processing frames as they come in
-connected(backlog, S = #chatterbox_fsm_state{frame_backlog=[]}) ->
-    gen_fsm:send_event(self(), start_frame),
-    {next_state, connected, S};
-%% Process an incoming frame
+    settings_handshake_loop({ReceivedAck, true},
+                            SettingsFramesTail,
+                            State#chatterbox_fsm_state{
+                              connection=C#connection_state{
+                                           send_settings=ClientSettings
+                                          }
+                              }).
+
+%% Process the backlog during the handshake until there's none
+connected(backlog, S = #chatterbox_fsm_state{frame_backlog=FB}) ->
+    lager:debug("[connected] Processing backlog, length: ~p", [queue:len(FB)]),
+    case queue:out(FB) of
+        %% Once the backlog is empty, start processing frames as they come in
+        {empty, _} ->
+            gen_fsm:send_event(self(), start_frame),
+            {next_state, connected, S};
+        %% After settings handshake, process any backlogged frames
+        {{value, F}, T} ->
+            Response = route_frame(F, S#chatterbox_fsm_state{frame_backlog=T}),
+            gen_fsm:send_event(self(), backlog),
+            Response
+    end;
 connected(start_frame,
           S = #chatterbox_fsm_state{
                  connection=#connection_state{
@@ -183,17 +207,12 @@ connected(start_frame,
 
     Response = route_frame(Frame, S),
     %% After frame is routed, let the FSM know we're ready for another
-
-    %% TODO there could be a race condition in here where the next
-    %% call to start_frame uses a different State then the one we're
-    %% returning here e.g. the routed frame creates a new stream which
-    %% is not yet in the State. Test it once those are implemented
-    %% ahahaahahaha
     gen_fsm:send_event(self(), start_frame),
-    %%lager:debug("Incoming frame? ~p", [Response]),
     Response.
 
-%% we're locked waiting for contiunation frames now
+%% The continuation state in entered after receiving a HEADERS frame
+%% with no ?END_HEADERS flag set, we're locked waiting for contiunation
+%% frames on the same stream to preserve the decoding context state
 continuation(start_frame,
              S = #chatterbox_fsm_state{
                  connection=#connection_state{
@@ -533,7 +552,7 @@ route_frame(F={H=#frame_header{stream_id=StreamId}, #window_update{}},
 
 route_frame(Frame, State) ->
     lager:error("Frame condition not covered by pattern match"),
-    lager:error("OOPS! ~p", [Frame]),
+    lager:error("OOPS! " ++ http2_frame:format(Frame)),
     lager:error("OOPS! ~p", [State]),
     go_away(?PROTOCOL_ERROR, State).
 
