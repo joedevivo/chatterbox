@@ -173,14 +173,22 @@
 
 -define(DEFAULT_INITIAL_WINDOW_SIZE, 65535).
 
+
 -record(connection_state, {
           socket = {undefined, undefined} :: socket(),
-           send_settings = #settings{} :: settings(),
+          send_settings = #settings{} :: settings(),
           recv_settings = #settings{} :: settings(),
           send_window_size = ?DEFAULT_INITIAL_WINDOW_SIZE :: integer(),
           recv_window_size = ?DEFAULT_INITIAL_WINDOW_SIZE :: integer(),
           decode_context = hpack:new_decode_context() :: hpack:decode_context(),
-          encode_context = hpack:new_encode_context() :: hpack:encode_context()
+          encode_context = hpack:new_encode_context() :: hpack:encode_context(),
+
+%% An effort to consolidate client and server states, which should actually be very similar
+          frame_backlog :: queue:queue(frame()),
+          next_available_stream_id = 2 :: stream_id(),
+          streams = [] :: [{stream_id(), stream_state()}],
+          continuation_stream_id = undefined :: stream_id() | undefined,
+          content_handler = chatterbox_static_content_handler :: module()
 }).
 
 -type connection_state() :: #connection_state{}.

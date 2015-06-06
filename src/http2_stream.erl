@@ -20,7 +20,9 @@
 %% were idle are considered closed. Where we'll account for this? who
 %% knows? probably in the chatterbox_fsm
 
--spec new(stream_id(), {pos_integer(), pos_integer()}, {gen_tcp|ssl, port()}) -> stream_state().
+-spec new(stream_id(),
+          {pos_integer(), pos_integer()},
+          {gen_tcp|ssl, port()}) -> stream_state().
 new(StreamId, {SendWindowSize, RecvWindowSize}, Socket) ->
     #stream_state{
        stream_id=StreamId,
@@ -67,7 +69,23 @@ recv_frame(F={#frame_header{
       incoming_frames = [F|Frames]
      };
 
-%% TODO : More ?DATA when L > RWS and when ?IS_FLAG(END_STREAM)
+%% When 'open' and recv window too small
+recv_frame({_FH=#frame_header{
+                   length=L,
+                   type=?DATA
+                  }, _P},
+           S = #stream_state{
+                 state=open,
+                 recv_window_size=RWS
+                })
+  when L > RWS ->
+    rst_stream(S, ?FLOW_CONTROL_ERROR),
+    S#stream_state{
+      state=closed,
+      recv_window_size=0,
+      incoming_frames=[]
+     };
+%% Open and not END STREAM
 recv_frame(F={_FH=#frame_header{
                    length=L,
                    type=?DATA,
@@ -79,6 +97,22 @@ recv_frame(F={_FH=#frame_header{
                 })
   when ?NOT_FLAG(Flags, ?FLAG_END_STREAM) ->
     S#stream_state{
+      recv_window_size=RWS-L,
+      incoming_frames=IF ++ [F]
+     };
+%% Open, DATA, AND END_STREAM
+recv_frame(F={_FH=#frame_header{
+                   length=L,
+                   type=?DATA,
+                   flags=Flags
+                  }, _P},
+          S = #stream_state{
+                 recv_window_size=RWS,
+                 incoming_frames=IF
+                })
+  when ?IS_FLAG(Flags, ?FLAG_END_STREAM) ->
+    S#stream_state{
+      state=half_closed_remote,
       recv_window_size=RWS-L,
       incoming_frames=IF ++ [F]
      };
@@ -146,3 +180,6 @@ send_frame(F={#frame_header{
       };
 send_frame(_F, S) ->
     S.
+
+rst_stream(_S, _ErrorCode) ->
+    ok.
