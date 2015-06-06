@@ -207,8 +207,7 @@
           send_window_size = ?DEFAULT_INITIAL_WINDOW_SIZE :: integer(),
           recv_window_size = ?DEFAULT_INITIAL_WINDOW_SIZE :: integer(),
           queued_frames = [] :: [frame()],
-          incoming_frames = [] :: [frame()],
-          socket = {undefined, undefined} :: socket()
+          incoming_frames = [] :: [frame()]
 }).
 
 -type stream_state() :: #stream_state{}.

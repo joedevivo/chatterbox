@@ -7,8 +7,8 @@
 -spec handle(connection_state(),
              hpack:headers(),
              http2_stream:stream_state()) -> {
-              connection_state(),
-              http2_stream:stream_state()}.
+              http2_stream:stream_state(),
+              connection_state()}.
 handle(C = #connection_state{
          encode_context=EncodeContext,
          send_settings=SS
@@ -66,11 +66,12 @@ handle(C = #connection_state{
             DataFrames = http2_frame_data:to_frames(StreamId, <<>>, SS),
             {NewContext, [HeaderFrame|DataFrames]}
         end,
+    NewConnectionState = C#connection_state{encode_context=NewEncodeContext},
+
     %% This is a baller fold right here. Fauxnite State Machine at its finest.
-    NewStream = lists:foldl(
-                  fun(Frame, State) ->
-                          http2_stream:send_frame(Frame, State)
-                  end,
-                  Stream,
-                  Frames),
-    {C#connection_state{encode_context=NewEncodeContext}, NewStream}.
+    lists:foldl(
+      fun(Frame, State) ->
+              http2_stream:send_frame(Frame, State)
+      end,
+      {Stream, NewConnectionState},
+      Frames).

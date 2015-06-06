@@ -32,6 +32,8 @@
          closing/2
         ]).
 
+-export([go_away/2]).
+
 -spec start_link({gen_tcp, socket()}|{ssl, ssl:sslsocket()}) ->
                         {ok, pid()} |
                         ignore |
@@ -253,27 +255,20 @@ route_frame({#frame_header{length=L}, _},
 %%TODO Data to stream 0 bad
 %% TODO Route data frames to streams. POST!
 route_frame(F={H=#frame_header{
-                  length=L,
                   stream_id=StreamId}, _Payload},
             S = #connection_state{
                    streams=Streams,
-                   socket=_Socket,
-                   recv_window_size=RWS
+                   socket=_Socket
                   })
     when H#frame_header.type == ?DATA ->
     lager:debug("Received DATA Frame for Stream ~p", [StreamId]),
 
     {Stream, NewStreamsTail} = get_stream(StreamId, Streams),
+    %% Decrement stream & connection recv_window L happens in http2_stream:recv_frame
+    {FinalStream, NewConnectionState} = http2_stream:recv_frame(F, {Stream, S}),
 
-    %% Decrement connection recv_window L
-    NewRWS = RWS - L,
-
-    %% Decrement stream recv_window L happens in http2_stream:recv_frame
-    FinalStream = http2_stream:recv_frame(F, Stream),
-
-    {next_state, connected, S#connection_state{
-                              streams=[{StreamId,FinalStream}|NewStreamsTail],
-                              recv_window_size=NewRWS
+    {next_state, connected, NewConnectionState#connection_state{
+                              streams=[{StreamId,FinalStream}|NewStreamsTail]
                              }
     };
 
@@ -287,7 +282,6 @@ route_frame(F={H=#frame_header{
 %% HEADERS frame with no END_HEADERS flag, expect continuations
 route_frame({H=#frame_header{stream_id=StreamId}, _Payload}=Frame,
             S = #connection_state{
-                   socket=Socket,
                    recv_settings=#settings{initial_window_size=RecvWindowSize},
                    send_settings=#settings{initial_window_size=SendWindowSize},
                    streams = Streams
@@ -295,9 +289,9 @@ route_frame({H=#frame_header{stream_id=StreamId}, _Payload}=Frame,
   when H#frame_header.type == ?HEADERS,
        ?NOT_FLAG(H#frame_header.flags, ?FLAG_END_HEADERS) ->
     lager:debug("Received HEADERS Frame for Stream ~p, no END in sight", [StreamId]),
-    NewStream = http2_stream:new(StreamId, {SendWindowSize, RecvWindowSize}, Socket),
-    NewStream1 = http2_stream:recv_frame(Frame, NewStream),
-    {next_state, continuation, S#connection_state{
+    NewStream = http2_stream:new(StreamId, {SendWindowSize, RecvWindowSize}),
+    {NewStream1, NewConnectionState} = http2_stream:recv_frame(Frame, {NewStream, S}),
+    {next_state, continuation, NewConnectionState#connection_state{
                                  streams = [{StreamId, NewStream1}|Streams],
                                  continuation_stream_id = StreamId
                                 }
@@ -308,7 +302,6 @@ route_frame(F={H=#frame_header{stream_id=StreamId}, _Payload},
                decode_context=DecodeContext,
                recv_settings=#settings{initial_window_size=RecvWindowSize},
                send_settings=#settings{initial_window_size=SendWindowSize},
-               socket=Socket,
                streams=Streams,
                content_handler = Handler
            })
@@ -318,9 +311,10 @@ route_frame(F={H=#frame_header{stream_id=StreamId}, _Payload},
     HeadersBin = http2_frame_headers:from_frames([F]),
     {Headers, NewDecodeContext} = hpack:decode(HeadersBin, DecodeContext),
     %%lager:debug("Headers decoded: ~p", [Headers]),
-    Stream = http2_stream:new(StreamId, {SendWindowSize, RecvWindowSize}, Socket),
-    Stream2 = http2_stream:recv_frame(F, Stream),
-
+    Stream = http2_stream:new(StreamId, {SendWindowSize, RecvWindowSize}),
+    {Stream2, NextConnectionState} = http2_stream:recv_frame(F, {Stream, S#connection_state{
+                                                                           decode_context=NewDecodeContext
+                                                                 }}),
     %% Now this stream should be 'open' and because we've gotten ?END_HEADERS we can start processing it.
 
     %% TODO: Or can we? We should be able to handle data frames here, so maybe
@@ -328,9 +322,9 @@ route_frame(F={H=#frame_header{stream_id=StreamId}, _Payload},
 
     %% TODO: Make this module name configurable
     %% Make content_handler a behavior with handle/3
-    {NewConnectionState, NewStreamState} =
+    {NewStreamState, NewConnectionState} =
         Handler:handle(
-          S#connection_state{decode_context=NewDecodeContext},
+          NextConnectionState,
           Headers,
           Stream2),
 
@@ -350,12 +344,12 @@ route_frame(F={H=#frame_header{stream_id=StreamId}, _Payload},
 
     {Stream, NewStreamsTail} = get_stream(StreamId, Streams),
 
-    NewStream = http2_stream:recv_frame(F, Stream),
+    {NewStream, NewConnectionState} = http2_stream:recv_frame(F, {Stream, S}),
 
     %% TODO: NewStreams = replace old stream
     NewStreams = [{StreamId,NewStream}|NewStreamsTail],
 
-    {next_state, continuation, S#connection_state{
+    {next_state, continuation, NewConnectionState#connection_state{
                               streams = NewStreams
                              }};
 
@@ -371,7 +365,7 @@ route_frame(F={H=#frame_header{stream_id=StreamId}, _Payload},
 
     {Stream, NewStreamsTail} = get_stream(StreamId, Streams),
 
-    NewStream = http2_stream:recv_frame(F, Stream),
+    {NewStream, NextConnectionState} = http2_stream:recv_frame(F, {Stream, S}),
 
     HeaderFrames = lists:reverse(NewStream#stream_state.incoming_frames),
     HeadersBin = http2_frame_headers:from_frames(HeaderFrames),
@@ -379,9 +373,9 @@ route_frame(F={H=#frame_header{stream_id=StreamId}, _Payload},
 
     %% I think this might be wrong because ?END_HEADERS doesn't mean
     %% data has posted but baby steps
-    {NewConnectionState, NewStreamState} =
+    {NewStreamState, NewConnectionState} =
         chatterbox_static_content_handler:handle(
-          S#connection_state{decode_context=NewDecodeContext},
+          NextConnectionState#connection_state{decode_context=NewDecodeContext},
           Headers,
           NewStream),
 
@@ -514,11 +508,11 @@ route_frame(F={H=#frame_header{stream_id=StreamId}, #window_update{}},
     %NewSendWindow = WSI+Stream#stream_state.send_window_size,
 
 
-    NStream = http2_stream:recv_frame(F, Stream),
+    {NStream, NConn} = http2_stream:recv_frame(F, {Stream, S}),
     %%NStream = chatterbox_static_content_handler:send_while_window_open(Stream#stream_state{send_window_size=NewSendWindow}, C),
     %%NewStreams = [{StreamId, Stream#stream_state{send_window_size=NewSendWindow}}|NewStreamsTail],
     NewStreams = [{StreamId, NStream}|NewStreamsTail],
-    {next_state, connected, S#connection_state{streams=NewStreams}};
+    {next_state, connected, NConn#connection_state{streams=NewStreams}};
 
 route_frame(Frame, State) ->
     lager:error("Frame condition not covered by pattern match"),
@@ -533,7 +527,7 @@ handle_sync_event(_E, _F, StateName, State) ->
     {next_state, StateName, State}.
 
 
-%%handle_info({_, _Socket, <<"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n",Bin/bits>>}, _, S) ->
+%% TODO: Handle_info when socket is closed
 handle_info({_, _Socket, <<?PREAMBLE,Bin/bits>>}, _, S) ->
     lager:debug("handle_info HTTP/2 Preamble!"),
     gen_fsm:send_event(self(), {start_frame,Bin}),
