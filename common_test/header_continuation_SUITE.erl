@@ -43,7 +43,7 @@ basic_continuation(_Config) ->
     ],
     http2c:send_unaltered_frames(Client, Frames),
 
-    timer:sleep(1000),
+    timer:sleep(100),
 
     Resp = http2c:get_frames(Client, 3),
     ct:pal("Resp: ~p", [Resp]),
@@ -80,7 +80,7 @@ bad_frame_wrong_type_between_continuations(_Config) ->
     ],
     http2c:send_unaltered_frames(Client, Frames),
 
-    timer:sleep(1000),
+    timer:sleep(100),
 
     Resp = http2c:get_frames(Client, 3),
     ct:pal("Resp: ~p", [Resp]),
@@ -122,7 +122,7 @@ bad_frame_wrong_stream_between_continuations(_Config) ->
     ],
     http2c:send_unaltered_frames(Client, Frames),
 
-    timer:sleep(1000),
+    timer:sleep(100),
 
     Resp = http2c:get_frames(Client, 3),
     ct:pal("Resp: ~p", [Resp]),

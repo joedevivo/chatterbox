@@ -24,7 +24,7 @@ frame_too_big(Config) ->
     http2c:send_unaltered_frames(Client, Frames),
 
     %% How do I get the response? Should be GOAWAY with FRAME_SIZE_ERROR
-    timer:sleep(10000),
+    timer:sleep(100),
 
     Resp = http2c:get_frames(Client, 0),
     ct:pal("Resp: ~p", [Resp]),
@@ -68,7 +68,7 @@ euc(Config) ->
     ],
 
     http2c:send_unaltered_frames(Client, Frames),
-    timer:sleep(10000),
+    timer:sleep(100),
 
     Resp = http2c:get_frames(Client, 0),
     ?assertEqual(0, length(Resp)).
