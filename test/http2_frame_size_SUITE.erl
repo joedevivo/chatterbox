@@ -16,7 +16,7 @@ end_per_test_case(_, Config) ->
     chatterbox_test_buddy:stop(Config),
     ok.
 
-frame_too_big(Config) ->
+frame_too_big(_Config) ->
     {ok, Client} = http2c:start_link(),
     Frames = [
         {#frame_header{length=16392,type=?HEADERS,flags=?FLAG_END_HEADERS,stream_id=3}, #headers{block_fragment = <<1:131136>>}}
@@ -36,7 +36,7 @@ frame_too_big(Config) ->
 
     ok.
 
-euc(Config) ->
+euc(_Config) ->
     {ok, Client} = http2c:start_link(),
 
     Headers1 = [

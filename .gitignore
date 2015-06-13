@@ -2,8 +2,6 @@ ebin/*
 *.beam
 deps/*
 rel/chatterbox
-.concrete/DEV_MODE
-deps.plt
 .eunit
 _rel
 relx
@@ -13,3 +11,5 @@ erln8.config
 common_test/logs
 .edts
 erl_crash.dump
+_build
+rebar3
