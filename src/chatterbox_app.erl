@@ -9,4 +9,5 @@ start(_StartType, _StartArgs) ->
     chatterbox_sup:start_link().
 
 stop(_State) ->
+    lager:info("Stopping Chatterbox"),
     ok.

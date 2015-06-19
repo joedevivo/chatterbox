@@ -12,7 +12,7 @@ init_per_testcase(_, Config) ->
     Config0 = chatterbox_test_buddy:start(Config),
     Config0.
 
-end_per_test_case(_, Config) ->
+end_per_testcase(_, Config) ->
     chatterbox_test_buddy:stop(Config),
     ok.
 

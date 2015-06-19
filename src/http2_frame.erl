@@ -4,6 +4,7 @@
 
 -export([
          read/1,
+         read/2,
          read_binary_frame_header/1,
          read_binary_payload/2,
          from_binary/1,
@@ -34,12 +35,17 @@
 
 -spec read(socket()) -> {frame_header(), payload()}.
 read(Socket) ->
-    {H, <<>>} = read_header(Socket),
-    %%lager:debug("HeaderBytes: ~p", [H]),
-    {ok, Payload, <<>>} = read_payload(Socket, H),
-    %%lager:debug("PayloadBytes: ~p", [Payload]),
-    lager:debug(format({H, Payload})),
-    {H, Payload}.
+    read(Socket, infinity).
+
+-spec read(socket(), timeout()) -> frame().
+read(Socket, Timeout) ->
+    case read_header(Socket, Timeout) of
+        {H, <<>>} ->
+            {ok, Payload, <<>>} = read_payload(Socket, H, Timeout),
+            lager:debug(format({H, Payload})),
+            {H, Payload};
+        E -> E
+    end.
 
 -spec from_binary(binary()) -> [{frame_header(), payload()}].
 from_binary(Bin) ->
@@ -62,10 +68,13 @@ format_header(#frame_header{
     }) ->
     io_lib:format("[Frame Header: L:~p, T:~p, F:~p, StrId:~p]", [Length, ?FT(Type), Flags, StreamId]).
 
--spec read_header(socket()) -> {frame_header(), binary()}.
-read_header({Transport, Socket}) ->
-    {ok, HeaderBytes} = Transport:recv(Socket, 9),
-    read_binary_frame_header(HeaderBytes).
+-spec read_header(socket(), timeout()) -> {frame_header(), binary()}.
+read_header({Transport, Socket}, Timeout) ->
+    case Transport:recv(Socket, 9, Timeout) of
+        {ok, HeaderBytes} ->
+            read_binary_frame_header(HeaderBytes);
+        E -> E
+    end.
 
 -spec read_binary_frame_header(binary()) -> {frame_header(), binary()}.
 read_binary_frame_header(<<Length:24,Type:8,Flags:8,_R:1,StreamId:31,Rem/bits>>) ->
@@ -77,12 +86,12 @@ read_binary_frame_header(<<Length:24,Type:8,Flags:8,_R:1,StreamId:31,Rem/bits>>)
     },
     {Header, Rem}.
 
--spec read_payload(socket(), frame_header()) ->
+-spec read_payload(socket(), frame_header(), timeout()) ->
     {ok, payload(), <<>>} | {error, term()}.
-read_payload(_, #frame_header{length=0}) ->
+read_payload(_, #frame_header{length=0}, _Timeout) ->
     {ok, <<>>, <<>>};
-read_payload({Transport, Socket}, Header=#frame_header{length=L}) ->
-    {ok, DataBin} = Transport:recv(Socket, L),
+read_payload({Transport, Socket}, Header=#frame_header{length=L}, Timeout) ->
+    {ok, DataBin} = Transport:recv(Socket, L, Timeout),
     read_binary_payload(DataBin, Header).
 
 -spec read_binary_payload(binary(), frame_header()) ->
@@ -131,6 +140,8 @@ format_payload({#frame_header{type=?CONTINUATION}, P}) ->
     http2_frame_continuation:format(P).
 
 -spec format(frame()) -> iodata().
+format(error) -> "error";
+format({error, E}) -> io_lib:format("error : ~p",[E]);
 format({Header, Payload}) ->
     lists:flatten(io_lib:format("~s | ~s", [format_header(Header), format_payload({Header, Payload})]));
 format(<<>>) -> "".
@@ -143,8 +154,6 @@ to_binary({Header, Payload}) ->
                   type = Type
                  },
     HeaderBin = header_to_binary(NewHeader),
-%    lager:debug("HeaderBin: ~p", [HeaderBin]),
-%    lager:debug("PayloadBin: ~p", [PayloadBin]),
     [HeaderBin, PayloadBin].
 
 -spec header_to_binary(frame_header()) -> iodata().
@@ -154,7 +163,6 @@ header_to_binary(#frame_header{
         flags=F,
         stream_id=StreamId
     }) ->
- %   lager:debug("H: ~p", [L]),
     <<L:24,T:8,F:8,0:1,StreamId:31>>.
 
 -spec payload_to_binary(payload()) -> {frame_type(), iodata()}.

@@ -80,7 +80,8 @@ accept(start, S=#connection_state{
     %% that's no longer listening
     chatterbox_sup:start_socket(),
 
-    {next_state, settings_handshake,
+    {next_state,
+     settings_handshake,
      S#connection_state{socket={Transport,Socket}}}.
 
 %% From Section 6.5 of the HTTP/2 Specification
@@ -88,6 +89,10 @@ accept(start, S=#connection_state{
 %% connection, and MAY be sent at any other time by either endpoint
 %% over the lifetime of the connection. Implementations MUST support
 %% all of the parameters defined by this specification.
+-spec settings_handshake({start_frame, binary()} | {boolean(), boolean(), [frame()]},
+                         #connection_state{}) ->
+                                {next_state, settings_handshake | connected, #connection_state{}}
+                              | {stop, closing, #connection_state{}}.
 settings_handshake({start_frame, Bin}, S = #connection_state{
                                               socket=Socket,
                                               recv_settings=ServerSettings
@@ -123,61 +128,62 @@ settings_handshake({start_frame, Bin}, S = #connection_state{
     NewState = S#connection_state{
                  frame_backlog=InitialOtherFrames
                 },
+    gen_fsm:send_event(self(), {false, false, InitialSettingsFrames}),
+    {next_state, settings_handshake, NewState};
 
-    settings_handshake_loop({false,false}, InitialSettingsFrames, NewState).
+%% For the remaining settings_handshake clauses, the event is
+%% {boolean(), boolean(), [frame()]} which was formerly the
+%% accumulator for settings_handhshake_loop (for you chatterbox
+%% historians out there!)
 
-%% The Accumulator {boolean(), boolean()} is {true, true} when the
-%% SETTINGS handshake is complete. {ReceivedAck,
-%% ReceivedClientSettings}
-
--spec settings_handshake_loop(
-        {ReceivedAck :: boolean(), ReceivedClientSettings :: boolean()},
-        [frame()], %% this should be a settings frame, but dialyzer hates on that
-        #connection_state{}) ->
-            {next_state, connected, #connection_state{}}.
-
-%% We're done, transition to connected and start processing the
-%% backlog
-settings_handshake_loop({true, true}, [], State) ->
+%% The event is {true, true, []} when the SETTINGS handshake is
+%% complete. We're done, transition to connected and start processing
+%% the backlog %settings_handshake_loop({true, true}, [], State) ->
+settings_handshake({true, true, []}, State) ->
     gen_fsm:send_event(self(), backlog),
     {next_state, connected, State};
 %% We're done with anything we received on the initial packet, read
 %% another, and put it on the backlog. We don't really need to do
 %% this, except it lets us only write the conditional logic once
-settings_handshake_loop(Done, [], State=#connection_state{
+settings_handshake({ReceivedAck,ReceivedClientSettings,[]}, State=#connection_state{
                                            socket=Socket,
                                            frame_backlog=FB
                                           }) ->
-    Frame = {FH, _} = http2_frame:read(Socket),
-    lager:debug("SHL: Got frame " ++ http2_frame:format_header(FH)),
+    %% TODO: 5000 is hardcoded, make configurable
+    Frame = {FH, _} = http2_frame:read(Socket, 5000),
 
-    case FH#frame_header.type of
+    try FH#frame_header.type of
         ?SETTINGS ->
-            settings_handshake_loop(Done, [Frame], State);
+            gen_fsm:send_event(self(), {ReceivedAck, ReceivedClientSettings, [Frame]}),
+            {next_state, settings_handshake, State};
         _ ->
             %% loop right back into this state after putting one on the backlog
-            settings_handshake_loop(Done, [], State#connection_state{
-                                                frame_backlog=queue:in(Frame, FB)
-                                               })
+            gen_fsm:send_event(self(), {ReceivedAck, ReceivedClientSettings, []}),
+            {next_state, settings_handshake, State#connection_state{
+                                               frame_backlog=queue:in(Frame, FB)
+                                              }}
+    catch
+        %% Timeout of settings handshake, let's close it down
+        _:_ ->
+            lager:error("[settings_handshake] did not receive SETTINGS frame in a reasonable timeframe. closing connection"),
+            go_away(?SETTINGS_TIMEOUT, State),
+            {next_state, closing, State}
     end;
-settings_handshake_loop({_ReceivedAck, ReceivedClientSettings},
-                       [{FH, _FPayload}|SettingsFramesTail],
-                       State)
+settings_handshake({_ReceivedAck, ReceivedClientSettings,
+                    [{FH, _FPayload}|SettingsFramesTail]},
+                    State)
   when ?IS_FLAG(FH#frame_header.flags, ?FLAG_ACK) ->
-    settings_handshake_loop({true, ReceivedClientSettings},
-                            SettingsFramesTail,
-                            State);
-settings_handshake_loop({ReceivedAck, _ReceivedClientSettings},
-                       [{_FH, FPayload}|SettingsFramesTail],
+    gen_fsm:send_event(self(), {true, ReceivedClientSettings, SettingsFramesTail}),
+    {next_state, settings_handshake, State};
+settings_handshake({ReceivedAck, _ReceivedClientSettings, [{_FH, FPayload}|SettingsFramesTail]},
                        S=#connection_state{}) ->
     ClientSettings = http2_frame_settings:overlay(S#connection_state.send_settings, FPayload),
     http2_frame_settings:ack(S#connection_state.socket),
 
-    settings_handshake_loop({ReceivedAck, true},
-                            SettingsFramesTail,
-                            S#connection_state{
-                              send_settings=ClientSettings
-                             }).
+    gen_fsm:send_event(self(), {ReceivedAck, true, SettingsFramesTail}),
+    {next_state, settings_handshake, S#connection_state{
+                                       send_settings=ClientSettings
+                                      }}.
 
 %% Process the backlog during the handshake until there's none
 connected(backlog, S = #connection_state{frame_backlog=FB}) ->
@@ -242,7 +248,7 @@ closing(Message, State) ->
 %% route_frame's job needs to be "now that we've read a frame off the
 %% wire, do connection based things to it and/or forward it to the
 %% http2 stream processor (http2_stream:recv_frame)
--spec route_frame(frame(), #connection_state{}) ->
+-spec route_frame(frame() | {error, term()}, #connection_state{}) ->
     {next_state, connected, #connection_state{}}.
 %% Bad Length of frame, exceedes maximum allowed size
 route_frame({#frame_header{length=L}, _},
@@ -514,6 +520,8 @@ route_frame(F={H=#frame_header{stream_id=StreamId}, #window_update{}},
     NewStreams = [{StreamId, NStream}|NewStreamsTail],
     {next_state, connected, NConn#connection_state{streams=NewStreams}};
 
+route_frame({error, closed}, State) ->
+    {stop, normal, State};
 route_frame(Frame, State) ->
     lager:error("Frame condition not covered by pattern match"),
     lager:error("OOPS! " ++ http2_frame:format(Frame)),
@@ -526,8 +534,7 @@ handle_event(_E, StateName, State) ->
 handle_sync_event(_E, _F, StateName, State) ->
     {next_state, StateName, State}.
 
-
-%% TODO: Handle_info when socket is closed
+%% TODO: Handle_info when ssl socket is closed
 handle_info({_, _Socket, <<?PREAMBLE,Bin/bits>>}, _, S) ->
     lager:debug("handle_info HTTP/2 Preamble!"),
     gen_fsm:send_event(self(), {start_frame,Bin}),
