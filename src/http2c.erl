@@ -82,8 +82,8 @@ send_unaltered_frames(Pid, Frames) ->
 %% broken up into HEADERS, CONTINUATIONS, and DATA frames, and that
 %% list of frames is passed to send_frames. This one needs to be smart
 %% about creating a new frame id
--spec send_request(pid(), [headers:header()], binary()) ->
-                          {[headers:header()], binary()}.
+-spec send_request(pid(), hpack:headers(), binary()) ->
+                          {hpack:headers(), binary()}.
 send_request(Pid, Headers, Body) ->
     %% TODO: Turn Headers & Body into frames
     %% That means creating a new stream id

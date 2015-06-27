@@ -42,7 +42,7 @@ is_priority(#frame_header{flags=F}) when ?IS_FLAG(F, ?FLAG_PRIORITY) ->
 is_priority(_) ->
     false.
 
--spec to_frame(pos_integer(), [headers:header()], hpack:encode_context()) ->
+-spec to_frame(pos_integer(), hpack:headers(), hpack:encode_context()) ->
                       {{frame_header(), headers()}, hpack:encode_context()}.
 %% Maybe break this up into continuations like the data frame
 to_frame(StreamId, Headers, EncodeContext) ->

@@ -9,4 +9,8 @@
  {<<"lager">>,
   {git,"git://github.com/basho/lager.git",
        {ref,"d33ccf3b69de09a628fe38b4d7981bb8671b8a4f"}},
+  0},
+ {<<"hpack">>,
+  {git,"git://github.com/joedevivo/hpack.git",
+       {ref,"1ee42d1ecff9db26b5dadf9abcb9a67ebf2a869a"}},
   0}].

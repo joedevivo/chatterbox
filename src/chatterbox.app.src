@@ -10,6 +10,7 @@
                   crypto,
                   public_key,
                   ssl,
+                  hpack,
                   lager
                  ]},
   {mod, { chatterbox_app, []}},
