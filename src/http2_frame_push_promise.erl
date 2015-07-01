@@ -7,7 +7,8 @@
 -export([
     format/1,
     read_binary/2,
-    to_binary/1
+    to_binary/1,
+    to_frame/4
     ]).
 
 -spec format(push_promise()) -> iodata().
@@ -25,6 +26,24 @@ read_binary(Bin, H=#frame_header{length=L}) ->
                  block_fragment=BlockFragment
                 },
     {ok, Payload, Rem}.
+
+-spec to_frame(pos_integer(), pos_integer(), hpack:headers(), hpack:encode_context()) ->
+                      {{frame_header(), push_promise()}, hpack:encode_context()}.
+%% Maybe break this up into continuations like the data frame
+to_frame(StreamId, PStreamId, Headers, EncodeContext) ->
+    {HeadersToSend, NewContext} = hpack:encode(Headers, EncodeContext),
+    L = byte_size(HeadersToSend),
+    {{#frame_header{
+         length=L,
+         type=?PUSH_PROMISE,
+         flags=?FLAG_END_HEADERS,
+         stream_id=StreamId
+        },
+      #push_promise{
+         promised_stream_id=PStreamId,
+         block_fragment=HeadersToSend
+        }},
+    NewContext}.
 
 -spec to_binary(push_promise()) -> iodata().
 to_binary(#push_promise{

@@ -2,7 +2,7 @@
 
 -include("http2.hrl").
 
--export([recv_frame/2, send_frame/2, new/2]).
+-export([recv_frame/2, send_frame/2, new/2, new/3]).
 
 -export_type([stream_state/0]).
 
@@ -22,15 +22,24 @@
 
 -spec new(stream_id(),
           {pos_integer(), pos_integer()}) ->
-          stream_state().
+                 stream_state().
 new(StreamId, {SendWindowSize, RecvWindowSize}) ->
+    new(StreamId, {SendWindowSize, RecvWindowSize}, idle).
+
+-spec new(stream_id(),
+          {pos_integer(), pos_integer()},
+          stream_state_name()) ->
+                 stream_state().
+new(StreamId, {SendWindowSize, RecvWindowSize}, StateName) ->
     #stream_state{
        stream_id=StreamId,
        send_window_size = SendWindowSize,
-       recv_window_size = RecvWindowSize
+       recv_window_size = RecvWindowSize,
+       state = StateName
       }.
 
--spec recv_frame(frame(), {stream_state(), connection_state()}) -> {stream_state(), connection_state()}.
+-spec recv_frame(frame(), {stream_state(), connection_state()}) ->
+                        {stream_state(), connection_state()}.
 %% First clause will handle transitions from idle to
 %% half_closed_remote, via HEADERS frame with END_STREAM flag set
 recv_frame(F={FH = #frame_header{
@@ -226,6 +235,16 @@ send_frame(F={#frame_header{
        queued_frames=QF ++ [F]
       },
      ConnectionState};
+send_frame(F={#frame_header{
+                 type=?PUSH_PROMISE
+                 }, _Data},
+           {StreamState = #stream_state{
+                             },
+            ConnectionState = #connection_state{
+                                 socket={Transport,Socket}
+                                }}) ->
+    Transport:send(Socket, http2_frame:to_binary(F)),
+    {StreamState, ConnectionState};
 send_frame(_F, S) ->
     S.
 

@@ -308,7 +308,7 @@ route_frame(F={H=#frame_header{stream_id=StreamId}, _Payload},
                decode_context=DecodeContext,
                recv_settings=#settings{initial_window_size=RecvWindowSize},
                send_settings=#settings{initial_window_size=SendWindowSize},
-               streams=Streams,
+               streams=_Streams,
                content_handler = Handler
            })
     when H#frame_header.type == ?HEADERS,
@@ -333,11 +333,10 @@ route_frame(F={H=#frame_header{stream_id=StreamId}, _Payload},
           NextConnectionState,
           Headers,
           Stream2),
-
     %% send it this headers frame which should transition it into the open state
     %% Add that pid to the set of streams in our state
     {next_state, connected, NewConnectionState#connection_state{
-                              streams = [{StreamId, NewStreamState}|Streams]
+                              streams = [{StreamId, NewStreamState}|NewConnectionState#connection_state.streams]
                              }};
 %% Might as well do continuations here since they're related code:
 route_frame(F={H=#frame_header{stream_id=StreamId}, _Payload},
@@ -363,7 +362,8 @@ route_frame(F={H=#frame_header{stream_id=StreamId}, _Payload},
             S = #connection_state{
                    decode_context=DecodeContext,
                    socket=_Socket,
-                   streams = Streams
+                   streams = Streams,
+                   content_handler = Handler
                   })
   when H#frame_header.type == ?CONTINUATION,
        ?IS_FLAG(H#frame_header.flags, ?FLAG_END_HEADERS) ->
@@ -380,13 +380,13 @@ route_frame(F={H=#frame_header{stream_id=StreamId}, _Payload},
     %% I think this might be wrong because ?END_HEADERS doesn't mean
     %% data has posted but baby steps
     {NewStreamState, NewConnectionState} =
-        chatterbox_static_content_handler:handle(
-          NextConnectionState#connection_state{decode_context=NewDecodeContext},
+        Handler:handle(
+          NextConnectionState#connection_state{decode_context=NewDecodeContext,
+                                              streams=NewStreamsTail},
           Headers,
           NewStream),
 
-    NewStreams = [{StreamId,NewStreamState}|NewStreamsTail],
-
+    NewStreams = [{StreamId,NewStreamState}|NewConnectionState#connection_state.streams],
     {next_state, connected, NewConnectionState#connection_state{
                               streams = NewStreams
                              }};
@@ -401,6 +401,7 @@ route_frame({H, _Payload}, S = #connection_state{
     when H#frame_header.type == ?PRIORITY ->
     lager:debug("Received PRIORITY Frame, but it's only a suggestion anyway..."),
     {next_state, connected, S};
+%% TODO: RST_STREAM support
 route_frame({H=#frame_header{stream_id=StreamId}, _Payload}, S = #connection_state{
                                                                     socket=_Socket})
     when H#frame_header.type == ?RST_STREAM ->
@@ -508,8 +509,6 @@ route_frame(F={H=#frame_header{stream_id=StreamId}, #window_update{}},
     when H#frame_header.type == ?WINDOW_UPDATE ->
     lager:debug("Received WINDOW_UPDATE Frame for Stream ~p", [StreamId]),
     {StreamId, Stream} = lists:keyfind(StreamId, 1, Streams),
-    %lager:info("Stream(~p): ~p", [StreamId, Stream]),
-    %lager:info("Streams: ~p", [Streams]),
     NewStreamsTail = lists:keydelete(StreamId, 1, Streams),
     %NewSendWindow = WSI+Stream#stream_state.send_window_size,
 
