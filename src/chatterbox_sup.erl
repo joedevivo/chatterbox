@@ -17,11 +17,7 @@ init([]) ->
         binary,
         {reuseaddr, true},
         {packet, raw},
-        %{nodelay, true},
         {backlog, 1024},
-        %{send_timeout, 30000},
-        %{send_timeout_close, true},
-        %% {keepalive, true}, {reuseaddr, true} %%, {nodelay, true}, {delay_send, false}, {backlog, 1024}
         {active, false}
     ],
     {ok, SSLEnabled} = application:get_env(ssl),
@@ -38,7 +34,7 @@ init([]) ->
     Restart = {simple_one_for_one, 60, 3600},
     Children = [{socket,
                 {http2_connection, start_link, [{Transport, ListenSocket}]}, % pass the socket!
-                temporary, 1000, worker, [chatterbox_fsm]}],
+                temporary, 1000, worker, [http2_connection]}],
     {ok, {Restart, Children}}.
 
 start_socket() ->
