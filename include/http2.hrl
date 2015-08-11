@@ -175,7 +175,7 @@
 
 
 -record(connection_state, {
-          socket = {undefined, undefined} :: socket(),
+          socket = undefined :: undefined | socket(),
           send_settings = #settings{} :: settings(),
           recv_settings = #settings{} :: settings(),
           send_window_size = ?DEFAULT_INITIAL_WINDOW_SIZE :: integer(),

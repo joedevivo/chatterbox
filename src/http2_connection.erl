@@ -4,15 +4,6 @@
 
 -include("http2.hrl").
 
-%-record(http2_connection_state, {
-%          connection= #connection_state{} :: connection_state(),
-%          frame_backlog :: queue:queue(frame()),
-%          next_available_stream_id = 2 :: stream_id(),
-%          streams = [] :: [{stream_id(), stream_state()}],
-%          continuation_stream_id = undefined :: stream_id() | undefined,
-%          content_handler = chatterbox_static_content_handler :: module()
-%    }).
-
 -export([start_link/1]).
 
 %% gen_fsm callbacks
@@ -41,76 +32,59 @@
 start_link(Socket) ->
     gen_fsm:start_link(?MODULE, Socket, []).
 
--spec init({gen_tcp, socket()}|{ssl, ssl:sslsocket()}) ->
+-spec init(socket()) ->
                   {ok, accept, #connection_state{}}.
-init(Socket) ->
-    gen_fsm:send_event(self(), start),
-    {ok, accept, #connection_state{
-                    socket=Socket
-                   }
-    }.
+init({Transport, ListenSocket}) ->
+    gen_fsm:send_event(self(), {Transport, ListenSocket}),
+    {ok, accept, #connection_state{}}.
 
 %% accepting connection state:
--spec accept(start, #connection_state{}) ->
+-spec accept(socket(), #connection_state{}) ->
                     {next_state, settings_handshake, #connection_state{}}.
-accept(start, S=#connection_state{
-                   socket={Transport,ListenSocket}
-                  }) ->
+accept({Transport, ListenSocket}, InitialState) ->
     Socket = case Transport of
         gen_tcp ->
             %%TCP Version
             {ok, AcceptSocket} = Transport:accept(ListenSocket),
-            inet:setopts(AcceptSocket, [{active, once}]),
             AcceptSocket;
         ssl ->
             %% SSL conditional stuff
             {ok, AcceptSocket} = Transport:transport_accept(ListenSocket),
-
-            lager:info("about to accept"),
-            Accept = ssl:ssl_accept(AcceptSocket),
-
-            lager:info("accepted ~p", [Accept]),
-            {ok, Upgrayedd} = ssl:negotiated_next_protocol(AcceptSocket),
-            lager:info("Upgrayedd ~p", [Upgrayedd]),
-
-            ssl:setopts(AcceptSocket, [{active, once}]),
+            _Accept = ssl:ssl_accept(AcceptSocket),
+            %% TODO: Erlang 18 uses ALPN
+            {ok, _Upgrayedd} = ssl:negotiated_next_protocol(AcceptSocket),
             AcceptSocket
     end,
     %% Start up a listening socket to take the place of this socket,
     %% that's no longer listening
     chatterbox_sup:start_socket(),
 
-    {next_state,
-     settings_handshake,
-     S#connection_state{socket={Transport,Socket}}}.
+    {ok, Bin} = Transport:recv(Socket, length(?PREAMBLE), 5000),
+    case Bin of
+        <<?PREAMBLE>> ->
+            gen_fsm:send_event(self(), start),
+            {next_state,
+             settings_handshake,
+             InitialState#connection_state{socket={Transport,Socket}}};
+        BadPreamble ->
+            Transport:close(Socket),
+            lager:debug("Bad Preamble: ~p", [BadPreamble]),
+            go_away(?PROTOCOL_ERROR, InitialState)
+    end.
 
 %% From Section 6.5 of the HTTP/2 Specification
 %% A SETTINGS frame MUST be sent by both endpoints at the start of a
 %% connection, and MAY be sent at any other time by either endpoint
 %% over the lifetime of the connection. Implementations MUST support
 %% all of the parameters defined by this specification.
--spec settings_handshake({start_frame, binary()} | {boolean(), boolean(), [frame()]},
+-spec settings_handshake(start | {boolean(), boolean(), [frame()]},
                          #connection_state{}) ->
                                 {next_state, settings_handshake | connected, #connection_state{}}
                               | {stop, closing, #connection_state{}}.
-settings_handshake({start_frame, Bin}, S = #connection_state{
+settings_handshake(start, S = #connection_state{
                                               socket=Socket,
                                               recv_settings=ServerSettings
                                              }) ->
-    %% We just triggered this from the handle info of the HTTP/2 preamble
-    %% It's possible we got more.
-    {InitialSettingsFrames, InitialOtherFrames} =
-        case Bin of
-            <<>> ->
-            {[], queue:new()};
-        _ ->
-            OtherFrames = http2_frame:from_binary(Bin),
-            {SettingsBacklog, FB} = lists:partition(
-                fun({X,_}) -> X#frame_header.type =:= ?SETTINGS end,
-                OtherFrames),
-            {SettingsBacklog, queue:from_list(FB)}
-    end,
-    lager:debug("Initial Other Frames: ~p", [InitialOtherFrames]),
     %% Assemble our settings and send them
     http2_frame_settings:send(Socket, ServerSettings),
 
@@ -126,9 +100,9 @@ settings_handshake({start_frame, Bin}, S = #connection_state{
     %% we can deal with them
 
     NewState = S#connection_state{
-                 frame_backlog=InitialOtherFrames
+                 frame_backlog=queue:new()
                 },
-    gen_fsm:send_event(self(), {false, false, InitialSettingsFrames}),
+    gen_fsm:send_event(self(), {false, false, []}),
     {next_state, settings_handshake, NewState};
 
 %% For the remaining settings_handshake clauses, the event is
@@ -534,10 +508,6 @@ handle_sync_event(_E, _F, StateName, State) ->
     {next_state, StateName, State}.
 
 %% TODO: Handle_info when ssl socket is closed
-handle_info({_, _Socket, <<?PREAMBLE,Bin/bits>>}, _, S) ->
-    lager:debug("handle_info HTTP/2 Preamble!"),
-    gen_fsm:send_event(self(), {start_frame,Bin}),
-    {next_state, settings_handshake, S};
 handle_info({tcp_closed, _Socket}, _StateName, S) ->
     lager:debug("tcp_close"),
     {stop, normal, S};
@@ -581,4 +551,5 @@ go_away(ErrorCode,
                                           stream_id=0
                                          }, GoAway}),
     T:send(Socket, GoAwayBin),
+    gen_fsm:send_event(self(), io_lib:format("GO_AWAY: ErrorCode ~p", [ErrorCode])),
     {next_state, closing, State}.
