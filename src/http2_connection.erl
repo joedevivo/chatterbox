@@ -77,7 +77,7 @@ accept({Transport, ListenSocket}, InitialState) ->
 %% connection, and MAY be sent at any other time by either endpoint
 %% over the lifetime of the connection. Implementations MUST support
 %% all of the parameters defined by this specification.
--spec settings_handshake(start | {boolean(), boolean(), [frame()]},
+-spec settings_handshake(start | {boolean(), boolean()},
                          #connection_state{}) ->
                                 {next_state, settings_handshake | connected, #connection_state{}}
                               | {stop, closing, #connection_state{}}.
@@ -86,6 +86,11 @@ settings_handshake(start, S = #connection_state{
                                               recv_settings=ServerSettings
                                              }) ->
     %% Assemble our settings and send them
+
+    %% Section 3.5
+    %% The server connection preface consists of a potentially empty
+    %% SETTINGS frame (Section 6.5) that MUST be the first frame the server
+    %% sends in the HTTP/2 connection.
     http2_frame_settings:send(Socket, ServerSettings),
 
     %% There should be two SETTINGS frames sitting on the wire
@@ -98,84 +103,63 @@ settings_handshake(start, S = #connection_state{
     %% any other frame types until SETTINGS have been exchanged. So,
     %% if something else comes in, let's store them in a backlog until
     %% we can deal with them
-
-    NewState = S#connection_state{
-                 frame_backlog=queue:new()
-                },
-    gen_fsm:send_event(self(), {false, false, []}),
-    {next_state, settings_handshake, NewState};
+    gen_fsm:send_event(self(), {false, false}),
+    {next_state, settings_handshake, S};
 
 %% For the remaining settings_handshake clauses, the event is
-%% {boolean(), boolean(), [frame()]} which was formerly the
+%% {boolean(), boolean()} which was formerly the
 %% accumulator for settings_handhshake_loop (for you chatterbox
 %% historians out there!)
 
-%% The event is {true, true, []} when the SETTINGS handshake is
+%% The event is {true, true} when the SETTINGS handshake is
 %% complete. We're done, transition to connected and start processing
 %% the backlog %settings_handshake_loop({true, true}, [], State) ->
-settings_handshake({true, true, []}, State) ->
-    gen_fsm:send_event(self(), backlog),
+settings_handshake({true, true}, State) ->
+    gen_fsm:send_event(self(), start_frame),
     {next_state, connected, State};
 %% We're done with anything we received on the initial packet, read
 %% another, and put it on the backlog. We don't really need to do
 %% this, except it lets us only write the conditional logic once
-settings_handshake({ReceivedAck,ReceivedClientSettings,[]}, State=#connection_state{
-                                           socket=Socket,
-                                           frame_backlog=FB
-                                          }) ->
+settings_handshake({ReceivedAck,ReceivedClientSettings},
+                   State=#connection_state{
+                            socket = Socket,
+                            frame_backlog = Backlog
+                           }) ->
     %% TODO: 5000 is hardcoded, make configurable
-    Frame = {FH, _} = http2_frame:read(Socket, 5000),
+    Frame = {FH, FPayload} = http2_frame:read(Socket, 5000),
 
-    try FH#frame_header.type of
-        ?SETTINGS ->
-            gen_fsm:send_event(self(), {ReceivedAck, ReceivedClientSettings, [Frame]}),
+    try {FH#frame_header.type, ?IS_FLAG(FH#frame_header.flags, ?FLAG_ACK)} of
+        {?SETTINGS, true} ->
+            gen_fsm:send_event(self(), {true, ReceivedClientSettings}),
             {next_state, settings_handshake, State};
+        {?SETTINGS, false} ->
+            ClientSettings = http2_frame_settings:overlay(
+                               State#connection_state.send_settings, FPayload),
+            http2_frame_settings:ack(Socket),
+            gen_fsm:send_event(self(), {ReceivedAck, true}),
+            {next_state, settings_handshake, State#connection_state{
+                                               send_settings=ClientSettings
+                                              }};
         _ ->
             %% loop right back into this state after putting one on the backlog
-            gen_fsm:send_event(self(), {ReceivedAck, ReceivedClientSettings, []}),
-            {next_state, settings_handshake, State#connection_state{
-                                               frame_backlog=queue:in(Frame, FB)
-                                              }}
+            gen_fsm:send_event(self(), {ReceivedAck, ReceivedClientSettings}),
+            {next_state,
+             settings_handshake,
+             State#connection_state{
+               frame_backlog = queue:in(Frame, Backlog)
+              }}
     catch
         %% Timeout of settings handshake, let's close it down
         _:_ ->
             lager:error("[settings_handshake] did not receive SETTINGS frame in a reasonable timeframe. closing connection"),
             go_away(?SETTINGS_TIMEOUT, State),
             {next_state, closing, State}
-    end;
-settings_handshake({_ReceivedAck, ReceivedClientSettings,
-                    [{FH, _FPayload}|SettingsFramesTail]},
-                    State)
-  when ?IS_FLAG(FH#frame_header.flags, ?FLAG_ACK) ->
-    gen_fsm:send_event(self(), {true, ReceivedClientSettings, SettingsFramesTail}),
-    {next_state, settings_handshake, State};
-settings_handshake({ReceivedAck, _ReceivedClientSettings, [{_FH, FPayload}|SettingsFramesTail]},
-                       S=#connection_state{}) ->
-    ClientSettings = http2_frame_settings:overlay(S#connection_state.send_settings, FPayload),
-    http2_frame_settings:ack(S#connection_state.socket),
+    end.
 
-    gen_fsm:send_event(self(), {ReceivedAck, true, SettingsFramesTail}),
-    {next_state, settings_handshake, S#connection_state{
-                                       send_settings=ClientSettings
-                                      }}.
-
-%% Process the backlog during the handshake until there's none
-connected(backlog, S = #connection_state{frame_backlog=FB}) ->
-    lager:debug("[connected] Processing backlog, length: ~p", [queue:len(FB)]),
-    case queue:out(FB) of
-        %% Once the backlog is empty, start processing frames as they come in
-        {empty, _} ->
-            gen_fsm:send_event(self(), start_frame),
-            {next_state, connected, S};
-        %% After settings handshake, process any backlogged frames
-        {{value, F}, T} ->
-            Response = route_frame(F, S#connection_state{frame_backlog=T}),
-            gen_fsm:send_event(self(), backlog),
-            Response
-    end;
 connected(start_frame,
           S = #connection_state{
-                 socket=Socket
+                 socket = Socket,
+                 frame_backlog = {[],[]} %% empty backlog
                 }
          ) ->
     lager:debug("[connected] Waiting for next frame"),
@@ -186,7 +170,29 @@ connected(start_frame,
     Response = route_frame(Frame, S),
     %% After frame is routed, let the FSM know we're ready for another
     gen_fsm:send_event(self(), start_frame),
-    Response.
+    Response;
+%% Process the backlog during the handshake until there's none.
+connected(start_frame, S = #connection_state{
+                              frame_backlog=FB
+                             }) ->
+    lager:debug("[connected] Processing backlog, length: ~p", [queue:len(FB)]),
+    case queue:out(FB) of
+        %% Once the backlog is empty, start processing frames as they come in
+        {empty, _} ->
+            gen_fsm:send_event(self(), start_frame),
+            {next_state,
+             connected,
+             S#connection_state{
+               frame_backlog = queue:new()
+              }};
+        %% After settings handshake, process any backlogged frames
+        {{value, F}, T} ->
+            Response = route_frame(F, S#connection_state{
+                                        frame_backlog=T
+                                       }),
+            gen_fsm:send_event(self(), start_frame),
+            Response
+    end.
 
 %% The continuation state in entered after receiving a HEADERS frame
 %% with no ?END_HEADERS flag set, we're locked waiting for contiunation
