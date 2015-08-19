@@ -184,7 +184,7 @@
           encode_context = hpack:new_encode_context() :: hpack:encode_context(),
 
 %% An effort to consolidate client and server states, which should actually be very similar
-          frame_backlog = queue:new() :: queue:queue(frame()) | {[],[]},
+          settings_sent = 0 :: non_neg_integer(),
           next_available_stream_id = 2 :: stream_id(),
           streams = [] :: [{stream_id(), stream_state()}],
           continuation_stream_id = undefined :: stream_id() | undefined,

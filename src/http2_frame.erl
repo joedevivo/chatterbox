@@ -37,7 +37,7 @@
 read(Socket) ->
     read(Socket, infinity).
 
--spec read(socket(), timeout()) -> frame().
+-spec read(socket(), timeout()) -> frame() | {error, closed|inet:posix()}.
 read(Socket, Timeout) ->
     case read_header(Socket, Timeout) of
         {H, <<>>} ->
@@ -68,7 +68,7 @@ format_header(#frame_header{
     }) ->
     io_lib:format("[Frame Header: L:~p, T:~p, F:~p, StrId:~p]", [Length, ?FT(Type), Flags, StreamId]).
 
--spec read_header(socket(), timeout()) -> {frame_header(), binary()}.
+-spec read_header(socket(), timeout()) -> {frame_header(), binary()} | {error, closed|inet:posix()}.
 read_header({Transport, Socket}, Timeout) ->
     case Transport:recv(Socket, 9, Timeout) of
         {ok, HeaderBytes} ->
@@ -87,12 +87,15 @@ read_binary_frame_header(<<Length:24,Type:8,Flags:8,_R:1,StreamId:31,Rem/bits>>)
     {Header, Rem}.
 
 -spec read_payload(socket(), frame_header(), timeout()) ->
-    {ok, payload(), <<>>} | {error, term()}.
+    {ok, payload(), <<>>} | {error, closed|inet:posix()}.
 read_payload(_, #frame_header{length=0}, _Timeout) ->
     {ok, <<>>, <<>>};
 read_payload({Transport, Socket}, Header=#frame_header{length=L}, Timeout) ->
-    {ok, DataBin} = Transport:recv(Socket, L, Timeout),
-    read_binary_payload(DataBin, Header).
+    case Transport:recv(Socket, L, Timeout) of
+        {ok, DataBin} ->
+            read_binary_payload(DataBin, Header);
+        E -> E
+    end.
 
 -spec read_binary_payload(binary(), frame_header()) ->
     {ok, payload(), binary()} | {error, term()}.

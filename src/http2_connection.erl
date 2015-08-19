@@ -17,7 +17,6 @@
 ]).
 
 -export([accept/2,
-         settings_handshake/2,
          connected/2,
          continuation/2,
          closing/2
@@ -40,8 +39,9 @@ init({Transport, ListenSocket}) ->
 
 %% accepting connection state:
 -spec accept(socket(), #connection_state{}) ->
-                    {next_state, settings_handshake, #connection_state{}}.
-accept({Transport, ListenSocket}, InitialState) ->
+                    {next_state, connected|closing, #connection_state{}}.
+accept({Transport, ListenSocket},
+       InitialState=#connection_state{}) ->
     Socket = case Transport of
         gen_tcp ->
             %%TCP Version
@@ -62,148 +62,75 @@ accept({Transport, ListenSocket}, InitialState) ->
     {ok, Bin} = Transport:recv(Socket, length(?PREAMBLE), 5000),
     case Bin of
         <<?PREAMBLE>> ->
-            gen_fsm:send_event(self(), start),
-            {next_state,
-             settings_handshake,
-             InitialState#connection_state{socket={Transport,Socket}}};
+            %% From Section 6.5 of the HTTP/2 Specification A SETTINGS
+            %% frame MUST be sent by both endpoints at the start of a
+            %% connection, and MAY be sent at any other time by either
+            %% endpoint over the lifetime of the
+            %% connection. Implementations MUST support all of the
+            %% parameters defined by this specification.
+
+            %% We should just send our server settings immediately
+            StateWithSocket = InitialState#connection_state{
+                                socket={Transport, Socket}
+                               },
+
+            StateToRouteWith = send_settings(StateWithSocket),
+
+            %% The first frame should be the client settings as per
+            %% RFC-7540#3.5
+
+            %% We'll send this event first, since route_frame will
+            %% return the response we need here
+            gen_fsm:send_event(self(), next),
+
+            Frame = {FH, _FPayload} = http2_frame:read({Transport,Socket}, 5000),
+
+            try FH#frame_header.type of
+                ?SETTINGS ->
+                    route_frame(Frame, StateToRouteWith);
+                _ ->
+                    go_away(?PROTOCOL_ERROR, StateToRouteWith)
+            catch
+                _:_ ->
+                    go_away(?PROTOCOL_ERROR, StateToRouteWith)
+            end;
         BadPreamble ->
             Transport:close(Socket),
             lager:debug("Bad Preamble: ~p", [BadPreamble]),
             go_away(?PROTOCOL_ERROR, InitialState)
     end.
 
-%% From Section 6.5 of the HTTP/2 Specification
-%% A SETTINGS frame MUST be sent by both endpoints at the start of a
-%% connection, and MAY be sent at any other time by either endpoint
-%% over the lifetime of the connection. Implementations MUST support
-%% all of the parameters defined by this specification.
--spec settings_handshake(start | {boolean(), boolean()},
-                         #connection_state{}) ->
-                                {next_state, settings_handshake | connected, #connection_state{}}
-                              | {stop, closing, #connection_state{}}.
-settings_handshake(start, S = #connection_state{
-                                              socket=Socket,
-                                              recv_settings=ServerSettings
-                                             }) ->
-    %% Assemble our settings and send them
-
-    %% Section 3.5
-    %% The server connection preface consists of a potentially empty
-    %% SETTINGS frame (Section 6.5) that MUST be the first frame the server
-    %% sends in the HTTP/2 connection.
-    http2_frame_settings:send(Socket, ServerSettings),
-
-    %% There should be two SETTINGS frames sitting on the wire
-    %% now. The ACK to the one we just sent and the value of the
-    %% client settings. We're pretty sure that the first one will be
-    %% the Client Settings as it was probably on the wire before we
-    %% even sent the Server Settings, but can we ever really be sure
-
-    %% What we know from the HTTP/2 spec is that we shouldn't process
-    %% any other frame types until SETTINGS have been exchanged. So,
-    %% if something else comes in, let's store them in a backlog until
-    %% we can deal with them
-    gen_fsm:send_event(self(), {false, false}),
-    {next_state, settings_handshake, S};
-
-%% For the remaining settings_handshake clauses, the event is
-%% {boolean(), boolean()} which was formerly the
-%% accumulator for settings_handhshake_loop (for you chatterbox
-%% historians out there!)
-
-%% The event is {true, true} when the SETTINGS handshake is
-%% complete. We're done, transition to connected and start processing
-%% the backlog %settings_handshake_loop({true, true}, [], State) ->
-settings_handshake({true, true}, State) ->
-    gen_fsm:send_event(self(), start_frame),
-    {next_state, connected, State};
-%% We're done with anything we received on the initial packet, read
-%% another, and put it on the backlog. We don't really need to do
-%% this, except it lets us only write the conditional logic once
-settings_handshake({ReceivedAck,ReceivedClientSettings},
-                   State=#connection_state{
-                            socket = Socket,
-                            frame_backlog = Backlog
-                           }) ->
-    %% TODO: 5000 is hardcoded, make configurable
-    Frame = {FH, FPayload} = http2_frame:read(Socket, 5000),
-
-    try {FH#frame_header.type, ?IS_FLAG(FH#frame_header.flags, ?FLAG_ACK)} of
-        {?SETTINGS, true} ->
-            gen_fsm:send_event(self(), {true, ReceivedClientSettings}),
-            {next_state, settings_handshake, State};
-        {?SETTINGS, false} ->
-            ClientSettings = http2_frame_settings:overlay(
-                               State#connection_state.send_settings, FPayload),
-            http2_frame_settings:ack(Socket),
-            gen_fsm:send_event(self(), {ReceivedAck, true}),
-            {next_state, settings_handshake, State#connection_state{
-                                               send_settings=ClientSettings
-                                              }};
-        _ ->
-            %% loop right back into this state after putting one on the backlog
-            gen_fsm:send_event(self(), {ReceivedAck, ReceivedClientSettings}),
-            {next_state,
-             settings_handshake,
-             State#connection_state{
-               frame_backlog = queue:in(Frame, Backlog)
-              }}
-    catch
-        %% Timeout of settings handshake, let's close it down
-        _:_ ->
-            lager:error("[settings_handshake] did not receive SETTINGS frame in a reasonable timeframe. closing connection"),
-            go_away(?SETTINGS_TIMEOUT, State),
-            {next_state, closing, State}
-    end.
-
-connected(start_frame,
+connected(next,
           S = #connection_state{
-                 socket = Socket,
-                 frame_backlog = {[],[]} %% empty backlog
+                 socket = Socket
                 }
          ) ->
     lager:debug("[connected] Waiting for next frame"),
-    {_Header, _Payload} = Frame = http2_frame:read(Socket),
 
-    lager:debug("[connected] [start_frame] ~p", [http2_frame:format(Frame)]),
-
-    Response = route_frame(Frame, S),
+    %% Timeout here so we can come up for air and see if anybody is
+    %% asking us to do anything. like maybe somebody has come to check
+    %% if we ever got our server settings ack
+    Response = case http2_frame:read(Socket,  2500) of
+        {error, _} ->
+             {next_state, connected, S};
+        Frame ->
+            lager:debug("[connected] [next] ~p", [http2_frame:format(Frame)]),
+            route_frame(Frame, S)
+    end,
     %% After frame is routed, let the FSM know we're ready for another
-    gen_fsm:send_event(self(), start_frame),
-    Response;
-%% Process the backlog during the handshake until there's none.
-connected(start_frame, S = #connection_state{
-                              frame_backlog=FB
-                             }) ->
-    lager:debug("[connected] Processing backlog, length: ~p", [queue:len(FB)]),
-    case queue:out(FB) of
-        %% Once the backlog is empty, start processing frames as they come in
-        {empty, _} ->
-            gen_fsm:send_event(self(), start_frame),
-            {next_state,
-             connected,
-             S#connection_state{
-               frame_backlog = queue:new()
-              }};
-        %% After settings handshake, process any backlogged frames
-        {{value, F}, T} ->
-            Response = route_frame(F, S#connection_state{
-                                        frame_backlog=T
-                                       }),
-            gen_fsm:send_event(self(), start_frame),
-            Response
-    end.
+    gen_fsm:send_event(self(), next),
+    Response.
 
 %% The continuation state in entered after receiving a HEADERS frame
 %% with no ?END_HEADERS flag set, we're locked waiting for contiunation
 %% frames on the same stream to preserve the decoding context state
-continuation(start_frame,
+continuation(next,
              S = #connection_state{
                     socket=Socket,
                     continuation_stream_id = StreamId
                    }) ->
     Frame = {FH,_} = http2_frame:read(Socket),
-    lager:debug("[continuation] [start_frame] ~p", [http2_frame:format(Frame)]),
+    lager:debug("[continuation] [next] ~p", [http2_frame:format(Frame)]),
 
     Response = case {FH#frame_header.stream_id, FH#frame_header.type} of
                    {StreamId, ?CONTINUATION} ->
@@ -211,7 +138,7 @@ continuation(start_frame,
                    _ ->
                        go_away(?PROTOCOL_ERROR, S)
                end,
-    gen_fsm:send_event(self(), start_frame),
+    gen_fsm:send_event(self(), next),
     Response;
 continuation(_, State) ->
     go_away(?PROTOCOL_ERROR, State).
@@ -430,11 +357,14 @@ route_frame({H, Payload}, S = #connection_state{
                              }
     };
 %% Got settings ACK
-route_frame({H, _Payload}, S = #connection_state{})
+route_frame({H, _Payload},
+            S = #connection_state{
+                   settings_sent=SS
+                  })
     when H#frame_header.type == ?SETTINGS,
          ?IS_FLAG(H#frame_header.flags, ?FLAG_ACK) ->
     lager:debug("Received SETTINGS ACK"),
-    {next_state, connected, S};
+    {next_state, connected, S#connection_state{settings_sent=SS-1}};
 route_frame({H=#frame_header{stream_id=StreamId}, _Payload}, S = #connection_state{})
     when H#frame_header.type == ?PUSH_PROMISE ->
     lager:debug("Received PUSH_PROMISE Frame for Stream ~p", [StreamId]),
@@ -499,14 +429,25 @@ route_frame(F={H=#frame_header{stream_id=StreamId}, #window_update{}},
     NewStreams = [{StreamId, NStream}|NewStreamsTail],
     {next_state, connected, NConn#connection_state{streams=NewStreams}};
 
-route_frame({error, closed}, State) ->
-    {stop, normal, State};
+%route_frame({error, closed}, State) ->
+%    {stop, normal, State};
 route_frame(Frame, State) ->
     lager:error("Frame condition not covered by pattern match"),
     lager:error("OOPS! " ++ http2_frame:format(Frame)),
     lager:error("OOPS! ~p", [State]),
     go_away(?PROTOCOL_ERROR, State).
 
+handle_event({check_settings_ack, ExpectedSS},
+             StateName,
+             State=#connection_state{
+                      settings_sent=ActualSS
+                     })
+  when ActualSS < ExpectedSS ->
+    lager:debug("check_settings_ack, ~p < ~p", [ActualSS, ExpectedSS]),
+    {next_state, StateName, State};
+handle_event({check_settings_ack, _ExpectedSS},
+             _StateName, State) ->
+    go_away(?SETTINGS_TIMEOUT, State);
 handle_event(_E, StateName, State) ->
     {next_state, StateName, State}.
 
@@ -559,3 +500,25 @@ go_away(ErrorCode,
     T:send(Socket, GoAwayBin),
     gen_fsm:send_event(self(), io_lib:format("GO_AWAY: ErrorCode ~p", [ErrorCode])),
     {next_state, closing, State}.
+
+-spec send_settings(connection_state()) -> connection_state().
+send_settings(State = #connection_state{
+                         recv_settings=ServerSettings,
+                         socket=Socket,
+                         settings_sent=SS
+                        }) ->
+    http2_frame_settings:send(Socket, ServerSettings),
+    send_ack_timeout(SS+1),
+    State#connection_state{
+      settings_sent=SS+1
+     }.
+
+-spec send_ack_timeout(non_neg_integer()) -> pid().
+send_ack_timeout(SS) ->
+    Self = self(),
+    SendAck = fun() ->
+                      lager:debug("Spawning ack timeout alarm clock: ~p + ~p", [Self, SS]),
+                      timer:sleep(5000),
+                      gen_fsm:send_all_state_event(Self, {check_settings_ack,SS})
+              end,
+    spawn_link(SendAck).
