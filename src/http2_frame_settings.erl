@@ -7,7 +7,7 @@
 -export([
          format/1,
          read_binary/2,
-         send/2,
+         send/3,
          ack/1,
          to_binary/1,
          overlay/2
@@ -52,7 +52,7 @@ format({settings, PList}) ->
     {ok, payload(), binary()} |
     {error, term()}.
 read_binary(Bin, _Header = #frame_header{length=0}) ->
-    {ok, <<>>, Bin};
+    {ok, {settings, []}, Bin};
 read_binary(Bin, _Header = #frame_header{length=Length}) ->
     <<SettingsBin:Length/binary,Rem/bits>> = Bin,
     Settings = parse_settings(SettingsBin),
@@ -94,22 +94,25 @@ overlay(S, {settings, [{?SETTINGS_MAX_HEADER_LIST_SIZE, Val}|PList]}) ->
 overlay(S, {settings, []}) ->
     S.
 
--spec send(socket(), settings()) -> ok | {error, term()}.
-send({Transport, Socket}, _Settings) ->
-    %% TODO: hard coded settings frame. needs to be figured out from
-    %% _Settings. Or not. We can have our own settings and they can be
-    %% different.  Also needs to be compared to ?DEFAULT_SETTINGS and
-    %% only send the ones that are different or maybe it's the fsm's
-    %% current settings.  figure out later
-    Header = <<12:24,?SETTINGS:8,16#0:8,0:1,0:31>>,
+-spec send(socket(), settings(), settings()) -> ok | {error, term()}.
+send({Transport, Socket}, PrevSettings, NewSettings) ->
+    Diff = http2_settings:diff(PrevSettings, NewSettings),
+    Payload = make_payload(Diff),
+    L = size(Payload),
+    Header = <<L:24,?SETTINGS:8,16#0:8,0:1,0:31>>,
 
-    Payload = <<3:16,
-                100:32,
-                4:16,
-                65535:32>>,
     Frame = [Header, Payload],
     lager:debug("sending settings ~p", [Frame]),
     Transport:send(Socket, Frame).
+
+-spec make_payload(settings_proplist()) -> binary().
+make_payload(Diff) ->
+    make_payload_(lists:reverse(Diff), <<>>).
+
+make_payload_([], BinAcc) ->
+    BinAcc;
+make_payload_([{<<Setting>>, Value}|Tail], BinAcc) ->
+    make_payload_(Tail, <<Setting:16,Value:32,BinAcc/binary>>).
 
 -spec ack(socket()) -> ok | {error, term()}.
 ack({Transport,Socket}) ->
@@ -144,3 +147,19 @@ to_binary(?SETTINGS_MAX_HEADER_LIST_SIZE, #settings{max_header_list_size=undefin
     <<>>;
 to_binary(?SETTINGS_MAX_HEADER_LIST_SIZE, #settings{max_header_list_size=MHLS}) ->
     <<16#6:16,MHLS:32>>.
+
+-ifdef(TEST).
+-include_lib("eunit/include/eunit.hrl").
+
+make_payload_test() ->
+    Diff = [
+            {?SETTINGS_MAX_CONCURRENT_STREAMS, 2},
+            {?SETTINGS_MAX_FRAME_SIZE, 2048}
+           ],
+    Bin = make_payload(Diff),
+    <<MCSIndex>> = ?SETTINGS_MAX_CONCURRENT_STREAMS,
+    <<MFSIndex>> = ?SETTINGS_MAX_FRAME_SIZE,
+    ?assertEqual(<<MCSIndex:16,2:32,MFSIndex:16,2048:32>>, Bin),
+    ok.
+
+-endif.

@@ -364,7 +364,18 @@ route_frame({H, _Payload},
     when H#frame_header.type == ?SETTINGS,
          ?IS_FLAG(H#frame_header.flags, ?FLAG_ACK) ->
     lager:debug("Received SETTINGS ACK"),
-    {next_state, connected, S#connection_state{settings_sent=SS-1}};
+    case queue:out(SS) of
+        {{value, {_Ref, NewSettings}}, NewSS} ->
+            {next_state,
+             connected,
+             S#connection_state{
+               settings_sent=NewSS,
+               send_settings=NewSettings
+              }};
+        _ ->
+            {next_state, closing, S}
+    end;
+%%    {next_state, connected, S#connection_state{settings_sent=SS-1}};
 route_frame({H=#frame_header{stream_id=StreamId}, _Payload}, S = #connection_state{})
     when H#frame_header.type == ?PUSH_PROMISE ->
     lager:debug("Received PUSH_PROMISE Frame for Stream ~p", [StreamId]),
@@ -437,17 +448,28 @@ route_frame(Frame, State) ->
     lager:error("OOPS! ~p", [State]),
     go_away(?PROTOCOL_ERROR, State).
 
-handle_event({check_settings_ack, ExpectedSS},
+handle_event({check_settings_ack, {Ref, NewSettings}},
              StateName,
              State=#connection_state{
-                      settings_sent=ActualSS
-                     })
-  when ActualSS < ExpectedSS ->
-    lager:debug("check_settings_ack, ~p < ~p", [ActualSS, ExpectedSS]),
-    {next_state, StateName, State};
-handle_event({check_settings_ack, _ExpectedSS},
-             _StateName, State) ->
-    go_away(?SETTINGS_TIMEOUT, State);
+                      settings_sent=SS
+                     }) ->
+    case queue:out(SS) of
+        {{value, {Ref, NewSettings}}, _} ->
+            %% This is still here!
+            go_away(?SETTINGS_TIMEOUT, State);
+        _ ->
+            %% YAY!
+            {next_state, StateName, State}
+    end;
+
+%%  when ActualSS == 0 ->
+%%    {next_state, StateName,
+%%     State#connection_state{
+%%       send_settings=NewSettings
+%%      }};
+%%handle_event({check_settings_ack, _ExpectedSS},
+%%             _StateName, State) ->
+%%    go_away(?SETTINGS_TIMEOUT, State);
 handle_event(_E, StateName, State) ->
     {next_state, StateName, State}.
 
@@ -503,22 +525,26 @@ go_away(ErrorCode,
 
 -spec send_settings(connection_state()) -> connection_state().
 send_settings(State = #connection_state{
-                         recv_settings=ServerSettings,
+                         recv_settings=CurrentSettings,
                          socket=Socket,
                          settings_sent=SS
                         }) ->
-    http2_frame_settings:send(Socket, ServerSettings),
-    send_ack_timeout(SS+1),
+    %% Pull from config
+    NewSettings = chatterbox:settings(),
+    Ref = make_ref(),
+
+    http2_frame_settings:send(Socket, CurrentSettings, NewSettings),
+    send_ack_timeout({Ref,NewSettings}),
     State#connection_state{
-      settings_sent=SS+1
+      settings_sent=queue:in({Ref, NewSettings}, SS)
      }.
 
--spec send_ack_timeout(non_neg_integer()) -> pid().
+-spec send_ack_timeout({reference(), settings()}) -> pid().
 send_ack_timeout(SS) ->
     Self = self(),
     SendAck = fun() ->
-                      lager:debug("Spawning ack timeout alarm clock: ~p + ~p", [Self, SS]),
-                      timer:sleep(5000),
-                      gen_fsm:send_all_state_event(Self, {check_settings_ack,SS})
+                  lager:debug("Spawning ack timeout alarm clock: ~p + ~p", [Self, SS]),
+                  timer:sleep(5000),
+                  gen_fsm:send_all_state_event(Self, {check_settings_ack,SS})
               end,
     spawn_link(SendAck).

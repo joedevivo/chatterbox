@@ -123,6 +123,26 @@
 -define(DEFAULT_SETTINGS, #settings{}).
 -type settings() :: #settings{}.
 
+-define(SETTINGS_HEADER_TABLE_SIZE,         <<16#1>>).
+-define(SETTINGS_ENABLE_PUSH,               <<16#2>>).
+-define(SETTINGS_MAX_CONCURRENT_STREAMS,    <<16#3>>).
+-define(SETTINGS_INITIAL_WINDOW_SIZE,       <<16#4>>).
+-define(SETTINGS_MAX_FRAME_SIZE,            <<16#5>>).
+-define(SETTINGS_MAX_HEADER_LIST_SIZE,      <<16#6>>).
+
+-define(SETTING_NAMES, [?SETTINGS_HEADER_TABLE_SIZE,
+                        ?SETTINGS_ENABLE_PUSH,
+                        ?SETTINGS_MAX_CONCURRENT_STREAMS,
+                        ?SETTINGS_INITIAL_WINDOW_SIZE,
+                        ?SETTINGS_MAX_FRAME_SIZE,
+                        ?SETTINGS_MAX_HEADER_LIST_SIZE]).
+
+-type setting_name() :: binary().
+
+
+-type settings_property() :: {setting_name(), any()}.
+-type settings_proplist() :: [settings_property()].
+
 -record(push_promise, {
           promised_stream_id :: stream_id(),
           block_fragment :: binary()
@@ -184,7 +204,7 @@
           encode_context = hpack:new_encode_context() :: hpack:encode_context(),
 
 %% An effort to consolidate client and server states, which should actually be very similar
-          settings_sent = 0 :: non_neg_integer(),
+          settings_sent = queue:new() :: queue:queue(),
           next_available_stream_id = 2 :: stream_id(),
           streams = [] :: [{stream_id(), stream_state()}],
           continuation_stream_id = undefined :: stream_id() | undefined,
@@ -211,17 +231,3 @@
 }).
 
 -type stream_state() :: #stream_state{}.
-
--define(SETTINGS_HEADER_TABLE_SIZE,         <<16#1>>).
--define(SETTINGS_ENABLE_PUSH,               <<16#2>>).
--define(SETTINGS_MAX_CONCURRENT_STREAMS,    <<16#3>>).
--define(SETTINGS_INITIAL_WINDOW_SIZE,       <<16#4>>).
--define(SETTINGS_MAX_FRAME_SIZE,            <<16#5>>).
--define(SETTINGS_MAX_HEADER_LIST_SIZE,      <<16#6>>).
-
--define(SETTING_NAMES, [?SETTINGS_HEADER_TABLE_SIZE,
-                        ?SETTINGS_ENABLE_PUSH,
-                        ?SETTINGS_MAX_CONCURRENT_STREAMS,
-                        ?SETTINGS_INITIAL_WINDOW_SIZE,
-                        ?SETTINGS_MAX_FRAME_SIZE,
-                        ?SETTINGS_MAX_HEADER_LIST_SIZE]).

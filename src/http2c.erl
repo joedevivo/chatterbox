@@ -138,9 +138,10 @@ init([]) ->
     http2_frame_settings:ack({Transport, Socket}),
 
     ClientSettings = #settings{},
-    http2_frame_settings:send({Transport, Socket}, ClientSettings),
+    http2_frame_settings:send({Transport, Socket}, #settings{}, ClientSettings),
     {AH, _Ack} = http2_frame:read({Transport, Socket}),
-    Ack =  ?IS_FLAG(AH#frame_header.flags, ?FLAG_ACK),
+    lager:debug("AH: ~p", [AH]),
+    Ack = ?IS_FLAG(AH#frame_header.flags, ?FLAG_ACK),
     lager:debug("Ack: ~p", [Ack]),
 
     case Transport of

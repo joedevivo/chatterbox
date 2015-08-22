@@ -40,11 +40,12 @@ read(Socket) ->
 -spec read(socket(), timeout()) -> frame() | {error, closed|inet:posix()}.
 read(Socket, Timeout) ->
     case read_header(Socket, Timeout) of
-        {H, <<>>} ->
-            {ok, Payload, <<>>} = read_payload(Socket, H, Timeout),
-            lager:debug(format({H, Payload})),
-            {H, Payload};
-        E -> E
+        {error, Reason} ->
+            {error, Reason};
+        FrameHeader ->
+            {ok, Payload} = read_payload(Socket, FrameHeader, Timeout),
+            lager:debug(format({FrameHeader, Payload})),
+            {FrameHeader, Payload}
     end.
 
 -spec from_binary(binary()) -> [{frame_header(), payload()}].
@@ -68,11 +69,12 @@ format_header(#frame_header{
     }) ->
     io_lib:format("[Frame Header: L:~p, T:~p, F:~p, StrId:~p]", [Length, ?FT(Type), Flags, StreamId]).
 
--spec read_header(socket(), timeout()) -> {frame_header(), binary()} | {error, closed|inet:posix()}.
+-spec read_header(socket(), timeout()) -> frame_header() | {error, closed|inet:posix()}.
 read_header({Transport, Socket}, Timeout) ->
     case Transport:recv(Socket, 9, Timeout) of
         {ok, HeaderBytes} ->
-            read_binary_frame_header(HeaderBytes);
+            {Header, <<>>} = read_binary_frame_header(HeaderBytes),
+            Header;
         E -> E
     end.
 
@@ -87,13 +89,15 @@ read_binary_frame_header(<<Length:24,Type:8,Flags:8,_R:1,StreamId:31,Rem/bits>>)
     {Header, Rem}.
 
 -spec read_payload(socket(), frame_header(), timeout()) ->
-    {ok, payload(), <<>>} | {error, closed|inet:posix()}.
-read_payload(_, #frame_header{length=0}, _Timeout) ->
-    {ok, <<>>, <<>>};
+    {ok, payload()} | {error, closed|inet:posix()}.
+read_payload(_, Header=#frame_header{length=0}, _Timeout) ->
+    {ok, FramePayload, <<>>} = read_binary_payload(<<>>, Header),
+    {ok, FramePayload};
 read_payload({Transport, Socket}, Header=#frame_header{length=L}, Timeout) ->
     case Transport:recv(Socket, L, Timeout) of
         {ok, DataBin} ->
-            read_binary_payload(DataBin, Header);
+            {ok, FramePayload, <<>>} = read_binary_payload(DataBin, Header),
+            {ok, FramePayload};
         E -> E
     end.
 

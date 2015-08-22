@@ -9,6 +9,11 @@ all() ->
     [times_out_on_no_ack_of_server_settings,
      protocol_error_on_never_send_client_settings].
 
+end_per_testcase(_, Config) ->
+    chatterbox_test_buddy:stop(Config),
+    ok.
+
+
 %% This test does not use the http2c client because it needs to
 %% circumvent a behavior that the http2c takes for granted.
 
@@ -37,7 +42,7 @@ times_out_on_no_ack_of_server_settings(Config) ->
 
     %% Now send client settings so the problem becomes that we do not ack
     ClientSettings = #settings{},
-    http2_frame_settings:send({Transport, Socket}, ClientSettings),
+    http2_frame_settings:send({Transport, Socket}, #settings{}, ClientSettings),
     %% Settings Frame
 
     %% Two receives. one for server settings, and one for client settings ack
@@ -102,6 +107,12 @@ protocol_error_on_never_send_client_settings(Config) ->
     end,
     ok.
 
-end_per_testcase(_, Config) ->
-    chatterbox_test_buddy:stop(Config),
+default_setting_honored_before_ack(_Config) ->
+    %% configure settings for smaller frame size, 2048
+
+    %% send frame with 2048 < size < 16384
+
+    %% send ack
+
+    %% send frame size > 2048, now should fail
     ok.
