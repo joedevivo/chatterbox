@@ -59,9 +59,8 @@ accept({Transport, ListenSocket},
     %% that's no longer listening
     chatterbox_sup:start_socket(),
 
-    {ok, Bin} = Transport:recv(Socket, length(?PREAMBLE), 5000),
-    case Bin of
-        <<?PREAMBLE>> ->
+    case Transport:recv(Socket, length(?PREAMBLE), 5000) of
+        {ok, <<?PREAMBLE>>} ->
             %% From Section 6.5 of the HTTP/2 Specification A SETTINGS
             %% frame MUST be sent by both endpoints at the start of a
             %% connection, and MAY be sent at any other time by either
@@ -129,15 +128,21 @@ continuation(next,
                     socket=Socket,
                     continuation_stream_id = StreamId
                    }) ->
-    Frame = {FH,_} = http2_frame:read(Socket),
-    lager:debug("[continuation] [next] ~p", [http2_frame:format(Frame)]),
-
-    Response = case {FH#frame_header.stream_id, FH#frame_header.type} of
-                   {StreamId, ?CONTINUATION} ->
-                       route_frame(Frame, S);
-                   _ ->
-                       go_away(?PROTOCOL_ERROR, S)
-               end,
+    lager:debug("[continuation] Waiting for next frame"),
+    Response =
+        case http2_frame:read(Socket, 2500) of
+            {error, _} ->
+                {next_state, continuation, S};
+            Frame = {#frame_header{
+                     stream_id=StreamId,
+                     type=?CONTINUATION
+                    }, _} ->
+                lager:debug("[continuation] [next] ~p", [http2_frame:format(Frame)]),
+                route_frame(Frame, S);
+            Frame ->
+                lager:debug("[continuation] [next] ~p", [http2_frame:format(Frame)]),
+                go_away(?PROTOCOL_ERROR, S)
+        end,
     gen_fsm:send_event(self(), next),
     Response;
 continuation(_, State) ->
@@ -245,7 +250,6 @@ route_frame(F={H=#frame_header{stream_id=StreamId}, _Payload},
     {next_state, connected, NewConnectionState#connection_state{
                               streams = [{StreamId, NewStreamState}|NewConnectionState#connection_state.streams]
                              }};
-%% Might as well do continuations here since they're related code:
 route_frame(F={H=#frame_header{stream_id=StreamId}, _Payload},
             S = #connection_state{
                    streams = Streams
@@ -258,7 +262,6 @@ route_frame(F={H=#frame_header{stream_id=StreamId}, _Payload},
 
     {NewStream, NewConnectionState} = http2_stream:recv_frame(F, {Stream, S}),
 
-    %% TODO: NewStreams = replace old stream
     NewStreams = [{StreamId,NewStream}|NewStreamsTail],
 
     {next_state, continuation, NewConnectionState#connection_state{
@@ -370,7 +373,7 @@ route_frame({H, _Payload},
              connected,
              S#connection_state{
                settings_sent=NewSS,
-               send_settings=NewSettings
+               recv_settings=NewSettings
               }};
         _ ->
             {next_state, closing, S}
@@ -461,15 +464,6 @@ handle_event({check_settings_ack, {Ref, NewSettings}},
             %% YAY!
             {next_state, StateName, State}
     end;
-
-%%  when ActualSS == 0 ->
-%%    {next_state, StateName,
-%%     State#connection_state{
-%%       send_settings=NewSettings
-%%      }};
-%%handle_event({check_settings_ack, _ExpectedSS},
-%%             _StateName, State) ->
-%%    go_away(?SETTINGS_TIMEOUT, State);
 handle_event(_E, StateName, State) ->
     {next_state, StateName, State}.
 
