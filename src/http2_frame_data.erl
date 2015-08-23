@@ -14,14 +14,17 @@
 
 -spec format(data()) -> iodata().
 format(Payload) ->
-    <<Start:32/binary,_/binary>> = Payload#data.data,
-    io_lib:format("[Data: {data: ~p ...}]", [Start]).
+    BinToShow = case size(Payload) > 31 of
+        false ->
+            Payload#data.data;
+        true ->
+            <<Start:32/binary,_/binary>> = Payload#data.data,
+            Start
+    end,
+    io_lib:format("[Data: {data: ~p ...}]", [BinToShow]).
 
 -spec read_binary(binary(), frame_header()) ->
-    {ok, payload(), binary()} |
-    {error, term()}.
-read_binary(_, #frame_header{stream_id=0}) ->
-    {error, 'PROTOCOL_ERROR'};
+    {ok, payload(), binary()}.
 read_binary(Bin, _H=#frame_header{length=0}) ->
     {ok, #data{data= <<>>}, Bin};
 read_binary(Bin, H=#frame_header{length=L}) ->

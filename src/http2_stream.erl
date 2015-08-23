@@ -2,13 +2,14 @@
 
 -include("http2.hrl").
 
--export([recv_frame/2, send_frame/2, new/2, new/3]).
+-export([
+         recv_frame/2,
+         send_frame/2,
+         new/2,
+         new/3
+        ]).
 
 -export_type([stream_state/0]).
-
-%% Yodawg_fsm. Abstracted here for readability and possible reuse on
-%% the client side. !NO! This module will need understanding of the
-%% underlying state which will be chatterbox_fsm_state OR http2c_state
 
 %% idle streams don't actually exist, and may never exist. Isn't that
 %% fun? According to my interpretation of the spec, every stream from
@@ -18,7 +19,7 @@
 %% streams, just assume that if we don't know about it, it's idle. Of
 %% course, whenever a stream of id N is opened, all streams <N that
 %% were idle are considered closed. Where we'll account for this? who
-%% knows? probably in the chatterbox_fsm
+%% knows? probably in the http2_connection
 
 -spec new(stream_id(),
           {pos_integer(), pos_integer()}) ->

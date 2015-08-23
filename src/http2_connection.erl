@@ -161,7 +161,9 @@ closing(Message, State) ->
 %% wire, do connection based things to it and/or forward it to the
 %% http2 stream processor (http2_stream:recv_frame)
 -spec route_frame(frame() | {error, term()}, #connection_state{}) ->
-    {next_state, connected, #connection_state{}}.
+    {next_state,
+     connected | continuation | closing ,
+     #connection_state{}}.
 %% Bad Length of frame, exceedes maximum allowed size
 route_frame({#frame_header{length=L}, _},
             S = #connection_state{
@@ -169,8 +171,137 @@ route_frame({#frame_header{length=L}, _},
                   })
     when L > MFS ->
     go_away(?FRAME_SIZE_ERROR, S);
+%% Some types have fixed lengths and there's nothing we can do about
+%% it except Frame Size error
+route_frame({#frame_header{
+                length=L,
+                type=T}, _Payload},
+            S)
+  when (T == ?PRIORITY      andalso L =/= 5) orelse
+       (T == ?RST_STREAM    andalso L =/= 4) orelse
+       (T == ?PING          andalso L =/= 8) orelse
+       (T == ?WINDOW_UPDATE andalso L =/= 4) ->
+    lager:debug("bad frame size?"),
+    go_away(?FRAME_SIZE_ERROR, S);
 
-%%TODO Data to stream 0 bad
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%
+%% Protocol Errors
+%%
+
+%% Not allowed on Stream 0:
+%% - DATA
+%% - HEADERS
+%% - PRIORITY
+%% - RST_STREAM
+%% - PUSH_PROMISE
+%% - CONTINUATION
+route_frame({#frame_header{
+                stream_id=0,
+                type=Type
+                },_Payload},
+            S = #connection_state{})
+  when Type == ?DATA;
+       Type == ?HEADERS;
+       Type == ?PRIORITY;
+       Type == ?RST_STREAM;
+       Type == ?PUSH_PROMISE;
+       Type == ?CONTINUATION ->
+    lager:error("~p frame not allowed on stream 0", [?FT(Type)]),
+    go_away(?PROTOCOL_ERROR, S);
+
+%% Only allowed on stream 0
+route_frame({#frame_header{
+                stream_id=StreamId,
+                type=Type
+                },_Payload},
+            S = #connection_state{})
+  when StreamId > 0 andalso (
+       Type == ?SETTINGS orelse
+       Type == ?PING orelse
+       Type == ?GOAWAY) ->
+    lager:error("~p frame only allowed on stream 0", [?FT(Type)]),
+    go_away(?PROTOCOL_ERROR, S);
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% Connection Level Frames
+%%
+%% Here we'll handle anything that belongs on stream 0.
+
+
+%% SETTINGS, finally something that's ok on stream 0
+%% This is the non-ACK case, where settings have actually arrived
+route_frame({H, Payload}, S = #connection_state{
+                                 socket=Socket,
+                                 send_settings=SS=#settings{
+                                                     initial_window_size=OldIWS
+                                                    },
+                                 streams = Streams
+                                })
+    when H#frame_header.type == ?SETTINGS,
+         ?NOT_FLAG(H#frame_header.flags, ?FLAG_ACK) ->
+    lager:debug("Received SETTINGS"),
+
+    %% Need a way of processing settings so I know which ones came in
+    %% on this one payload.
+    {settings, PList} = Payload,
+    Delta = case proplists:get_value(?SETTINGS_INITIAL_WINDOW_SIZE, PList) of
+        undefined ->
+            0;
+        NewIWS ->
+            OldIWS - NewIWS
+    end,
+    NewSendSettings = http2_frame_settings:overlay(SS, Payload),
+
+    %% Adjust all open and half_closed_remote streams send_window_size
+    %% TODO: This will probably come in handy on the client side too
+    NewStreams = lists:map(fun({StreamId, Stream=#stream_state{state=open,send_window_size=SWS}}) ->
+                               {StreamId, Stream#stream_state{
+                                            send_window_size=SWS - Delta
+                                           }};
+                              ({StreamId, Stream=#stream_state{state=half_closed_remote,send_window_size=SWS}}) ->
+                               {StreamId, Stream#stream_state{
+                                            send_window_size=SWS - Delta
+                                           }};
+                              (X) -> X
+                           end, Streams),
+
+    http2_frame_settings:ack(Socket),
+    {next_state, connected, S#connection_state{
+                              send_settings=NewSendSettings,
+                              streams=NewStreams
+                             }
+    };
+%% This is the case where we got an ACK, so dequeue settings we're
+%% waiting to apply
+route_frame({H, _Payload},
+            S = #connection_state{
+                   settings_sent=SS
+                  })
+    when H#frame_header.type == ?SETTINGS,
+         ?IS_FLAG(H#frame_header.flags, ?FLAG_ACK) ->
+    lager:debug("Received SETTINGS ACK"),
+    case queue:out(SS) of
+        {{value, {_Ref, NewSettings}}, NewSS} ->
+            {next_state,
+             connected,
+             S#connection_state{
+               settings_sent=NewSS,
+               recv_settings=NewSettings
+              }};
+        _ ->
+            {next_state, closing, S}
+    end;
+
+
+
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% Stream level frames
+%%
+%% Maybe abstract it all into http2_stream?
+
 %% TODO Route data frames to streams. POST!
 route_frame(F={H=#frame_header{
                   stream_id=StreamId}, _Payload},
@@ -318,66 +449,6 @@ route_frame({H=#frame_header{stream_id=StreamId}, _Payload}, S = #connection_sta
     lager:debug("Received RST_STREAM Frame for Stream ~p", [StreamId]),
     lager:error("Chatterbox doesn't support streams. Throwing this RST_STREAM away"),
     {next_state, connected, S};
-%% Got a settings frame, need to ACK
-route_frame({H, Payload}, S = #connection_state{
-                                 socket=Socket,
-                                 send_settings=SS=#settings{
-                                                     initial_window_size=OldIWS
-                                                    },
-                                 streams = Streams
-                                })
-    when H#frame_header.type == ?SETTINGS,
-         ?NOT_FLAG(H#frame_header.flags, ?FLAG_ACK) ->
-    lager:debug("Received SETTINGS"),
-
-    %% Need a way of processing settings so I know which ones came in on this one payload.
-    {settings, PList} = Payload,
-    Delta = case proplists:get_value(?SETTINGS_INITIAL_WINDOW_SIZE, PList) of
-        undefined ->
-            0;
-        NewIWS ->
-            OldIWS - NewIWS
-    end,
-    NewSendSettings = http2_frame_settings:overlay(SS, Payload),
-
-    %% Adjust all open and half_closed_remote streams send_window_size
-    %% TODO: This will probably come in handy on the client side too
-    NewStreams = lists:map(fun({StreamId, Stream=#stream_state{state=open,send_window_size=SWS}}) ->
-                               {StreamId, Stream#stream_state{
-                                            send_window_size=SWS - Delta
-                                           }};
-                              ({StreamId, Stream=#stream_state{state=half_closed_remote,send_window_size=SWS}}) ->
-                               {StreamId, Stream#stream_state{
-                                            send_window_size=SWS - Delta
-                                           }};
-                              (X) -> X
-                           end, Streams),
-
-    http2_frame_settings:ack(Socket),
-    {next_state, connected, S#connection_state{
-                              send_settings=NewSendSettings,
-                              streams=NewStreams
-                             }
-    };
-%% Got settings ACK
-route_frame({H, _Payload},
-            S = #connection_state{
-                   settings_sent=SS
-                  })
-    when H#frame_header.type == ?SETTINGS,
-         ?IS_FLAG(H#frame_header.flags, ?FLAG_ACK) ->
-    lager:debug("Received SETTINGS ACK"),
-    case queue:out(SS) of
-        {{value, {_Ref, NewSettings}}, NewSS} ->
-            {next_state,
-             connected,
-             S#connection_state{
-               settings_sent=NewSS,
-               recv_settings=NewSettings
-              }};
-        _ ->
-            {next_state, closing, S}
-    end;
 %%    {next_state, connected, S#connection_state{settings_sent=SS-1}};
 route_frame({H=#frame_header{stream_id=StreamId}, _Payload}, S = #connection_state{})
     when H#frame_header.type == ?PUSH_PROMISE ->

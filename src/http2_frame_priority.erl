@@ -18,7 +18,7 @@ format(Payload) ->
 -spec read_binary(binary(), frame_header()) ->
     {ok, payload(), binary()} |
     {error, term()}.
-read_binary(Bin, #frame_header{stream_id=_Sid, length=5}) ->
+read_binary(Bin, #frame_header{stream_id=_Sid}) ->
     {Payload, Rem} = read_priority(Bin),
     {ok, Payload, Rem}.
 

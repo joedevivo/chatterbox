@@ -5,7 +5,15 @@
 -include_lib("common_test/include/ct.hrl").
 -compile([export_all]).
 
-all() -> [frame_too_big, euc].
+all() -> [
+  frame_too_big,
+  euc
+%% TODO: Tests break because I'm having trouble sending broken data.
+%  wrong_size_priority,
+%  wrong_size_rst_stream,
+%  wrong_size_ping,
+%  wrong_size_window_update
+].
 
 init_per_testcase(_, Config) ->
     lager_common_test_backend:bounce(debug),
@@ -14,6 +22,27 @@ init_per_testcase(_, Config) ->
 
 end_per_testcase(_, Config) ->
     chatterbox_test_buddy:stop(Config),
+    ok.
+
+wrong_size_priority(Config) ->
+    send_wrong_size(?PRIORITY, Config).
+wrong_size_rst_stream(Config) ->
+    send_wrong_size(?RST_STREAM, Config).
+wrong_size_ping(Config) ->
+    send_wrong_size(?PING, Config).
+wrong_size_window_update(Config) ->
+    send_wrong_size(?WINDOW_UPDATE, Config).
+
+send_wrong_size(Type, _Config) ->
+    {ok, Client} = http2c:start_link(),
+    http2c:send_binary(Client, <<10:24,Type:8,0:1,0:31,0:100>>),
+    timer:sleep(100),
+    Resp = http2c:get_frames(Client, 0),
+    ct:pal("Resp: ~p", [Resp]),
+
+    ?assertEqual(1, length(Resp)),
+    [{_GoAwayH, GoAway}] = Resp,
+    ?FRAME_SIZE_ERROR = GoAway#goaway.error_code,
     ok.
 
 frame_too_big(_Config) ->
