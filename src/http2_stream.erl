@@ -483,14 +483,23 @@ send_frame(F={#frame_header{
      ConnectionState};
 send_frame(F={#frame_header{
                  type=?PUSH_PROMISE
-                 }, _Data},
+                 }, #push_promise{
+                       promised_stream_id=PSID
+                      }},
            {StreamState = #stream_state{
                              },
             ConnectionState = #connection_state{
-                                 socket={Transport,Socket}
+                                 socket={Transport,Socket},
+                                 recv_settings=#settings{initial_window_size=RecvWindowSize},
+                                 send_settings=#settings{initial_window_size=SendWindowSize},
+                                 streams=Streams
                                 }}) ->
     Transport:send(Socket, http2_frame:to_binary(F)),
-    {StreamState, ConnectionState};
+    NewStream = new(PSID, {SendWindowSize, RecvWindowSize}, reserved_local),
+
+    {StreamState, ConnectionState#connection_state{
+                    streams=[NewStream|Streams]
+                   }};
 send_frame(_F, S) ->
     S.
 

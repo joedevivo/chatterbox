@@ -453,16 +453,19 @@ route_frame(F={H=#frame_header{stream_id=StreamId}, #window_update{}},
                    streams=Streams})
     when H#frame_header.type == ?WINDOW_UPDATE ->
     lager:debug("Received WINDOW_UPDATE Frame for Stream ~p", [StreamId]),
-    {StreamId, Stream} = lists:keyfind(StreamId, 1, Streams),
-    NewStreamsTail = lists:keydelete(StreamId, 1, Streams),
-    %NewSendWindow = WSI+Stream#stream_state.send_window_size,
-
-
-    {NStream, NConn} = http2_stream:recv_frame(F, {Stream, S}),
-    %%NStream = chatterbox_static_content_handler:send_while_window_open(Stream#stream_state{send_window_size=NewSendWindow}, C),
-    %%NewStreams = [{StreamId, Stream#stream_state{send_window_size=NewSendWindow}}|NewStreamsTail],
-    NewStreams = [{StreamId, NStream}|NewStreamsTail],
-    {next_state, connected, NConn#connection_state{streams=NewStreams}};
+    case lists:keyfind(StreamId, 1, Streams) of
+        {StreamId, Stream} ->
+            NewStreamsTail = lists:keydelete(StreamId, 1, Streams),
+            %NewSendWindow = WSI+Stream#stream_state.send_window_size,
+            {NStream, NConn} = http2_stream:recv_frame(F, {Stream, S}),
+            %%NStream = chatterbox_static_content_handler:send_while_window_open(Stream#stream_state{send_window_size=NewSendWindow}, C),
+            %%NewStreams = [{StreamId, Stream#stream_state{send_window_size=NewSendWindow}}|NewStreamsTail],
+            NewStreams = [{StreamId, NStream}|NewStreamsTail],
+            {next_state, connected, NConn#connection_state{streams=NewStreams}};
+        _ ->
+            lager:error("Window update for a stream that we don't think exists!"),
+            {next_state, connected, S}
+    end;
 
 %route_frame({error, closed}, State) ->
 %    {stop, normal, State};
