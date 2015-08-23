@@ -427,13 +427,13 @@ recv_frame({#frame_header{
     NewSendWindow = WSI + SWS,
     NewState = State#stream_state{
                  send_window_size=NewSendWindow,
-                 queued_frames=[]
+                 queued_frames=queue:new()
                 },
     lager:info("Stream ~p send window now: ~p", [StreamId, NewSendWindow]),
     lists:foldl(
       fun(Frame, Stream) -> send_frame(Frame, Stream) end,
       {NewState, ConnectionState},
-      QF);
+      queue:to_list(QF));
 recv_frame(_F, {S, C}) ->
     {S, C}.
 
@@ -478,7 +478,7 @@ send_frame(F={#frame_header{
                      },
            ConnectionState = #connection_state{}}) ->
     {StreamState#stream_state{
-       queued_frames=QF ++ [F]
+       queued_frames=queue:in(F,QF)
       },
      ConnectionState};
 send_frame(F={#frame_header{

@@ -226,7 +226,7 @@
           state = idle :: stream_state_name(),
           send_window_size = ?DEFAULT_INITIAL_WINDOW_SIZE :: integer(),
           recv_window_size = ?DEFAULT_INITIAL_WINDOW_SIZE :: integer(),
-          queued_frames = [] :: [frame()], %% queue:new() :: queue:queue(frame()),
+          queued_frames = queue:new() :: queue:queue(frame()),
           incoming_frames = queue:new() :: queue:queue(frame()),
           request_headers = [] :: hpack:headers()
 }).
