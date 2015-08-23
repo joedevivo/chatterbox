@@ -295,8 +295,6 @@ route_frame({H, _Payload},
 
 
 
-
-
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Stream level frames
 %%
@@ -321,114 +319,66 @@ route_frame(F={H=#frame_header{
                              }
     };
 
-%% HEADERS frame can have an ?FLAG_END_STREAM but no ?FLAG_END_HEADERS
-%% in which case, CONTINUATION frame may follow that have an
-%% ?FLAG_END_HEADERS. RFC7540:8.1
+%%%%%%%%%
+%% Begin Refactor of headers/continuation into http2_stream
 
-%% If there CONTINUATIONS, they must all follow the HEADERS frame with
-%% no frames from other streams or types in between RFC7540:8.1
+%% Since we don't create idle streams and just assume they exist, we
+%% actually need to create a new stream state in two cases (as a
+%% server)
 
-%% HEADERS frame with no END_HEADERS flag, expect continuations
-route_frame({H=#frame_header{stream_id=StreamId}, _Payload}=Frame,
+%% 1) We have received a HEADERS frame
+%% 2) We have sent a PUSH_PROMISE frame
+
+%% First let's worry about HEADERS
+
+%% The only thing we need to know about in this gen_fsm is wether or
+%% not we are going to remain in the connected state or transition
+%% into the continuation state
+route_frame({H=#frame_header{
+                  type=?HEADERS,
+                  stream_id=StreamId
+                 }, _Payload} = Frame,
             S = #connection_state{
                    recv_settings=#settings{initial_window_size=RecvWindowSize},
                    send_settings=#settings{initial_window_size=SendWindowSize},
                    streams = Streams
-            })
-  when H#frame_header.type == ?HEADERS,
-       ?NOT_FLAG(H#frame_header.flags, ?FLAG_END_HEADERS) ->
-    lager:debug("Received HEADERS Frame for Stream ~p, no END in sight", [StreamId]),
+            }) ->
+    %% ok, it's a headers frame. No matter what, create a new stream.
     NewStream = http2_stream:new(StreamId, {SendWindowSize, RecvWindowSize}),
+
+    NextState = case ?IS_FLAG(H#frame_header.flags, ?FLAG_END_HEADERS) of
+                    true ->
+                        connected;
+                    false ->
+                        continuation
+                end,
     {NewStream1, NewConnectionState} = http2_stream:recv_frame(Frame, {NewStream, S}),
-    {next_state, continuation, NewConnectionState#connection_state{
+    {next_state, NextState, NewConnectionState#connection_state{
                                  streams = [{StreamId, NewStream1}|Streams],
                                  continuation_stream_id = StreamId
                                 }
     };
-%% HEADER frame with END_HEADERS flag
-route_frame(F={H=#frame_header{stream_id=StreamId}, _Payload},
-        S = #connection_state{
-               decode_context=DecodeContext,
-               recv_settings=#settings{initial_window_size=RecvWindowSize},
-               send_settings=#settings{initial_window_size=SendWindowSize},
-               streams=_Streams,
-               content_handler = Handler
-           })
-    when H#frame_header.type == ?HEADERS,
-         ?IS_FLAG(H#frame_header.flags, ?FLAG_END_HEADERS) ->
-    lager:debug("Received HEADERS Frame for Stream ~p", [StreamId]),
-    HeadersBin = http2_frame_headers:from_frames([F]),
-    {Headers, NewDecodeContext} = hpack:decode(HeadersBin, DecodeContext),
-    %%lager:debug("Headers decoded: ~p", [Headers]),
-    Stream = http2_stream:new(StreamId, {SendWindowSize, RecvWindowSize}),
-    {Stream2, NextConnectionState} = http2_stream:recv_frame(F, {Stream, S#connection_state{
-                                                                           decode_context=NewDecodeContext
-                                                                 }}),
-    %% Now this stream should be 'open' and because we've gotten ?END_HEADERS we can start processing it.
 
-    %% TODO: Or can we? We should be able to handle data frames here, so maybe
-    %% ?END_STREAM is what we should be looking for
-
-    %% TODO: Make this module name configurable
-    %% Make content_handler a behavior with handle/3
-    {NewStreamState, NewConnectionState} =
-        Handler:handle(
-          NextConnectionState,
-          Headers,
-          Stream2),
-    %% send it this headers frame which should transition it into the open state
-    %% Add that pid to the set of streams in our state
-    {next_state, connected, NewConnectionState#connection_state{
-                              streams = [{StreamId, NewStreamState}|NewConnectionState#connection_state.streams]
-                             }};
-route_frame(F={H=#frame_header{stream_id=StreamId}, _Payload},
+route_frame(F={H=#frame_header{
+                    stream_id=StreamId,
+                    type=?CONTINUATION
+                   }, _Payload},
             S = #connection_state{
                    streams = Streams
-                  })
-  when H#frame_header.type == ?CONTINUATION,
-       ?NOT_FLAG(H#frame_header.flags, ?FLAG_END_HEADERS) ->
+                  }) ->
     lager:debug("Received CONTINUATION Frame for Stream ~p", [StreamId]),
-
     {Stream, NewStreamsTail} = get_stream(StreamId, Streams),
-
     {NewStream, NewConnectionState} = http2_stream:recv_frame(F, {Stream, S}),
-
     NewStreams = [{StreamId,NewStream}|NewStreamsTail],
 
-    {next_state, continuation, NewConnectionState#connection_state{
-                              streams = NewStreams
-                             }};
+    NextState = case ?IS_FLAG(H#frame_header.flags, ?FLAG_END_HEADERS) of
+                    true ->
+                        connected;
+                    false ->
+                        continuation
+                end,
 
-route_frame(F={H=#frame_header{stream_id=StreamId}, _Payload},
-            S = #connection_state{
-                   decode_context=DecodeContext,
-                   socket=_Socket,
-                   streams = Streams,
-                   content_handler = Handler
-                  })
-  when H#frame_header.type == ?CONTINUATION,
-       ?IS_FLAG(H#frame_header.flags, ?FLAG_END_HEADERS) ->
-    lager:debug("Received CONTINUATION Frame for Stream ~p", [StreamId]),
-
-    {Stream, NewStreamsTail} = get_stream(StreamId, Streams),
-
-    {NewStream, NextConnectionState} = http2_stream:recv_frame(F, {Stream, S}),
-
-    HeaderFrames = lists:reverse(NewStream#stream_state.incoming_frames),
-    HeadersBin = http2_frame_headers:from_frames(HeaderFrames),
-    {Headers, NewDecodeContext} = hpack:decode(HeadersBin, DecodeContext),
-
-    %% I think this might be wrong because ?END_HEADERS doesn't mean
-    %% data has posted but baby steps
-    {NewStreamState, NewConnectionState} =
-        Handler:handle(
-          NextConnectionState#connection_state{decode_context=NewDecodeContext,
-                                              streams=NewStreamsTail},
-          Headers,
-          NewStream),
-
-    NewStreams = [{StreamId,NewStreamState}|NewConnectionState#connection_state.streams],
-    {next_state, connected, NewConnectionState#connection_state{
+    {next_state, NextState, NewConnectionState#connection_state{
                               streams = NewStreams
                              }};
 

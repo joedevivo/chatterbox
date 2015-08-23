@@ -41,45 +41,7 @@ new(StreamId, {SendWindowSize, RecvWindowSize}, StateName) ->
 
 -spec recv_frame(frame(), {stream_state(), connection_state()}) ->
                         {stream_state(), connection_state()}.
-%% First clause will handle transitions from idle to
-%% half_closed_remote, via HEADERS frame with END_STREAM flag set
-recv_frame(F={FH = #frame_header{
-              stream_id=StreamId,
-              type=?HEADERS
-             }, _Payload},
-           {State = #stream_state{state=idle},
-            ConnectionState})
-when ?IS_FLAG(FH#frame_header.flags, ?FLAG_END_STREAM) ->
-    {State#stream_state{
-      stream_id = StreamId,
-      state = half_closed_remote,
-      incoming_frames = [F]
-     }, ConnectionState};
-%% This one goes to open, because it's a headers frame, but not the
-%% end of stream
-recv_frame(F={_FH = #frame_header{
-              stream_id=StreamId,
-              type=?HEADERS
-             }, _Payload},
-           {State = #stream_state{state=idle},
-            ConnectionState}) ->
-    {State#stream_state{
-      stream_id = StreamId,
-      state = open,
-      incoming_frames = [F]
-     }, ConnectionState};
-recv_frame(F={#frame_header{
-                 stream_id=StreamId,
-                 type=?CONTINUATION
-                }, _Payload},
-           {State = #stream_state{
-                      stream_id=StreamId,
-                      incoming_frames=Frames
-                     },
-            ConnectionState}) ->
-    {State#stream_state{
-      incoming_frames = [F|Frames]
-     }, ConnectionState};
+%% Errors first, since they're usually easier to detect.
 
 %% When 'open' and stream recv window too small
 recv_frame({_FH=#frame_header{
@@ -97,7 +59,7 @@ recv_frame({_FH=#frame_header{
     {S#stream_state{
       state=closed,
       recv_window_size=0,
-      incoming_frames=[]
+      incoming_frames=queue:new()
      }, ConnectionState};
 %% When 'open' and connection recv window too small
 recv_frame({_FH=#frame_header{
@@ -116,54 +78,337 @@ recv_frame({_FH=#frame_header{
     {S#stream_state{
       state=closed,
       recv_window_size=0,
-      incoming_frames=[]
+      incoming_frames=queue:new()
      }, ConnectionState};
-%% Open and not END STREAM
-recv_frame(F={_FH=#frame_header{
-                   length=L,
-                   type=?DATA,
-                   flags=Flags
-                  }, _P},
-          {S = #stream_state{
-                  recv_window_size=SRWS,
-                  incoming_frames=IF
+
+%% So many possibilities:
+
+%% easiest idle receives HEADERS with END_HEADERS AND END_STREAM! decode headers, handle content, transition to closed
+recv_frame(F={#frame_header{
+                   flags=Flags,
+                   type=?HEADERS
+                  }, _Payload},
+           {Stream=#stream_state{
+                      state=idle
+                     },
+            Connection=#connection_state{
+              decode_context=DecodeContext,
+              content_handler=Handler
+             }})
+  when ?IS_FLAG(Flags, ?FLAG_END_STREAM),
+       ?IS_FLAG(Flags, ?FLAG_END_HEADERS) ->
+    HeadersBin = http2_frame_headers:from_frames([F]),
+    {Headers, NewDecodeContext} = hpack:decode(HeadersBin, DecodeContext),
+    Handler:handle(
+      Connection#connection_state{
+        decode_context=NewDecodeContext
+       },
+      Headers,
+      Stream#stream_state{
+        request_headers=Headers
+       });
+
+%% idle receives HEADERS with END_STREAM, no END_HEADERS, transition
+%% to half_closed_remote, wait for continuations until END HEADERS,
+%% then decode headers, handle content, transition to closed.
+recv_frame(F={#frame_header{
+                   flags=Flags,
+                   type=?HEADERS
+                  }, _Payload},
+           {Stream=#stream_state{
+                      state=idle,
+                      incoming_frames=IFQ
+                     },
+            Connection=#connection_state{}})
+  when ?IS_FLAG(Flags, ?FLAG_END_STREAM),
+       ?NOT_FLAG(Flags, ?FLAG_END_HEADERS) ->
+    {Stream#stream_state{
+       state=half_closed_remote,
+       incoming_frames=queue:in(F,IFQ)
+      }, Connection};
+
+recv_frame(F={#frame_header{
+                   flags=Flags,
+                   type=?CONTINUATION
+                  }, _Payload},
+           {Stream=#stream_state{
+                      state=half_closed_remote,
+                      incoming_frames=IFQ
+                     },
+            Connection=#connection_state{}})
+  when ?NOT_FLAG(Flags,?FLAG_END_HEADERS) ->
+    {Stream#stream_state{
+       incoming_frames=queue:in(F,IFQ)
+      }, Connection};
+
+recv_frame(F={#frame_header{
+                   flags=Flags,
+                   type=?CONTINUATION
+                  }, _Payload},
+           {Stream=#stream_state{
+                      state=half_closed_remote,
+                      incoming_frames=IFQ
+                     },
+            Connection=#connection_state{
+                          decode_context=DecodeContext,
+                          content_handler=Handler
+                         }})
+  when ?IS_FLAG(Flags,?FLAG_END_HEADERS) ->
+    NewIFQ = queue:in(F, IFQ),
+
+    HeadersBin = http2_frame_headers:from_frames(queue:to_list(NewIFQ)),
+    {Headers, NewDecodeContext} = hpack:decode(HeadersBin, DecodeContext),
+
+    NewStream = Stream#stream_state{
+                  incoming_frames=queue:new(),
+                  request_headers=Headers
                  },
-           ConnectionState=#connection_state{
-             recv_window_size=CRWS
-            }
-          })
+
+    Handler:handle(
+      Connection#connection_state{
+        decode_context=NewDecodeContext
+       },
+      Headers,
+      NewStream);
+
+%% idle receives HEADERS with END_HEADERS, no END_STREAM. transition
+%% to open and wait for DATA frames until one comes with END_STREAM,
+%% then decode headers, handle content and transtition to closed.
+recv_frame(F={#frame_header{
+                   flags=Flags,
+                   type=?HEADERS
+                  }, _Payload},
+           {Stream=#stream_state{
+                      state=idle
+                     },
+            Connection=#connection_state{
+              decode_context=DecodeContext
+             }})
+  when ?NOT_FLAG(Flags, ?FLAG_END_STREAM),
+       ?IS_FLAG(Flags, ?FLAG_END_HEADERS) ->
+    HeadersBin = http2_frame_headers:from_frames([F]),
+    {Headers, NewDecodeContext} = hpack:decode(HeadersBin, DecodeContext),
+    {Stream#stream_state{
+       state=open,
+       request_headers=Headers
+      },
+     Connection#connection_state{
+       decode_context=NewDecodeContext
+      }};
+
+recv_frame(F={#frame_header{
+                   length=L,
+                   flags=Flags,
+                   type=?DATA
+                  }, _Payload},
+           {Stream=#stream_state{
+                      incoming_frames=IFQ,
+                      state=open,
+                      recv_window_size=SRWS
+                     },
+            Connection=#connection_state{
+                          recv_window_size=CRWS
+                         }})
   when ?NOT_FLAG(Flags, ?FLAG_END_STREAM) ->
-    {S#stream_state{
-      recv_window_size=SRWS-L,
-      incoming_frames=IF ++ [F]
-     }, ConnectionState#connection_state{
-      recv_window_size=CRWS-L
-         }
-    };
-%% Open, DATA, AND END_STREAM
-recv_frame(F={_FH=#frame_header{
-                   length=L,
-                   type=?DATA,
-                   flags=Flags
-                  }, _P},
-          {S = #stream_state{
-                  recv_window_size=SRWS,
-                  incoming_frames=IF
-                 },
-           ConnectionState=#connection_state{
-             recv_window_size=CRWS
-            }
-          })
-  when ?IS_FLAG(Flags, ?FLAG_END_STREAM) ->
-    {S#stream_state{
-      state=half_closed_remote,
-      recv_window_size=SRWS-L,
-      incoming_frames=IF ++ [F]
-     },
-     ConnectionState#connection_state{
+
+    {Stream#stream_state{
+       incoming_frames=queue:in(F,IFQ),
+       recv_window_size=SRWS-L
+      },
+     Connection#connection_state{
        recv_window_size=CRWS-L
       }
     };
+
+
+recv_frame(F={#frame_header{
+                   length=L,
+                   flags=Flags,
+                   type=?DATA
+                  }, _Payload},
+           {Stream=#stream_state{
+                      incoming_frames=IFQ,
+                      state=open,
+                      request_headers=Headers,
+                      recv_window_size=SRWS
+                     },
+            Connection=#connection_state{
+                          content_handler=Handler,
+                          recv_window_size=CRWS
+                         }})
+  when ?IS_FLAG(Flags, ?FLAG_END_STREAM) ->
+    NewDataQueue = queue:in(F, IFQ),
+
+    DataFrames = queue:to_list(NewDataQueue),
+    lager:debug("Data frames: ~p", [DataFrames]),
+
+    NewStream = Stream#stream_state{
+                  incoming_frames=queue:new(),
+                  state=half_closed_remote,
+                  recv_window_size=SRWS-L
+                 },
+
+    Handler:handle(
+      Connection#connection_state{
+        recv_window_size=CRWS-L
+       },
+      Headers,
+      NewStream);
+
+%% idle receives HEADERS, no END_STREAM or END_HEADERS transition into
+%% open, expect continuations until one shows up with an END_HEADERS,
+%% then expect DATA frames until one shows up with an END_STREAM
+
+recv_frame(F={#frame_header{
+                   flags=Flags,
+                   type=?HEADERS
+                  }, _Payload},
+           {Stream=#stream_state{
+                      state=idle,
+                      incoming_frames=IFQ
+                     },
+            Connection=#connection_state{}})
+  when ?NOT_FLAG(Flags, ?FLAG_END_STREAM),
+       ?NOT_FLAG(Flags, ?FLAG_END_HEADERS) ->
+
+    {Stream#stream_state{
+       incoming_frames=queue:in(F, IFQ),
+       state=open
+      },
+     Connection};
+
+
+recv_frame(F={#frame_header{
+                   flags=Flags,
+                   type=?CONTINUATION
+                  }, _Payload},
+           {Stream=#stream_state{
+                      state=open,
+                      incoming_frames=IFQ
+                     },
+            Connection=#connection_state{}})
+  when ?NOT_FLAG(Flags,?FLAG_END_HEADERS),
+       ?NOT_FLAG(Flags,?FLAG_END_STREAM)->
+    {Stream#stream_state{
+       incoming_frames=queue:in(F,IFQ)
+      }, Connection};
+
+recv_frame(F={#frame_header{
+                   flags=Flags,
+                   type=?CONTINUATION
+                  }, _Payload},
+           {Stream=#stream_state{
+                      state=open,
+                      incoming_frames=IFQ
+                     },
+            Connection=#connection_state{
+                          decode_context=DecodeContext
+                         }})
+  when ?IS_FLAG(Flags,?FLAG_END_HEADERS),
+       ?NOT_FLAG(Flags, ?FLAG_END_STREAM) ->
+    NewIFQ = queue:in(F, IFQ),
+
+    HeadersBin = http2_frame_headers:from_frames(queue:to_list(NewIFQ)),
+    {Headers, NewDecodeContext} = hpack:decode(HeadersBin, DecodeContext),
+
+    {Stream#stream_state{
+       incoming_frames=queue:new(),
+       request_headers=Headers
+      },
+     Connection#connection_state{
+       decode_context=NewDecodeContext
+      }};
+
+
+recv_frame(F={#frame_header{
+                   flags=Flags,
+                   type=?CONTINUATION
+                  }, _Payload},
+           {Stream=#stream_state{
+                      state=open,
+                      incoming_frames=IFQ
+                     },
+            Connection=#connection_state{
+                          decode_context=DecodeContext,
+                          content_handler=Handler
+                         }})
+  when ?IS_FLAG(Flags,?FLAG_END_HEADERS),
+       ?IS_FLAG(Flags, ?FLAG_END_STREAM) ->
+    NewIFQ = queue:in(F, IFQ),
+
+    HeadersBin = http2_frame_headers:from_frames(queue:to_list(NewIFQ)),
+    {Headers, NewDecodeContext} = hpack:decode(HeadersBin, DecodeContext),
+
+    NewStream = Stream#stream_state{
+       incoming_frames=queue:new(),
+       request_headers=Headers
+     },
+
+    Handler:handle(
+      Connection#connection_state{
+        decode_context=NewDecodeContext
+       },
+      Headers,
+      NewStream);
+
+
+recv_frame(F={#frame_header{
+                   length=L,
+                   flags=Flags,
+                   type=?DATA
+                  }, _Payload},
+           {Stream=#stream_state{
+                      state=open,
+                      incoming_frames=IFQ,
+                      recv_window_size=SRWS
+                     },
+            Connection=#connection_state{
+                          recv_window_size=CRWS
+                         }})
+  when ?NOT_FLAG(Flags, ?FLAG_END_STREAM) ->
+    {Stream#stream_state{
+       incoming_frames=queue:in(F, IFQ),
+       recv_window_size=SRWS-L
+      },
+     Connection#connection_state{
+       recv_window_size=CRWS-L
+      }
+    };
+
+recv_frame(F={#frame_header{
+                 length=L,
+                 flags=Flags,
+                 type=?DATA
+                }, _Payload},
+           {Stream=#stream_state{
+                      state=open,
+                      incoming_frames=IFQ,
+                      request_headers=Headers,
+                      recv_window_size=SRWS
+                     },
+            Connection=#connection_state{
+                          content_handler=Handler,
+                          recv_window_size=CRWS
+                         }})
+  when ?IS_FLAG(Flags, ?FLAG_END_STREAM) ->
+    NewDataQueue = queue:in(F, IFQ),
+    DataFrames = queue:to_list(NewDataQueue),
+    lager:debug("Data frames: ~p", [DataFrames]),
+
+    NewStream = Stream#stream_state{
+                  incoming_frames=queue:new(),
+                  state=half_closed_remote,
+                  recv_window_size=SRWS-L
+                 },
+
+    Handler:handle(
+      Connection#connection_state{
+        recv_window_size=CRWS-L
+       },
+      Headers,
+      NewStream);
+
+
 %% needs a WINDOW_UPDATE clause badly
 recv_frame({#frame_header{
                type=?WINDOW_UPDATE,
