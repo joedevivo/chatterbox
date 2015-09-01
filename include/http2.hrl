@@ -187,7 +187,7 @@
 
 
 -type transport() :: gen_tcp | ssl.
--type socket() :: {gen_tcp, gen_tcp:socket()} | {ssl, ssl:sslsocket()}.
+-type socket() :: {gen_tcp, gen_tcp:socket()|undefined} | {ssl, ssl:sslsocket()|undefined}.
 
 -define(PREAMBLE, "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n").
 
@@ -195,7 +195,8 @@
 
 
 -record(connection_state, {
-          listen_socket :: socket(),
+          ssl_options = [],
+          listen_ref :: non_neg_integer(),
           socket = undefined :: undefined | socket(),
           send_settings = #settings{} :: settings(),
           recv_settings = #settings{} :: settings(),

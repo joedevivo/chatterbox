@@ -24,7 +24,7 @@
     terminate/3
 ]).
 
--export([accept/2,
+-export([handshake/2,
          connected/2,
          continuation/2,
          closing/2
@@ -63,41 +63,25 @@ send_promise(Pid, StreamId, NewStreamId, Headers) ->
     gen_fsm:send_all_state_event(Pid, {send_promise, StreamId, NewStreamId, Headers}),
     ok.
 
--spec init(socket()) ->
-                  {ok, accept, #connection_state{}, non_neg_integer()}.
-init({Transport, ListenSocket}) ->
+-spec init([socket() | term()]) ->
+                  {ok, accept, #connection_state{}}.
+init([{Transport, ListenSocket}, SSLOptions]) ->
+    {ok, Ref} = prim_inet:async_accept(ListenSocket, -1),
     {ok,
      accept,
-     #connection_state{listen_socket={Transport, ListenSocket}},
-     0}.
+     #connection_state{
+        listen_ref=Ref,
+        socket = {Transport, undefined},
+        ssl_options = SSLOptions
+        }}.
 
 %% accepting connection state:
--spec accept(timeout, #connection_state{}) ->
+-spec handshake(timeout, #connection_state{}) ->
                     {next_state, connected|closing, #connection_state{}, non_neg_integer()}.
-accept(timeout,
-       InitialState=#connection_state{listen_socket={Transport, ListenSocket}}) ->
-    Socket = case Transport of
-        gen_tcp ->
-            %%TCP Version
-            {ok, AcceptSocket} = Transport:accept(ListenSocket),
-            AcceptSocket;
-        ssl ->
-            %% SSL conditional stuff
-            {ok, AcceptSocket} = Transport:transport_accept(ListenSocket),
-            _Accept = ssl:ssl_accept(AcceptSocket),
-            %% TODO: Erlang 18 uses ALPN
-            {ok, _Upgrayedd} = ssl:negotiated_next_protocol(AcceptSocket),
-            AcceptSocket
-    end,
-
-    StateWithSocket = InitialState#connection_state{
-                        socket={Transport, Socket}
-                      },
-
-    %% Start up a listening socket to take the place of this socket,
-    %% that's no longer listening
-    chatterbox_sup:start_socket(),
-
+handshake(timeout,
+          StateWithSocket=#connection_state{
+            socket={Transport, Socket}
+          }) ->
     case Transport:recv(Socket, length(?PREAMBLE), 5000) of
         {ok, <<?PREAMBLE>>} ->
             %% From Section 6.5 of the HTTP/2 Specification A SETTINGS
@@ -603,6 +587,31 @@ handle_sync_event(is_push, _F, StateName,
 handle_sync_event(_E, _F, StateName, State) ->
     {next_state, StateName, State, 0}.
 
+handle_info({inet_async, _ListSock, Ref, {ok, CliSocket}},
+    accept,
+    S=#connection_state{
+        ssl_options = SSLOptions,
+        socket = {Transport, undefined},
+        listen_ref = Ref
+    }) ->
+    inet_db:register_socket(CliSocket, inet_tcp),
+    Socket = case Transport of
+        gen_tcp ->
+            CliSocket;
+        ssl ->
+            {ok, AcceptSocket} = ssl:ssl_accept(CliSocket, SSLOptions),
+            %% TODO: Erlang 18 uses ALPN
+            {ok, _Upgrayedd} = ssl:negotiated_next_protocol(AcceptSocket),
+            AcceptSocket
+        end,
+    chatterbox_sup:start_socket(),
+
+    {next_state,
+     handshake,
+     S#connection_state{
+       socket = {Transport, Socket}
+     },
+     0};
 %% TODO: Handle_info when ssl socket is closed
 handle_info({tcp_closed, _Socket}, _StateName, S) ->
     lager:debug("tcp_close"),

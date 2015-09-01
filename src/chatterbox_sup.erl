@@ -13,7 +13,7 @@ start_link() ->
 
 init([]) ->
     {ok, Port} = application:get_env(port),
-    ListenerOptions = [
+    Options = [
         binary,
         {reuseaddr, true},
         {packet, raw},
@@ -21,19 +21,19 @@ init([]) ->
         {active, false}
     ],
     {ok, SSLEnabled} = application:get_env(ssl),
-    {Transport, Options} = case SSLEnabled of
+    {Transport, SSLOptions} = case SSLEnabled of
         true ->
-            {ok, SSLOptions} = application:get_env(ssl_options),
-            {ssl, ListenerOptions ++ SSLOptions};
+            {ok, SSLOpts} = application:get_env(ssl_options),
+            {ssl, SSLOpts};
         false ->
-            {gen_tcp, ListenerOptions}
+            {gen_tcp, []}
     end,
 
     spawn_link(fun empty_listeners/0),
-    {ok, ListenSocket} = Transport:listen(Port, Options),
+    {ok, ListenSocket} = gen_tcp:listen(Port, Options),
     Restart = {simple_one_for_one, 60, 3600},
     Children = [{socket,
-                {http2_connection, start_link, [{Transport, ListenSocket}]}, % pass the socket!
+                {http2_connection, start_link, [[{Transport, ListenSocket}, SSLOptions]]}, % pass the socket!
                 temporary, 1000, worker, [http2_connection]}],
     {ok, {Restart, Children}}.
 
