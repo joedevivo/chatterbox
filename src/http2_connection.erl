@@ -6,6 +6,14 @@
 
 -export([start_link/1]).
 
+-export([
+         send_headers/3,
+         send_body/3,
+         is_push/1,
+         new_stream/1,
+         send_promise/4
+]).
+
 %% gen_fsm callbacks
 -export([
     init/1,
@@ -31,6 +39,31 @@
 start_link(Socket) ->
     gen_fsm:start_link(?MODULE, Socket, []).
 
+
+-spec send_headers(pid(), stream_id(), hpack:headers()) -> ok.
+send_headers(Pid, StreamId, Headers) ->
+    gen_fsm:send_all_state_event(Pid, {send_headers, StreamId, Headers}),
+    ok.
+
+-spec send_body(pid(), stream_id(), binary()) -> ok.
+send_body(Pid, StreamId, Body) ->
+    gen_fsm:send_all_state_event(Pid, {send_body, StreamId, Body}),
+    ok.
+
+-spec is_push(pid()) -> boolean().
+is_push(Pid) ->
+    gen_fsm:sync_send_all_state_event(Pid, is_push).
+
+-spec new_stream(pid()) -> stream_id().
+new_stream(Pid) ->
+    gen_fsm:sync_send_all_state_event(Pid, new_stream).
+
+-spec send_promise(pid(), stream_id(), stream_id(), hpack:headers()) -> ok.
+send_promise(Pid, StreamId, NewStreamId, Headers) ->
+    gen_fsm:send_all_state_event(Pid, {send_promise, StreamId, NewStreamId, Headers}),
+    ok.
+
+
 -spec init(socket()) ->
                   {ok, accept, #connection_state{}}.
 init({Transport, ListenSocket}) ->
@@ -55,6 +88,14 @@ accept({Transport, ListenSocket},
             {ok, _Upgrayedd} = ssl:negotiated_next_protocol(AcceptSocket),
             AcceptSocket
     end,
+
+    {sslsocket,{gen_tcp,MysterySocket,tls_connection,_},_} = AcceptSocket,
+
+    InetDB =  inet_db:lookup_socket(MysterySocket),
+    lager:error("inet_db ~p", [InetDB]),
+
+    Output = erlang:port_get_data(MysterySocket),
+    lager:error("port_get_data ~p", [Output]),
     %% Start up a listening socket to take the place of this socket,
     %% that's no longer listening
     chatterbox_sup:start_socket(),
@@ -104,12 +145,12 @@ connected(next,
                  socket = Socket
                 }
          ) ->
-    lager:debug("[connected] Waiting for next frame"),
+    %lager:debug("[connected] Waiting for next frame"),
 
     %% Timeout here so we can come up for air and see if anybody is
     %% asking us to do anything. like maybe somebody has come to check
     %% if we ever got our server settings ack
-    Response = case http2_frame:read(Socket,  2500) of
+    Response = case http2_frame:read(Socket,  10) of
         {error, _} ->
              {next_state, connected, S};
         Frame ->
@@ -128,9 +169,9 @@ continuation(next,
                     socket=Socket,
                     continuation_stream_id = StreamId
                    }) ->
-    lager:debug("[continuation] Waiting for next frame"),
+    %lager:debug("[continuation] Waiting for next frame"),
     Response =
-        case http2_frame:read(Socket, 2500) of
+        case http2_frame:read(Socket, 10) of
             {error, _} ->
                 {next_state, continuation, S};
             Frame = {#frame_header{
@@ -475,6 +516,64 @@ route_frame(Frame, State) ->
     lager:error("OOPS! ~p", [State]),
     go_away(?PROTOCOL_ERROR, State).
 
+handle_event({send_headers, StreamId, Headers},
+             StateName,
+             State=#connection_state{
+                      encode_context=EncodeContext,
+                      streams = Streams
+                     }
+            ) ->
+    lager:debug("{send headers, ~p, ~p}", [StreamId, Headers]),
+    {Stream, StreamTail} = get_stream(StreamId, Streams),
+    {HeaderFrame, NewContext} = http2_frame_headers:to_frame(StreamId, Headers, EncodeContext),
+    {NewStream, NewConnection} = http2_stream:send_frame(HeaderFrame, {Stream, State}),
+    {next_state, StateName, NewConnection#connection_state{
+                              encode_context=NewContext,
+                              streams=[{StreamId, NewStream}|StreamTail]
+                             }
+    };
+handle_event({send_body, StreamId, Body},
+             StateName,
+             State=#connection_state{
+                      streams=Streams,
+                      send_settings=SendSettings
+                     }
+            ) ->
+    {Stream, StreamTail} = get_stream(StreamId, Streams),
+    DataFrames = http2_frame_data:to_frames(StreamId, Body, SendSettings),
+    {NewStream, NewConnection}
+        = lists:foldl(
+            fun(Frame, S) ->
+                    http2_stream:send_frame(Frame, S)
+            end,
+            {Stream, State},
+            DataFrames),
+
+    {next_state, StateName, NewConnection#connection_state{
+                              streams=[{StreamId, NewStream}|StreamTail]
+                             }
+    };
+handle_event({send_promise, StreamId, NewStreamId, Headers},
+             StateName,
+             State=#connection_state{
+                      streams=Streams,
+                      encode_context=OldContext
+                     }
+            ) ->
+    {Stream, StreamTail} = get_stream(StreamId, Streams),
+    {PromiseFrame, NewContext} = http2_frame_push_promise:to_frame(
+                                   StreamId,
+                                   NewStreamId,
+                                   Headers,
+                                   OldContext
+                                  ),
+    {NewStream, NewConnection} = http2_stream:send_frame(PromiseFrame, {Stream, State}),
+    {next_state, StateName, NewConnection#connection_state{
+                              encode_context=NewContext,
+                              streams=[{StreamId, NewStream}|StreamTail]
+                             }
+    };
+
 handle_event({check_settings_ack, {Ref, NewSettings}},
              StateName,
              State=#connection_state{
@@ -491,6 +590,29 @@ handle_event({check_settings_ack, {Ref, NewSettings}},
 handle_event(_E, StateName, State) ->
     {next_state, StateName, State}.
 
+handle_sync_event(new_stream, _F, StateName,
+                  State=#connection_state{
+                           streams=Streams,
+                           next_available_stream_id=NextId,
+                           recv_settings=#settings{initial_window_size=RecvWindowSize},
+                           send_settings=#settings{initial_window_size=SendWindowSize}
+                          }) ->
+    NewStream = http2_stream:new(NextId, {SendWindowSize, RecvWindowSize}),
+    lager:debug("added stream #~p to ~p", [NextId, Streams]),
+    {reply, NextId, StateName, State#connection_state{
+                                 next_available_stream_id=NextId+2,
+                                 streams=[{NextId, NewStream}|Streams]
+                                }
+    };
+handle_sync_event(is_push, _F, StateName,
+                  State=#connection_state{
+                    send_settings=#settings{enable_push=Push}
+                   }) ->
+    IsPush = case Push of
+        1 -> true;
+        _ -> false
+    end,
+    {reply, IsPush, StateName, State};
 handle_sync_event(_E, _F, StateName, State) ->
     {next_state, StateName, State}.
 
@@ -517,6 +639,7 @@ terminate(_Reason, _StateName, _State) ->
 -spec get_stream(stream_id(), [{stream_id(), stream_state()}]) ->
                         {stream_state(), [{stream_id(), stream_state()}]}.
 get_stream(StreamId, Streams) ->
+    lager:debug("get_stream(~p, ~p)", [StreamId, Streams]),
     {[{StreamId, Stream}], Leftovers} =
         lists:partition(fun({Sid, _}) ->
                                 Sid =:= StreamId

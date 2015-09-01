@@ -89,7 +89,8 @@ recv_frame(F={#frame_header{
                    type=?HEADERS
                   }, _Payload},
            {Stream=#stream_state{
-                      state=idle
+                      state=idle,
+                      stream_id=StreamId
                      },
             Connection=#connection_state{
               decode_context=DecodeContext,
@@ -99,14 +100,12 @@ recv_frame(F={#frame_header{
        ?IS_FLAG(Flags, ?FLAG_END_HEADERS) ->
     HeadersBin = http2_frame_headers:from_frames([F]),
     {Headers, NewDecodeContext} = hpack:decode(HeadersBin, DecodeContext),
-    Handler:handle(
-      Connection#connection_state{
-        decode_context=NewDecodeContext
-       },
-      Headers,
-      Stream#stream_state{
-        request_headers=Headers
-       });
+    Handler:spawn_handle(self(), StreamId, Headers, <<>>),
+    {Stream#stream_state{request_headers=Headers},
+     Connection#connection_state{
+       decode_context=NewDecodeContext
+      }
+     };
 
 %% idle receives HEADERS with END_STREAM, no END_HEADERS, transition
 %% to half_closed_remote, wait for continuations until END HEADERS,
@@ -147,7 +146,8 @@ recv_frame(F={#frame_header{
                   }, _Payload},
            {Stream=#stream_state{
                       state=half_closed_remote,
-                      incoming_frames=IFQ
+                      incoming_frames=IFQ,
+                      stream_id=StreamId
                      },
             Connection=#connection_state{
                           decode_context=DecodeContext,
@@ -164,12 +164,12 @@ recv_frame(F={#frame_header{
                   request_headers=Headers
                  },
 
-    Handler:handle(
-      Connection#connection_state{
-        decode_context=NewDecodeContext
-       },
-      Headers,
-      NewStream);
+    Handler:spawn_handle(self(), StreamId, Headers, <<>>),
+    {NewStream,
+     Connection#connection_state{
+       decode_context=NewDecodeContext
+      }
+     };
 
 %% idle receives HEADERS with END_HEADERS, no END_STREAM. transition
 %% to open and wait for DATA frames until one comes with END_STREAM,
@@ -230,7 +230,8 @@ recv_frame(F={#frame_header{
                       incoming_frames=IFQ,
                       state=open,
                       request_headers=Headers,
-                      recv_window_size=SRWS
+                      recv_window_size=SRWS,
+                      stream_id=StreamId
                      },
             Connection=#connection_state{
                           content_handler=Handler,
@@ -247,13 +248,13 @@ recv_frame(F={#frame_header{
                   state=half_closed_remote,
                   recv_window_size=SRWS-L
                  },
+    Handler:spawn_handle(self(), StreamId, Headers, <<>>),
+    {NewStream,
+     Connection#connection_state{
+       recv_window_size=CRWS-L
+      }
+    };
 
-    Handler:handle(
-      Connection#connection_state{
-        recv_window_size=CRWS-L
-       },
-      Headers,
-      NewStream);
 
 %% idle receives HEADERS, no END_STREAM or END_HEADERS transition into
 %% open, expect continuations until one shows up with an END_HEADERS,
@@ -326,7 +327,8 @@ recv_frame(F={#frame_header{
                   }, _Payload},
            {Stream=#stream_state{
                       state=open,
-                      incoming_frames=IFQ
+                      incoming_frames=IFQ,
+                      stream_id=StreamId
                      },
             Connection=#connection_state{
                           decode_context=DecodeContext,
@@ -344,13 +346,12 @@ recv_frame(F={#frame_header{
        request_headers=Headers
      },
 
-    Handler:handle(
-      Connection#connection_state{
+   Handler:spawn_handle(self(), StreamId, Headers, <<>>),
+    {NewStream,
+     Connection#connection_state{
         decode_context=NewDecodeContext
-       },
-      Headers,
-      NewStream);
-
+      }
+    };
 
 recv_frame(F={#frame_header{
                    length=L,
@@ -384,7 +385,8 @@ recv_frame(F={#frame_header{
                       state=open,
                       incoming_frames=IFQ,
                       request_headers=Headers,
-                      recv_window_size=SRWS
+                      recv_window_size=SRWS,
+                      stream_id=StreamId
                      },
             Connection=#connection_state{
                           content_handler=Handler,
@@ -401,13 +403,12 @@ recv_frame(F={#frame_header{
                   recv_window_size=SRWS-L
                  },
 
-    Handler:handle(
-      Connection#connection_state{
+   Handler:spawn_handle(self(), StreamId, Headers, <<>>),
+    {NewStream,
+     Connection#connection_state{
         recv_window_size=CRWS-L
-       },
-      Headers,
-      NewStream);
-
+      }
+    };
 
 %% needs a WINDOW_UPDATE clause badly
 recv_frame({#frame_header{
