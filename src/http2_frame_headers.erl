@@ -33,8 +33,6 @@ read_binary(Bin, H = #frame_header{length=L}) ->
                  priority=Priority,
                  block_fragment=HeaderFragment
                 },
-
-    lager:debug("HEADERS payload: ~p", [Payload]),
     {ok, Payload, Rem}.
 
 is_priority(#frame_header{flags=F}) when ?IS_FLAG(F, ?FLAG_PRIORITY) ->

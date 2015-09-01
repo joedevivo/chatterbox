@@ -195,6 +195,7 @@
 
 
 -record(connection_state, {
+          listen_socket :: socket(),
           socket = undefined :: undefined | socket(),
           send_settings = #settings{} :: settings(),
           recv_settings = #settings{} :: settings(),
