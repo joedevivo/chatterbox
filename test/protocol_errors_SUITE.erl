@@ -55,7 +55,10 @@ no_goaway_frame_on_non_zero(Config) ->
 
 
 one_frame(Frame, _Config) ->
-    {ok, Client} = http2c:start_link(),
+    {ok, Port} = application:get_env(chatterbox, port),
+    {ok, Client} = http2c:start_link([{host, "127.0.0.1"},
+				      {port, Port},
+				      {ssl, true}]),
     http2c:send_unaltered_frames(Client, [Frame]),
 
     %% How do I get the response? Should be GOAWAY with PROTOCOL_ERROR

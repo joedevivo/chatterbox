@@ -17,7 +17,7 @@
 
 %% API
 -export([
-         start_link/0,
+         start_link/1,
          send_binary/2,
          send_frames/2,
          send_unaltered_frames/2,
@@ -39,9 +39,9 @@
 }).
 
 %% Starts a server. Should probably take args eventually
--spec start_link() -> {ok, pid()} | ignore | {error, any()}.
-start_link() ->
-    gen_server:start_link(?MODULE, [], []).
+-spec start_link(any()) -> {ok, pid()} | ignore | {error, any()}.
+start_link(Opts) ->
+    gen_server:start_link(?MODULE, [Opts], []).
 
 %% Three API levels:
 %% 1: lowest: Send a frame or set of frames
@@ -110,40 +110,40 @@ get_frames(Pid, StreamId) ->
                       {ok, #http2c_state{}, timeout()} |
                       ignore |
                       {stop, any()}.
-init([]) ->
-    Host = "localhost",
-    {ok, Port} = application:get_env(chatterbox, port),
-    ClientOptions = [
-               binary,
-               {packet, raw},
-               {active, false}
-              ],
-    %% TODO: Stealing from the server config here :/
-    {ok, SSLEnabled} = application:get_env(chatterbox, ssl),
-    {Transport, Options} = case SSLEnabled of
-        true ->
-            {ok, SSLOptions} = application:get_env(chatterbox, ssl_options),
-            {ssl, ClientOptions ++ SSLOptions ++ [{client_preferred_next_protocols, {client, [<<"h2">>]}}]};
-        false ->
-            {gen_tcp, ClientOptions}
-    end,
+init([Options]) ->
+    Host = proplists:get_value(host, Options),
+    Port = proplists:get_value(port, Options),
+    ClientOptions = [binary,
+		     {packet, raw},
+		     {active, false}],
+    {Transport, Options1} =
+	case proplists:get_value(ssl, Options, false) of
+	    false ->
+		{gen_tcp, ClientOptions};
+	    true ->
+		SSLOptions = proplists:get_value(ssl_opts, Options, []),
+		{ssl, ClientOptions ++ SSLOptions ++
+		     [{client_preferred_next_protocols, {client, [<<"h2">>]}}]}
+	end,
+    lager:debug("Options: ~p", [Options1]),
     lager:debug("Transport: ~p", [Transport]),
-    {ok, Socket} = Transport:connect(Host, Port, Options),
+    {ok, Socket} = Transport:connect(Host, Port, Options1),
 
     %% Send the preamble
-    Transport:send(Socket, <<?PREAMBLE>>),
+    ok = Transport:send(Socket, <<?PREAMBLE>>),
 
-    %% Settings Handshake
-    {_SSH, ServerSettings}  = http2_frame:read({Transport, Socket}),
-    http2_frame_settings:ack({Transport, Socket}),
-
+    %% Send the Settings Handshake before anything else.
     ClientSettings = #settings{},
     http2_frame_settings:send({Transport, Socket}, #settings{}, ClientSettings),
     {AH, _Ack} = http2_frame:read({Transport, Socket}),
+
+    %% Read and accept the settings from the server. @todo handle errors here
+    {_SSH, ServerSettings}  = http2_frame:read({Transport, Socket}),
+    http2_frame_settings:ack({Transport, Socket}),
+    lager:debug("Ack: ~p", [_Ack]),
     lager:debug("AH: ~p", [AH]),
     Ack = ?IS_FLAG(AH#frame_header.flags, ?FLAG_ACK),
     lager:debug("Ack: ~p", [Ack]),
-
     case Transport of
         ssl ->
             ssl:setopts(Socket, [{active, true}]);
