@@ -34,7 +34,10 @@ wrong_size_window_update(Config) ->
     send_wrong_size(?WINDOW_UPDATE, Config).
 
 send_wrong_size(Type, _Config) ->
-    {ok, Client} = http2c:start_link(),
+    {ok, Port} = application:get_env(chatterbox, port),
+    {ok, Client} = http2c:start_link([{host, "127.0.0.1"},
+				      {port, Port},
+				      {ssl, true}]),
     http2c:send_binary(Client, <<10:24,Type:8,0:1,0:31,0:100>>),
     timer:sleep(100),
     Resp = http2c:get_frames(Client, 0),
@@ -46,7 +49,10 @@ send_wrong_size(Type, _Config) ->
     ok.
 
 frame_too_big(_Config) ->
-    {ok, Client} = http2c:start_link(),
+    {ok, Port} = application:get_env(chatterbox, port),
+    {ok, Client} = http2c:start_link([{host, "127.0.0.1"},
+				      {port, Port},
+				      {ssl, true}]),
     Frames = [
         {#frame_header{length=16392,type=?HEADERS,flags=?FLAG_END_HEADERS,stream_id=3}, #headers{block_fragment = <<1:131136>>}}
     ],
@@ -66,7 +72,10 @@ frame_too_big(_Config) ->
     ok.
 
 euc(_Config) ->
-    {ok, Client} = http2c:start_link(),
+    {ok, Port} = application:get_env(chatterbox, port),
+    {ok, Client} = http2c:start_link([{host, "127.0.0.1"},
+				      {port, Port},
+				      {ssl, true}]),
 
     Headers1 = [
                {<<":path">>, <<"/">>},

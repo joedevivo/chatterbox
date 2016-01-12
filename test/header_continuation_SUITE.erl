@@ -22,7 +22,10 @@ end_per_testcase(_, Config) ->
     ok.
 
 basic_continuation(_Config) ->
-    {ok, Client} = http2c:start_link(),
+    {ok, Port} = application:get_env(chatterbox, port),
+    {ok, Client} = http2c:start_link([{host, "127.0.0.1"},
+				      {port, Port},
+				      {ssl, true}]),
 
     %% build some headers
     Headers = [
@@ -54,12 +57,15 @@ basic_continuation(_Config) ->
     ct:pal("Resp: ~p", [Resp]),
 
     ?assertEqual(2, length(Resp)),
-
+    gen_server:stop(Client),
     ok.
 
 
 basic_continuation_end_stream_first(_Config) ->
-    {ok, Client} = http2c:start_link(),
+    {ok, Port} = application:get_env(chatterbox, port),
+    {ok, Client} = http2c:start_link([{host, "127.0.0.1"},
+				      {port, Port},
+				      {ssl, true}]),
 
     %% build some headers
     Headers = [
@@ -96,7 +102,10 @@ basic_continuation_end_stream_first(_Config) ->
 
 
 bad_frame_wrong_type_between_continuations(_Config) ->
-    {ok, Client} = http2c:start_link(),
+    {ok, Port} = application:get_env(chatterbox, port),
+    {ok, Client} = http2c:start_link([{host, "127.0.0.1"},
+				      {port, Port},
+				      {ssl, true}]),
 
     %% build some headers
     Headers = [
@@ -138,7 +147,10 @@ bad_frame_wrong_type_between_continuations(_Config) ->
     ok.
 
 bad_frame_wrong_stream_between_continuations(_Config) ->
-    {ok, Client} = http2c:start_link(),
+    {ok, Port} = application:get_env(chatterbox, port),
+    {ok, Client} = http2c:start_link([{host, "127.0.0.1"},
+				      {port, Port},
+				      {ssl, true}]),
 
     %% build some headers
     Headers = [

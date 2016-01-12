@@ -23,7 +23,7 @@ identifies_protocol(Config) ->
     {ok, Socket} = ssl:connect("localhost", Port, Options),
     ct:pal("Socket to me: ~p", [Socket]),
 
-    try ssl:negotiated_next_protocol(Socket) of
+    try ssl:negotiated_protocol(Socket) of
          {ok, NextProtocol} ->
             ct:pal("NextProtocol: ~p", [NextProtocol]),
             <<"h2">> = NextProtocol,
