@@ -600,8 +600,9 @@ handle_info({inet_async, _ListSock, Ref, {ok, CliSocket}},
             CliSocket;
         ssl ->
             {ok, AcceptSocket} = ssl:ssl_accept(CliSocket, SSLOptions),
-            %% TODO: Erlang 18 uses ALPN
-            {ok, _Upgrayedd} = ssl:negotiated_next_protocol(AcceptSocket),
+            %% TODO: Backwards compatibility for Erlang 17 using
+            %% ssl:negotiated_next_protocol
+            {ok, _Upgrayedd} = ssl:negotiated_protocol(AcceptSocket),
             AcceptSocket
         end,
     chatterbox_sup:start_socket(),
