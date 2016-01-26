@@ -30,6 +30,7 @@
          terminate/2, code_change/3]).
 
 -record(http2c_state, {
+          socket :: undefined | {gen_tcp, gen_tcp:socket()} | {ssl, ssl:sslsocket()},
           connection = #connection_state{} :: connection_state(),
           next_available_stream_id = 1 :: pos_integer(),
           incoming_frames = [] :: [frame()],
@@ -134,13 +135,16 @@ init([]) ->
     Transport:send(Socket, <<?PREAMBLE>>),
 
     %% Settings Handshake
-    {_SSH, ServerSettings}  = http2_frame:read({Transport, Socket}),
+    {_SSH, ServerSettings} = http2_frame:read({Transport, Socket}, 1000),
     http2_frame_settings:ack({Transport, Socket}),
 
     ClientSettings = #settings{},
-    http2_frame_settings:send({Transport, Socket}, #settings{}, ClientSettings),
-    {AH, _Ack} = http2_frame:read({Transport, Socket}),
-    lager:debug("AH: ~p", [AH]),
+
+    BinToSend = http2_frame_settings:send(#settings{}, ClientSettings),
+    Transport:send(Socket, BinToSend),
+
+    {AH, PAck} = http2_frame:read({Transport, Socket}, 100),
+    lager:debug("AH: ~p, ~p", [AH, PAck]),
     Ack = ?IS_FLAG(AH#frame_header.flags, ?FLAG_ACK),
     lager:debug("Ack: ~p", [Ack]),
 
@@ -151,8 +155,8 @@ init([]) ->
             inet:setopts(Socket, [{active, true}])
     end,
     {ok, #http2c_state{
+            socket = {Transport, Socket},
             connection = #connection_state{
-                            socket = {Transport, Socket},
                             recv_settings = ClientSettings,
                             send_settings = http2_frame_settings:overlay(#settings{},  ServerSettings)
                            }
@@ -184,13 +188,14 @@ handle_call(_Request, _From, State) ->
                          {noreply, #http2c_state{}} |
                          {noreply, #http2c_state{}, timeout()} |
                          {stop, any(), #http2c_state{}}.
-handle_cast({send_bin, Bin}, #http2c_state{connection=#connection_state{socket={Transport, Socket}}}=State) ->
+handle_cast({send_bin, Bin}, #http2c_state{socket={Transport, Socket}}=State) ->
     lager:debug("Sending ~p", [Bin]),
     Transport:send(Socket, Bin),
     {noreply, State};
 handle_cast(recv, #http2c_state{
-        incoming_frames = Frames,
-        connection=#connection_state{socket={Transport, Socket}}
+                     socket={Transport, Socket},
+                     incoming_frames = Frames,
+                     connection=#connection_state{}
         }=State) ->
     lager:info("recv"),
 

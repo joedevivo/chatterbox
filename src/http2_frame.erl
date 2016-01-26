@@ -3,6 +3,7 @@
 -include("http2.hrl").
 
 -export([
+         recv/1,
          read/1,
          read/2,
          read_binary_frame_header/1,
@@ -33,6 +34,27 @@
 %% TODO: some kind of callback for sending frames
 %-callback send(port(), payload()) -> ok | {error, term()}.
 
+
+%% for http2_socket
+-spec recv(binary() |
+           {frame_header(), binary()}) ->
+                  {ok, frame(), binary()}
+                | {error, not_enoguh_header, binary()}
+                | {error, not_enough_payload, frame_header(), binary()}.
+recv(Bin)
+  when is_binary(Bin), byte_size(Bin) < 9 ->
+    {error, not_enough_header, Bin};
+recv(Bin)
+  when is_binary(Bin) ->
+    {Header, PayloadBin} = read_binary_frame_header(Bin),
+    recv({Header, PayloadBin});
+recv({Header, PayloadBin})
+  when byte_size(PayloadBin) < Header#frame_header.length ->
+    {error, not_enough_payload, Header, PayloadBin};
+recv({Header, PayloadBin}) ->
+    {ok, Payload, Rem} = read_binary_payload(PayloadBin, Header),
+    {ok, {Header, Payload}, Rem}.
+
 -spec read(socket()) -> {frame_header(), payload()}.
 read(Socket) ->
     read(Socket, infinity).
@@ -48,6 +70,10 @@ read(Socket, Timeout) ->
             {FrameHeader, Payload}
     end.
 
+%% Hi, it's been a while. We need to massage the API here into
+%% something that can handle an unknown number of bytes in a binary
+%% containing an unknown quantity of frames
+
 -spec from_binary(binary()) -> [{frame_header(), payload()}].
 from_binary(Bin) ->
     from_binary(Bin, []).
@@ -57,7 +83,6 @@ from_binary(<<>>, Acc) ->
 from_binary(Bin, Acc) ->
     {Header, PayloadBin} = read_binary_frame_header(Bin),
     {ok, Payload, Rem} = read_binary_payload(PayloadBin, Header),
-    lager:debug(format({Header, Payload})),
     from_binary(Rem, [{Header, Payload}|Acc]).
 
 -spec format_header(frame_header()) -> iodata().

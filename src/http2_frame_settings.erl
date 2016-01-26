@@ -7,7 +7,8 @@
 -export([
          format/1,
          read_binary/2,
-         send/3,
+         send/2,
+         ack/0,
          ack/1,
          to_binary/1,
          overlay/2
@@ -94,16 +95,13 @@ overlay(S, {settings, [{?SETTINGS_MAX_HEADER_LIST_SIZE, Val}|PList]}) ->
 overlay(S, {settings, []}) ->
     S.
 
--spec send(socket(), settings(), settings()) -> ok | {error, term()}.
-send({Transport, Socket}, PrevSettings, NewSettings) ->
+-spec send(settings(), settings()) -> binary().
+send(PrevSettings, NewSettings) ->
     Diff = http2_settings:diff(PrevSettings, NewSettings),
     Payload = make_payload(Diff),
     L = size(Payload),
     Header = <<L:24,?SETTINGS:8,16#0:8,0:1,0:31>>,
-
-    Frame = [Header, Payload],
-    lager:debug("sending settings ~p", [Frame]),
-    Transport:send(Socket, Frame).
+    <<Header/binary, Payload/binary>>.
 
 -spec make_payload(settings_proplist()) -> binary().
 make_payload(Diff) ->
@@ -113,6 +111,10 @@ make_payload_([], BinAcc) ->
     BinAcc;
 make_payload_([{<<Setting>>, Value}|Tail], BinAcc) ->
     make_payload_(Tail, <<Setting:16,Value:32,BinAcc/binary>>).
+
+-spec ack() -> binary().
+ack() ->
+    <<0:24,4:8,1:8,0:1,0:31>>.
 
 -spec ack(socket()) -> ok | {error, term()}.
 ack({Transport,Socket}) ->

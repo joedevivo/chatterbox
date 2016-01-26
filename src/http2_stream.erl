@@ -445,10 +445,10 @@ send_frame(F={#frame_header{
                 },_},
            {StreamState = #stream_state{},
             ConnectionState = #connection_state{
-                                 socket={Transport,Socket}
+                                 socket=Socket
                                 }
            }) ->
-    Transport:send(Socket, http2_frame:to_binary(F)),
+    http2_socket:send(Socket, http2_frame:to_binary(F)),
     {StreamState, ConnectionState};
 send_frame(F={#frame_header{
                  length=L,
@@ -458,12 +458,12 @@ send_frame(F={#frame_header{
                       send_window_size=SSWS
                       },
             ConnectionState = #connection_state{
-                                 socket={Transport,Socket},
+                                 socket=Socket,
                                  send_window_size=CSWS
                                 }
            })
   when SSWS >= L, CSWS >= L ->
-    Transport:send(Socket, http2_frame:to_binary(F)),
+    http2_socket:send(Socket, http2_frame:to_binary(F)),
     {StreamState#stream_state{
        send_window_size=SSWS-L
       },
@@ -490,12 +490,12 @@ send_frame(F={#frame_header{
            {StreamState = #stream_state{
                              },
             ConnectionState = #connection_state{
-                                 socket={Transport,Socket},
+                                 socket=Socket,
                                  recv_settings=#settings{initial_window_size=RecvWindowSize},
                                  send_settings=#settings{initial_window_size=SendWindowSize},
                                  streams=Streams
                                 }}) ->
-    Transport:send(Socket, http2_frame:to_binary(F)),
+    http2_socket:send(Socket, http2_frame:to_binary(F)),
     NewStream = new(PSID, {SendWindowSize, RecvWindowSize}, reserved_local),
 
     {StreamState, ConnectionState#connection_state{
@@ -504,12 +504,12 @@ send_frame(F={#frame_header{
 send_frame(_F, S) ->
     S.
 
-rst_stream(ErrorCode, StreamId, #connection_state{socket={Transport, Socket}}) ->
+rst_stream(ErrorCode, StreamId, #connection_state{socket=Socket}) ->
     RstStream = #rst_stream{error_code=ErrorCode},
     RstStreamBin = http2_frame:to_binary(
                      {#frame_header{
                          stream_id=StreamId
                         },
                       RstStream}),
-    Transport:send(Socket, RstStreamBin),
+    http2_socket:send(Socket, RstStreamBin),
     ok.

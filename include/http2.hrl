@@ -189,7 +189,9 @@
 -type transport() :: gen_tcp | ssl.
 -type socket() :: {gen_tcp, gen_tcp:socket()|undefined} | {ssl, ssl:sslsocket()|undefined}.
 
+%% TODO: I don't know where I got PREAMBLE from, it's PREFACE in the spec
 -define(PREAMBLE, "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n").
+-define(PREFACE, "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n").
 
 -define(DEFAULT_INITIAL_WINDOW_SIZE, 65535).
 
@@ -197,7 +199,7 @@
 -record(connection_state, {
           ssl_options = [],
           listen_ref :: non_neg_integer(),
-          socket = undefined :: undefined | socket(),
+          socket = undefined :: undefined | pid(),
           send_settings = #settings{} :: settings(),
           recv_settings = #settings{} :: settings(),
           send_window_size = ?DEFAULT_INITIAL_WINDOW_SIZE :: integer(),
