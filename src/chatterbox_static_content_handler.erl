@@ -11,7 +11,7 @@
         pid(),
         stream_id(),     %% Stream Id
         hpack:headers(), %% Decoded Request Headers
-        binary()         %% Request Body
+        iodata()         %% Request Body
        ) -> pid().
 spawn_handle(Pid, StreamId, Headers, ReqBody) ->
     Handler = fun() ->
@@ -23,7 +23,7 @@ spawn_handle(Pid, StreamId, Headers, ReqBody) ->
         pid(),
         stream_id(),
         hpack:headers(),
-        binary()
+        iodata()
        ) -> ok.
 handle(ConnPid, StreamId, Headers, _ReqBody) ->
     lager:debug("handle(~p, ~p, ~p, _)", [ConnPid, StreamId, Headers]),

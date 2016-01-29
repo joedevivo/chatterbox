@@ -4,7 +4,7 @@
 
 -include("http2.hrl").
 
--export([start_link/1]).
+-export([start_link/2]).
 
 -export([
          send_headers/3,
@@ -32,13 +32,17 @@
 
 -export([go_away/2]).
 
--spec start_link(pid()) ->
+-spec start_link(pid(), client|server) ->
                         {ok, pid()} |
                         ignore |
                         {error, term()}.
-start_link(Pid) ->
-    gen_fsm:start_link(?MODULE, Pid, []).
-
+start_link(Pid, ConnectionType) ->
+    %% client streams are odd, server's are even
+    FirstStreamId = case ConnectionType of
+                        client -> 1;
+                        server -> 2
+                    end,
+    gen_fsm:start_link(?MODULE, {Pid, FirstStreamId}, []).
 
 -spec send_headers(pid(), stream_id(), hpack:headers()) -> ok.
 send_headers(Pid, StreamId, Headers) ->
@@ -63,16 +67,17 @@ send_promise(Pid, StreamId, NewStreamId, Headers) ->
     gen_fsm:send_all_state_event(Pid, {send_promise, StreamId, NewStreamId, Headers}),
     ok.
 
--spec init(pid()) ->
+-spec init({pid(), 1|2}) ->
                   {ok, handshake, #connection_state{}, timeout()}.
-init(SocketPid) ->
+init({SocketPid, FirstStreamId}) ->
     %% From Section 6.5 of the HTTP/2 Specification A SETTINGS frame
     %% MUST be sent by both endpoints at the start of a connection,
     %% and MAY be sent at any other time by either endpoint over the
     %% lifetime of the connection. Implementations MUST support all of
     %% the parameters defined by this specification.
     StateWithSocket =  #connection_state{
-                          socket=SocketPid
+                          socket=SocketPid,
+                          next_available_stream_id=FirstStreamId
                          },
     StateToRouteWith = send_settings(StateWithSocket),
     {ok,
@@ -443,6 +448,7 @@ route_frame(F={H=#frame_header{stream_id=StreamId}, #window_update{}},
 %    {stop, normal, State};
 route_frame(Frame, State) ->
     lager:error("Frame condition not covered by pattern match"),
+    lager:error("This is bad and you probably found a bug. Please open a github issue with this output:"),
     lager:error("OOPS! " ++ http2_frame:format(Frame)),
     lager:error("OOPS! ~p", [State]),
     go_away(?PROTOCOL_ERROR, State).

@@ -1,3 +1,9 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%
+%% PLEASE ONLY USE FOR TESTING
+%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
 -module(http2c).
 
 -behaviour(gen_server).
@@ -229,6 +235,10 @@ handle_info({_, _, Bin}, #http2c_state{
         working_frame_header = Header,
         working_frame_payload = Rem
     }};
+handle_info({tcp_closed,_}, State) ->
+    {noreply, State};
+handle_info({ssl_closed,_}, State) ->
+    {noreply, State};
 handle_info(Info, State) ->
     lager:debug("unexpected [http2c]: ~p~n", [Info]),
     {noreply, State}.

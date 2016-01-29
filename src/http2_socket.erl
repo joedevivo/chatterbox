@@ -100,9 +100,12 @@ init({client, Transport, Host, Port, SSLOptions}) ->
     %% the wire? It's the second thing. What we want is to be able to
     %% write servers and clients in terms of HTTP/2 frames.
 
+    {ok, CliPid} = http2_connection:start_link(self(), client),
+
     {ok, #http2_socket_state{
             type = client,
-            socket = {Transport, Socket}
+            socket = {Transport, Socket},
+            http2_pid = CliPid
            }}.
 
 handle_call(Msg, _From, State) ->
@@ -147,7 +150,6 @@ handle_info({inet_async, ListenSocket, Ref, {ok, ClientSocket}},
                server_module = ServerMod,
                acceptor_callback = AcceptorCallback
               }=State) ->
-    lager:debug("He's here!"),
     inet_db:register_socket(ClientSocket, inet_tcp),
     Socket = case Transport of
         gen_tcp ->
@@ -160,7 +162,7 @@ handle_info({inet_async, ListenSocket, Ref, {ok, ClientSocket}},
 
     %% Pass self to server module's start link. The socket negotiation
     %% all happens here, so all we need is a place to send messages
-    {ok, ServerPid} = ServerMod:start_link(self()),
+    {ok, ServerPid} = ServerMod:start_link(self(), server),
 
     %% We should read the PREFACE
 

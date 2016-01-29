@@ -232,7 +232,14 @@
           recv_window_size = ?DEFAULT_INITIAL_WINDOW_SIZE :: integer(),
           queued_frames = queue:new() :: queue:queue(frame()),
           incoming_frames = queue:new() :: queue:queue(frame()),
-          request_headers = [] :: hpack:headers()
+          request_headers = [] :: hpack:headers(),
+          request_body :: iodata(),
+          request_end_stream = false :: boolean(),
+          request_end_headers = false :: boolean(),
+          response_headers = [] :: hpack:headers(),
+          response_body :: iodata(),
+          response_end_headers = false :: boolean(),
+          response_end_stream = false :: boolean()
 }).
 
 -type stream_state() :: #stream_state{}.
