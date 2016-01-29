@@ -30,7 +30,10 @@
          closing/2
         ]).
 
--export([go_away/2]).
+-export([
+         get_stream/2,
+         go_away/2
+        ]).
 
 -spec start_link(pid(), client|server) ->
                         {ok, pid()} |

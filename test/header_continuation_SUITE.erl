@@ -42,9 +42,9 @@ basic_continuation(_Config) ->
     %% break them up into 3 frames
 
     Frames = [
-              {#frame_header{length=8,type=?HEADERS,stream_id=3},#headers{block_fragment=H1}},
+              {#frame_header{length=8,type=?HEADERS,flags=?FLAG_END_STREAM,stream_id=3},#headers{block_fragment=H1}},
               {#frame_header{length=8,type=?CONTINUATION,stream_id=3},#continuation{block_fragment=H2}},
-              {#frame_header{length=8,type=?CONTINUATION,flags=?FLAG_END_HEADERS bor ?FLAG_END_STREAM,stream_id=3},#continuation{block_fragment=H3}}
+              {#frame_header{length=8,type=?CONTINUATION,flags=?FLAG_END_HEADERS,stream_id=3},#continuation{block_fragment=H3}}
     ],
     http2c:send_unaltered_frames(Client, Frames),
 

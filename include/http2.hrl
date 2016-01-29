@@ -239,7 +239,9 @@
           response_headers = [] :: hpack:headers(),
           response_body :: iodata(),
           response_end_headers = false :: boolean(),
-          response_end_stream = false :: boolean()
+          response_end_stream = false :: boolean(),
+          next_state = undefined :: undefined | stream_state_name(),
+          promised_stream = undefined :: undefined |  stream_state()
 }).
 
 -type stream_state() :: #stream_state{}.
