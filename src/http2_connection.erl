@@ -4,7 +4,10 @@
 
 -include("http2.hrl").
 
--export([start_link/2]).
+-export([
+         start/2,
+         start_link/2
+        ]).
 
 -export([
          send_headers/3,
@@ -35,6 +38,14 @@
          get_stream/2,
          go_away/2
         ]).
+
+start(Pid, ConnectionType) ->
+    %% client streams are odd, server's are even
+    FirstStreamId = case ConnectionType of
+                        client -> 1;
+                        server -> 2
+                    end,
+    gen_fsm:start(?MODULE, {Pid, FirstStreamId}, []).
 
 -spec start_link(pid(), client|server) ->
                         {ok, pid()} |
@@ -332,18 +343,32 @@ route_frame({H=#frame_header{
                    send_settings=#settings{initial_window_size=SendWindowSize},
                    streams = Streams
             }) ->
+    lager:debug("Received HEADERS Frame for Stream ~p", [StreamId]),
     %% ok, it's a headers frame. No matter what, create a new stream.
-    NewStream = http2_stream:new(StreamId, {SendWindowSize, RecvWindowSize}),
+    %% It's a headers frame, but it could be a response header, so
+    %% maybe we don't need a new stream
+    {Stream, NewTail} =
+        case get_stream(StreamId, Streams) of
+            notfound ->
+                {http2_stream:new(StreamId, {SendWindowSize, RecvWindowSize}),
+                 Streams};
+            {NewStream, Tail} ->
+                {NewStream, Tail}
+        end,
 
     NextState = case ?IS_FLAG(H#frame_header.flags, ?FLAG_END_HEADERS) of
-                    true ->
-                        connected;
-                    false ->
-                        continuation
-                end,
-    {NewStream1, NewConnectionState} = http2_stream:recv_frame(Frame, {NewStream, S}),
+                            true ->
+                                connected;
+                            false ->
+                                continuation
+                        end,
+
+    lager:debug("recv(~p, {~p, ~p})",[Frame, Stream, S]),
+    R = http2_stream:recv_frame(Frame, {Stream, S}),
+    lager:debug("?? ~p",[R]),
+    {NewStream1, NewConnectionState} = R,
     {next_state, NextState, NewConnectionState#connection_state{
-                                 streams = [{StreamId, NewStream1}|Streams],
+                                 streams = [{StreamId, NewStream1}|NewTail],
                                  continuation_stream_id = StreamId
                                 }};
 route_frame(F={H=#frame_header{
@@ -594,14 +619,22 @@ terminate(_Reason, _StateName, _State) ->
 
 
 -spec get_stream(stream_id(), [{stream_id(), stream_state()}]) ->
-                        {stream_state(), [{stream_id(), stream_state()}]}.
+                        {stream_state(), [{stream_id(), stream_state()}]}
+                            | notfound | toomany.
 get_stream(StreamId, Streams) ->
-    {[{StreamId, Stream}], Leftovers} =
-        lists:partition(fun({Sid, _}) ->
-                                Sid =:= StreamId
-                        end,
-                        Streams),
-    {Stream, Leftovers}.
+
+
+    case lists:partition(fun({Sid, _}) ->
+                                 Sid =:= StreamId
+                         end,
+                         Streams) of
+        {[{StreamId, Stream}], Leftovers} ->
+            {Stream, Leftovers};
+        {[], Streams} ->
+            notfound;
+        _ ->
+            toomany
+        end.
 
 -spec go_away(error_code(), #connection_state{}) -> {next_state, closing, #connection_state{}}.
 go_away(ErrorCode,

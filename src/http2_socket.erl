@@ -106,7 +106,7 @@ init({client, Transport, Host, Port, SSLOptions}) ->
     %% the wire? It's the second thing. What we want is to be able to
     %% write servers and clients in terms of HTTP/2 frames.
 
-    {ok, CliPid} = http2_connection:start_link(self(), client),
+    {ok, CliPid} = http2_connection:start(self(), client),
 
     {ok, #http2_socket_state{
             type = client,

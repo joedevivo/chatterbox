@@ -485,7 +485,7 @@ process(send,
               type=?DATA
              }, _Payload},
         {#stream_state{
-            state=State,
+            state=open,
             send_window_size=SSWS
            }=Stream,
          #connection_state{
@@ -493,11 +493,10 @@ process(send,
             socket=Socket
            }=Connection})
   when ?IS_FLAG(Flags, ?FLAG_END_STREAM),
-       SSWS >= L, CSWS >= L,
-       State =:= open orelse State =:= half_closed_remote ->
+       SSWS >= L, CSWS >= L ->
     http2_socket:send(Socket, F),
     NewStream = Stream#stream_state{
-                  state=half_closed_remote,
+                  state=half_closed_local,
                   send_window_size=SSWS-L
                  },
     {NewStream,
@@ -614,10 +613,38 @@ process(send,
             {Stream, Connection}
     end;
 
+process(send,
+        F={#frame_header{
+              length=L,
+              flags=Flags,
+              type=?DATA
+             }, _Payload},
+        {#stream_state{
+            state=half_closed_remote,
+            send_window_size=SSWS
+           }=Stream,
+         #connection_state{
+            send_window_size=CSWS,
+            socket=Socket
+           }=Connection})
+  when ?IS_FLAG(Flags, ?FLAG_END_STREAM),
+       SSWS >= L, CSWS >= L ->
+    http2_socket:send(Socket, F),
+    NewStream = Stream#stream_state{
+                  state=closed,
+                  send_window_size=SSWS-L
+                 },
+    {NewStream,
+     Connection#connection_state{
+       send_window_size=CSWS-L
+      }
+    };
+
 
 %% TODO: ???
 process(A, B, C) ->
-    lager:error("No process/3 for ~p, ~p, ~p", [A,B,C]).
+    lager:error("No process/3 for ~p, ~p, ~p", [A,B,C]),
+    C.
 
 
 maybe_decode_request_headers(
