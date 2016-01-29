@@ -2,9 +2,6 @@
 
 -include("http2.hrl").
 
-%%TODO: remove
--compile([export_all]).
-
 -export([
          recv_frame/2,
          send_frame/2,
@@ -509,6 +506,42 @@ process(send,
       }
     };
 
+%% half_closed_local, can only receive
+
+process(recv,
+        F={#frame_header{
+              type=?HEADERS,
+              flags=Flags
+             },_},
+        {#stream_state{
+            state=half_closed_local
+           }=Stream,
+         #connection_state{
+           }=Connection}) ->
+    maybe_decode_request_headers(
+      Stream#stream_state{
+        incoming_frames=queue:in(F,queue:new()),
+        response_end_stream = ?IS_FLAG(Flags, ?FLAG_END_STREAM),
+        response_end_headers = ?IS_FLAG(Flags, ?FLAG_END_HEADERS)
+       }, Connection);
+
+process(recv, F={#frame_header{
+                    type=?CONTINUATION,
+                    flags=Flags
+                    },_},
+        {#stream_state{
+            incoming_frames=IFQ,
+            state=half_closed_local,
+            response_end_headers=false
+           }=Stream,
+         #connection_state{}=Connection}) ->
+    maybe_decode_response_headers(
+      Stream#stream_state{
+        incoming_frames=queue:in(F, IFQ),
+        response_end_headers = ?IS_FLAG(Flags, ?FLAG_END_HEADERS)
+       },
+      Connection);
+
 process(recv,
         F={#frame_header{
               length=L,
@@ -635,6 +668,8 @@ maybe_decode_request_body(Stream, Connection) ->
     lager:info("Uhoh: ~p", [Stream]),
     {Stream, Connection}.
 
+-spec maybe_decode_response_headers(stream_state(), connection_state()) ->
+                                           {stream_state(), connection_state()}.
 maybe_decode_response_headers(
   #stream_state{
      incoming_frames=IFQ,

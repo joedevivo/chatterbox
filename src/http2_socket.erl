@@ -37,7 +37,8 @@
          start_client_link/4,
          start_server_link/3,
          send/2,
-         close/1
+         close/1,
+         get_http2_pid/1
         ]).
 
 %% Public API
@@ -54,6 +55,11 @@ send(Pid, Frame) ->
 -spec close(pid()) -> ok.
 close(Pid) ->
     gen_server:cast(Pid, close).
+
+-spec get_http2_pid(pid()) -> pid().
+get_http2_pid(Pid) ->
+    gen_server:call(Pid, pid).
+
 
 %% gen_server callbacks
 -spec init( {client, gen_tcp | ssl, string(), non_neg_integer(), [ssl:ssloption()]}
@@ -88,7 +94,7 @@ init({client, Transport, Host, Port, SSLOptions}) ->
             ClientSocketOptions
     end,
     {ok, Socket} = Transport:connect(Host, Port, Options),
-    Transport:send(<<?PREFACE>>),
+    Transport:send(Socket, <<?PREFACE>>),
 
     %% Q: Do we want to handle the begining of the settings handshake
     %% here?  Right now I'm thinking no? But it's a real interesting
@@ -108,6 +114,8 @@ init({client, Transport, Host, Port, SSLOptions}) ->
             http2_pid = CliPid
            }}.
 
+handle_call(pid, _From, #http2_socket_state{http2_pid=Pid}=State) ->
+    {reply, Pid, State};
 handle_call(Msg, _From, State) ->
     lager:warning("http2_socket:handle_call should never happen: ~p", [Msg]),
     {noreply, State}.

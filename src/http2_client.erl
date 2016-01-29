@@ -22,11 +22,8 @@
          start_link/2,
          start_link/3,
          start_link/4,
-         send_binary/2,
-         send_frames/2,
-         send_unaltered_frames/2,
          send_request/3,
-         get_frames/2
+         get_response/2
         ]).
 
 
@@ -90,6 +87,7 @@ start_link(https, Host, SSLOptions)
   when is_list(SSLOptions) ->
     start_link(https, Host, 443, SSLOptions).
 
+
 %% Here's your all access client starter. MAXIMUM TUNABLES! Scheme,
 %% Hostname, Port and SSLOptions. All of the start_link/* calls come
 %% through here eventually, so this is where we turn 'http' and
@@ -107,64 +105,18 @@ start_link(Transport, Host, Port, SSLOptions) ->
                http -> gen_tcp;
                https -> ssl
            end,
-    http2_socket:start_client_link(NewT, Host, Port, SSLOptions).
+    {ok, SocketPid} = http2_socket:start_client_link(NewT, Host, Port, SSLOptions),
+    {ok, http2_socket:get_http2_pid(SocketPid)}.
 
-%% Three API levels:
-%% 1: lowest: Send a frame or set of frames
-%% 2: middle: Here's some hastily constucted frames, do some setup of frame header flags.
-%% 3: highest: a semantic http request: here are
 
-%% send_binary/2 is the lowest level API. It just puts bits on the
-%% wire
--spec send_binary(pid(), iodata()) -> ok.
-send_binary(Pid, Binary) ->
-    gen_server:cast(Pid, {send_bin, Binary}).
+send_request(CliPid, Headers, Body) ->
+    StreamId = http2_connection:new_stream(CliPid),
+    http2_connection:send_headers(CliPid, StreamId, Headers),
+    http2_connection:send_body(CliPid,StreamId,Body),
+    {ok, StreamId}.
 
-%% send_frames is the middle level. Converts a series of frames to
-%% binary and sends them over to send_binary. It will scrub the frame
-%% headers correctly, for example if you try to add a HEADERS frame
-%% and two CONTINUATION frames, no matter what flags are set in the
-%% frame headers, it will make sure that the HEADERS frame and the
-%% FIRST CONTINUATION frame have the END_HEADERS flag set to 0 and the
-%% SECOND CONTINUATION frame will have it set to 1.
--spec send_frames(pid(), [frame()]) -> ok.
-send_frames(Pid, Frames) ->
-    %% TODO Process Frames
-    MassagedFrames = Frames,
-    %% Then Send
-    send_unaltered_frames(Pid, MassagedFrames).
-
-%% send_unaltered_frames is the raw version of the middle level. You
-%% can put frames directly as constructed on the wire. This is
-%% desgined for testing error conditions by giving you the freedom to
-%% create bad sets of frames. This will problably only be exported
-%% ifdef(TEST)
--spec send_unaltered_frames(pid(), [frame()]) -> ok.
-send_unaltered_frames(Pid, Frames) ->
-    [ send_binary(Pid, http2_frame:to_binary(F)) || F <- Frames],
-    ok.
-
-%% send_request takes a set of headers and a possible body. It's
-%% broken up into HEADERS, CONTINUATIONS, and DATA frames, and that
-%% list of frames is passed to send_frames. This one needs to be smart
-%% about creating a new frame id
--spec send_request(pid(), hpack:headers(), binary()) ->
-                          {hpack:headers(), binary()}.
-send_request(Pid, Headers, Body) ->
-    %% TODO: Turn Headers & Body into frames
-    %% That means creating a new stream id
-    %% Which means getting one from the gen_server state
-    NewStreamId = gen_server:call(Pid, new_stream_id),
-    EncodeContext = gen_server:call(Pid, encode_context),
-    SendSettings = gen_server:call(Pid, send_settings),
-    %% Use that to make frames
-    {HeaderFrame, NewEncodeContext} = http2_frame_headers:to_frame(NewStreamId, Headers, EncodeContext),
-    gen_server:cast(Pid, {encode_context, NewEncodeContext}),
-    DataFrames = http2_frame_data:to_frames(NewStreamId, Body, SendSettings),
-    send_frames(Pid, [HeaderFrame|DataFrames]),
-
-    %% Pull data off the wire. How? Right now we just do a separent call
-    {[],<<>>}.
-
-get_frames(Pid, StreamId) ->
-    gen_server:call(Pid, {get_frames, StreamId}).
+-spec get_response(pid(), stream_id()) ->
+                          {ok, {hpack:header(), iodata()}}
+                           | {error, term()}.
+get_response(CliPid, StreamId) ->
+    http2_connection:get_response(CliPid, StreamId).

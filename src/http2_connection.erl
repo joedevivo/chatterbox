@@ -11,7 +11,8 @@
          send_body/3,
          is_push/1,
          new_stream/1,
-         send_promise/4
+         send_promise/4,
+         get_response/2
 ]).
 
 %% gen_fsm callbacks
@@ -69,6 +70,12 @@ new_stream(Pid) ->
 send_promise(Pid, StreamId, NewStreamId, Headers) ->
     gen_fsm:send_all_state_event(Pid, {send_promise, StreamId, NewStreamId, Headers}),
     ok.
+
+-spec get_response(pid(), stream_id()) ->
+                          {ok, {hpack:headers(), iodata()}}
+                              | {error, term()}.
+get_response(Pid, StreamId) ->
+    gen_fsm:sync_send_all_state_event(Pid, {get_response, StreamId}).
 
 -spec init({pid(), 1|2}) ->
                   {ok, handshake, #connection_state{}, timeout()}.
@@ -527,6 +534,20 @@ handle_event({check_settings_ack, {Ref, NewSettings}},
 handle_event(_E, StateName, State) ->
     {next_state, StateName, State}.
 
+handle_sync_event({get_response, StreamId}, _F, StateName,
+                  #connection_state{
+                     streams=Streams
+                    }=Connection) ->
+    {Stream, _} = get_stream(StreamId, Streams),
+    Reply =
+        case Stream#stream_state.response_end_stream of
+            true ->
+                {ok, {Stream#stream_state.response_headers,
+                      Stream#stream_state.response_body}};
+            false ->
+                {error, stream_not_finished}
+        end,
+    {reply, Reply, StateName, Connection};
 handle_sync_event(new_stream, _F, StateName,
                   State=#connection_state{
                            streams=Streams,
