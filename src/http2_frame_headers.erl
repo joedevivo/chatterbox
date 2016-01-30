@@ -77,7 +77,9 @@ to_binary(#headers{
     end.
 
 -spec from_frames([frame()], binary()) -> binary().
-from_frames([{#frame_header{type=?HEADERS},#headers{block_fragment=BF}}|Continuations]) ->
+from_frames([{#frame_header{type=?HEADERS},#headers{block_fragment=BF}}|Continuations])->
+    from_frames(Continuations, BF);
+from_frames([{#frame_header{type=?PUSH_PROMISE},#push_promise{block_fragment=BF}}|Continuations])->
     from_frames(Continuations, BF).
 
 from_frames([], Acc) ->

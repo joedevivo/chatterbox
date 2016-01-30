@@ -301,7 +301,7 @@ route_frame({H, _Payload},
 %%
 %% Maybe abstract it all into http2_stream?
 
-%% TODO Route data frames to streams. POST!
+%% TODO Route data frames to streams.
 route_frame(F={H=#frame_header{
                   stream_id=StreamId}, _Payload},
             S = #connection_state{
@@ -344,15 +344,26 @@ route_frame({H=#frame_header{
                    streams = Streams
             }) ->
     lager:debug("Received HEADERS Frame for Stream ~p", [StreamId]),
-    %% ok, it's a headers frame. No matter what, create a new stream.
-    %% It's a headers frame, but it could be a response header, so
-    %% maybe we don't need a new stream
+    %% Three things could be happening here.
+
+    %% 1. We're a server, and these are Request Headers.
+
+    %% 2. We're a client, and these are Response Headers.
+
+    %% 3. We're a client, and these are Response Headers, but the
+    %% response is to a Push Promise
+
+    %% Fortunately, the only thing we need to do here is create a new
+    %% stream if this is the first scenario. The stream will already
+    %% exist if this is a PP or Response
     {Stream, NewTail} =
         case get_stream(StreamId, Streams) of
             notfound ->
+                lager:debug("Stream ~p notfound", [StreamId]),
                 {http2_stream:new(StreamId, {SendWindowSize, RecvWindowSize}),
                  Streams};
             {NewStream, Tail} ->
+                lager:debug("Stream ~p found! ~p", [StreamId, NewStream]),
                 {NewStream, Tail}
         end,
 
@@ -412,11 +423,24 @@ route_frame({H=#frame_header{stream_id=StreamId}, _Payload}, S = #connection_sta
     lager:error("Chatterbox doesn't support streams. Throwing this RST_STREAM away"),
     {next_state, connected, S};
 %%    {next_state, connected, S#connection_state{settings_sent=SS-1}};
-route_frame({H=#frame_header{stream_id=StreamId}, _Payload}, S = #connection_state{})
+route_frame({
+              H=#frame_header{stream_id=StreamId}, _Payload}=F,
+            #connection_state{
+               streams=Streams
+              }=Connection)
     when H#frame_header.type == ?PUSH_PROMISE ->
     lager:debug("Received PUSH_PROMISE Frame for Stream ~p", [StreamId]),
-    lager:error("Chatterbox doesn't support SERVER_PUSH. Throwing this PUSH_PROMISE away"),
-    {next_state, connected, S};
+    {Stream, StreamTail} = get_stream(StreamId, Streams),
+    {NewStream, NewConnection} =
+        http2_stream:recv_frame(F, {Stream, Connection#connection_state{streams=StreamTail}}),
+
+
+
+    {next_state,
+     connected,
+     NewConnection#connection_state{
+       streams=[{StreamId, NewStream}|NewConnection#connection_state.streams]
+      }};
 
 %% The case for PING
 
@@ -497,6 +521,7 @@ handle_event({send_headers, StreamId, Headers},
             ) ->
     lager:debug("{send headers, ~p, ~p}", [StreamId, Headers]),
     {Stream, StreamTail} = get_stream(StreamId, Streams),
+    lager:debug("stream ~p", [Stream]),
     {HeaderFrame, NewContext} = http2_frame_headers:to_frame(StreamId, Headers, EncodeContext),
     {NewStream, NewConnection} = http2_stream:send_frame(HeaderFrame, {Stream, State}),
     {next_state, StateName, NewConnection#connection_state{
@@ -525,10 +550,10 @@ handle_event({send_body, StreamId, Body},
                              }};
 handle_event({send_promise, StreamId, NewStreamId, Headers},
              StateName,
-             State=#connection_state{
-                      streams=Streams,
-                      encode_context=OldContext
-                     }
+             #connection_state{
+                streams=Streams,
+                encode_context=OldContext
+               }=Connection
             ) ->
     {Stream, StreamTail} = get_stream(StreamId, Streams),
     {PromiseFrame, NewContext} = http2_frame_push_promise:to_frame(
@@ -537,10 +562,20 @@ handle_event({send_promise, StreamId, NewStreamId, Headers},
                                    Headers,
                                    OldContext
                                   ),
-    {NewStream, NewConnection} = http2_stream:send_frame(PromiseFrame, {Stream, State}),
+    {NewStream, NewConnection} =
+        http2_stream:send_frame(PromiseFrame,
+                                {Stream,
+                                 Connection#connection_state{
+                                   streams=StreamTail
+                                  }
+                                }),
+
+    {X,_} = get_stream(NewStreamId, NewConnection#connection_state.streams),
+    lager:debug("Promise sent, Stream: ~p", [X]),
+
     {next_state, StateName, NewConnection#connection_state{
                               encode_context=NewContext,
-                              streams=[{StreamId, NewStream}|StreamTail]
+                              streams=[{StreamId, NewStream}|NewConnection#connection_state.streams]
                              }};
 
 handle_event({check_settings_ack, {Ref, NewSettings}},

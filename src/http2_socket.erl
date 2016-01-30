@@ -143,6 +143,7 @@ socksend(Binary,
         ok ->
             {noreply, State};
         {error, Reason} ->
+            lager:info("Socksend error: ~p", [Reason]),
             {stop, Reason, State}
     end.
 

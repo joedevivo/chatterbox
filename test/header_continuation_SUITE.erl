@@ -51,7 +51,7 @@ basic_continuation(_Config) ->
     timer:sleep(100),
 
     Resp = http2c:get_frames(Client, 3),
-    ct:pal("Resp: ~p", [Resp]),
+    cthr:pal("Resp: ~p", [Resp]),
 
     ?assertEqual(2, length(Resp)),
 
@@ -88,7 +88,7 @@ basic_continuation_end_stream_first(_Config) ->
     timer:sleep(100),
 
     Resp = http2c:get_frames(Client, 3),
-    ct:pal("Resp: ~p", [Resp]),
+    cthr:pal("Resp: ~p", [Resp]),
 
     ?assertEqual(2, length(Resp)),
 
@@ -126,7 +126,7 @@ bad_frame_wrong_type_between_continuations(_Config) ->
     timer:sleep(100),
 
     Resp = http2c:get_frames(Client, 3),
-    ct:pal("Resp: ~p", [Resp]),
+    cthr:pal("Resp: ~p", [Resp]),
 
     ?assertEqual(0, length(Resp)),
 
@@ -168,7 +168,7 @@ bad_frame_wrong_stream_between_continuations(_Config) ->
     timer:sleep(100),
 
     Resp = http2c:get_frames(Client, 3),
-    ct:pal("Resp: ~p", [Resp]),
+    cthr:pal("Resp: ~p", [Resp]),
 
     ?assertEqual(0, length(Resp)),
 

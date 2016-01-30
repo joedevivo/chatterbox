@@ -55,7 +55,7 @@ handle(ConnPid, StreamId, Headers, _ReqBody) ->
     %% Directory browsing?
     File = RootDir ++ Path4,
     lager:debug("[chatterbox_static_content_handler] serving ~p on stream ~p", [File, StreamId]),
-    lager:info("Request Headers: ~p", [Headers]),
+    %%lager:info("Request Headers: ~p", [Headers]),
 
     case {filelib:is_file(File), filelib:is_dir(File)} of
         {_, true} ->

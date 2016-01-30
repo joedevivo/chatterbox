@@ -206,9 +206,12 @@ process(recv, F={#frame_header{
   when State =:= open;
        State =:= half_closed_local ->
 
+    lager:debug("OMG Promise: ~p", [PSID]),
+
     %% Create the promised stream
     NewStream = new(PSID, {SendWindowSize, RecvWindowSize}),
     EndHeaders = ?IS_FLAG(Flags, ?FLAG_END_HEADERS),
+    lager:debug("Promise ~p End? ~p", [PSID, EndHeaders]),
     NewerStream =
         NewStream#stream_state{
           incoming_frames=queue:in(F,queue:new()),
@@ -217,10 +220,14 @@ process(recv, F={#frame_header{
           next_state = reserved_remote
          },
 
+    lager:debug("Newer: ~p", [NewerStream]),
     {PromisedStream, NewConnection} =
         maybe_decode_request_headers(
           NewerStream,
           Connection),
+    lager:debug("Promised: ~p", [PromisedStream]),
+
+
 
     case EndHeaders of
         true ->
@@ -293,20 +300,21 @@ process(send,
            }=Stream,
          #connection_state{
             socket=Socket,
-            recv_settings=#settings{initial_window_size=RecvWindowSize},
-            send_settings=#settings{initial_window_size=SendWindowSize},
+%            recv_settings=#settings{initial_window_size=RecvWindowSize},
+%            send_settings=#settings{initial_window_size=SendWindowSize},
             streams=Streams
            }=Connection})
   when State =:= open;
        State =:= half_closed_remote ->
 
+    lager:debug("Send Promise ~p -> ~p", [Stream#stream_state.stream_id, PSID]),
     %% ok, we have to send it.
     http2_socket:send(Socket, http2_frame:to_binary(F)),
 
     EndHeaders = ?IS_FLAG(Flags, ?FLAG_END_HEADERS),
 
     %% Now we need to construct the promised stream
-    NewStream = new(PSID, {SendWindowSize, RecvWindowSize}),
+    {NewStream, StreamTail} = http2_connection:get_stream(PSID, Streams),%  new(PSID, {SendWindowSize, RecvWindowSize}),
 
     NewerStream =
         NewStream#stream_state{
@@ -323,12 +331,15 @@ process(send,
                  },
             {Stream,
              Connection#connection_state{
-               streams=[{PSID, PromisedStream}|Streams]
+               streams=[{PSID, PromisedStream}|StreamTail]
               }};
         false ->
             {Stream#stream_state{
                promised_stream=NewerStream
-               }, Connection}
+               },
+             Connection#connection_state{
+               streams=StreamTail
+              }}
     end;
 process(send,
         F={#frame_header{
@@ -373,6 +384,42 @@ process(send,
 %% In theory, this handles PUSH_PROMISES. This never worked with PPs
 %% that had CONTINUATIONs, nor did it it handle recv, so the above
 %% block may need work.
+
+process(send,
+        F={#frame_header{
+            flags=Flags,
+            type=?HEADERS
+           }, _},
+        {#stream_state{
+            state=reserved_local
+           }=Stream,
+         #connection_state{
+            socket=Socket
+           }=Connection})
+  when ?IS_FLAG(Flags, ?FLAG_END_HEADERS) ->
+    http2_socket:send(Socket, F),
+    {Stream#stream_state{
+       response_end_headers=true,
+       state=half_closed_remote
+      },
+     Connection};
+
+%process(recv,
+%        {#frame_header{
+%            flags=Flags,
+%            type=?HEADERS
+%           }, _},
+%        {#stream_state{
+%            state=reserved_remote
+%           }=Stream,
+%         #connection_state{}=Connection})
+%  when ?IS_FLAG(Flags, ?FLAG_END_HEADERS) ->
+%    maybe_decode_response_headers(Stream, Connection);
+%    {Stream#stream_state{
+%       response_end_headers=true,
+%       state=half_closed_remote
+%      },
+%     Connection};
 
 %% Let's work on 'open' now. If we're open, we've gotten the headers,
 %% let's work data:
@@ -485,7 +532,7 @@ process(send,
               type=?DATA
              }, _Payload},
         {#stream_state{
-            state=open,
+            state=State,
             send_window_size=SSWS
            }=Stream,
          #connection_state{
@@ -493,7 +540,8 @@ process(send,
             socket=Socket
            }=Connection})
   when ?IS_FLAG(Flags, ?FLAG_END_STREAM),
-       SSWS >= L, CSWS >= L ->
+       SSWS >= L, CSWS >= L,
+       State =:= open orelse State =:= half_closed_remote ->
     http2_socket:send(Socket, F),
     NewStream = Stream#stream_state{
                   state=half_closed_local,
@@ -517,7 +565,7 @@ process(recv,
            }=Stream,
          #connection_state{
            }=Connection}) ->
-    maybe_decode_request_headers(
+    maybe_decode_response_headers(
       Stream#stream_state{
         incoming_frames=queue:in(F,queue:new()),
         response_end_stream = ?IS_FLAG(Flags, ?FLAG_END_STREAM),
@@ -585,7 +633,7 @@ process(recv,
       Stream#stream_state{
         incoming_frames=queue:in(F, IFQ),
         recv_window_size=SRWS-L,
-        request_end_stream=true
+        response_end_stream=true
        },
       Connection#connection_state{
         recv_window_size=CRWS-L
@@ -598,6 +646,7 @@ process(send,
               flags=Flags
               }, _},
         {#stream_state{
+            state=half_closed_remote
             }=Stream,
          #connection_state{
             socket=Socket
@@ -674,7 +723,7 @@ maybe_decode_request_headers(Stream, Connection) ->
     {Stream, Connection}.
 
 maybe_decode_request_body(#stream_state{
-                             state=open,
+                             state=Type,
                              incoming_frames=IFQ,
                              stream_id=StreamId,
                              request_headers=Headers,
@@ -683,16 +732,26 @@ maybe_decode_request_body(#stream_state{
                             }=Stream,
                           #connection_state{
                              content_handler=Handler
-                            }=Connection) ->
+                            }=Connection)
+  when Type =:= open;
+       Type =:= reserved_remote ->
     Data = [ D || {#frame_header{type=?DATA}, #data{data=D}} <- queue:to_list(IFQ)],
-    Handler:spawn_handle(self(), StreamId, Headers, Data),
+
+    Next =
+        case Type of
+            open ->
+                Handler:spawn_handle(self(), StreamId, Headers, Data),
+                half_closed_remote;
+            _ ->
+                reserved_remote
+        end,
     {Stream#stream_state{
-       state=half_closed_remote,
+       state=Next,
        incoming_frames=queue:new()
       },
      Connection};
 maybe_decode_request_body(Stream, Connection) ->
-    lager:info("Uhoh: ~p", [Stream]),
+    lager:info("Not time to decode request body: ~p", [Stream]),
     {Stream, Connection}.
 
 -spec maybe_decode_response_headers(stream_state(), connection_state()) ->
@@ -700,17 +759,20 @@ maybe_decode_request_body(Stream, Connection) ->
 maybe_decode_response_headers(
   #stream_state{
      incoming_frames=IFQ,
-     state=half_closed_local,
+     state=Type,
      response_end_headers=true
     }=Stream,
   #connection_state{
      decode_context=DecodeContext
-    }=Connection)->
+    }=Connection)
+  when Type =:= half_closed_local;
+       Type =:= reserved_remote->
     HeadersBin = http2_frame_headers:from_frames(queue:to_list(IFQ)),
     {Headers, NewDecodeContext} = hpack:decode(HeadersBin, DecodeContext),
     maybe_decode_response_body(Stream#stream_state{
        incoming_frames=queue:new(),
-       response_headers=Headers
+       response_headers=Headers,
+       state=half_closed_local
       },
      Connection#connection_state{
        decode_context=NewDecodeContext
@@ -745,7 +807,6 @@ recv_frame({_FH=#frame_header{
                    type=?DATA
                   }, _P},
            {S = #stream_state{
-                   state=open,
                    stream_id=StreamId,
                    recv_window_size=SRWS
                 },
@@ -763,7 +824,6 @@ recv_frame({_FH=#frame_header{
                    type=?DATA
                   }, _P},
            {S = #stream_state{
-                 state=open
                 },
             ConnectionState=#connection_state{
               recv_window_size=CRWS
@@ -778,14 +838,30 @@ recv_frame({_FH=#frame_header{
      }, ConnectionState};
 
 recv_frame(F, {S,_C}=Acc) ->
-    lager:info("F: ~p", [F]),
-    lager:info("S: ~p", [S]),
+    lager:info("RecvF: ~p", [F]),
+    lager:info("RecvS: ~p", [S]),
     process(recv, F, Acc).
 
 -spec send_frame(frame(), {stream_state(), connection_state()})
                 -> {stream_state(), connection_state()}.
 
-send_frame(F, Acc) ->
+send_frame({#frame_header{
+               length=L,
+               type=?DATA},_},
+           {#stream_state{
+               stream_id=StreamId,
+               send_window_size=SSWS
+              } = Stream,
+            #connection_state{
+               send_window_size=CSWS
+              }=Connection})
+  when L > SSWS; L > CSWS ->
+    rst_stream(?FLOW_CONTROL_ERROR, StreamId, Connection),
+    {Stream, Connection};
+
+send_frame(F, {S,_C}=Acc) ->
+    lager:info("SendF: ~p", [F]),
+    lager:info("SendS: ~p", [S]),
     process(send, F, Acc).
 
 rst_stream(ErrorCode, StreamId, #connection_state{socket=Socket}) ->
