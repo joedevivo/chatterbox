@@ -212,7 +212,7 @@
           next_available_stream_id = 2 :: stream_id(),
           streams = [] :: [{stream_id(), stream_state()}],
           continuation_stream_id = undefined :: stream_id() | undefined,
-          content_handler = chatterbox_static_content_handler :: module()
+          content_handler = application:get_env(chatterbox, content_handler, chatterbox_static_content_handler) :: module()
 }).
 
 -type connection_state() :: #connection_state{}.
