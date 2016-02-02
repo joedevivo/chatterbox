@@ -838,8 +838,8 @@ recv_frame({_FH=#frame_header{
      }, ConnectionState};
 
 recv_frame(F, {S,_C}=Acc) ->
-    lager:info("RecvF: ~p", [F]),
-    lager:info("RecvS: ~p", [S]),
+    lager:debug("RecvF: ~p", [F]),
+    lager:debug("RecvS: ~p", [S]),
     process(recv, F, Acc).
 
 -spec send_frame(frame(), {stream_state(), connection_state()})
@@ -860,8 +860,8 @@ send_frame({#frame_header{
     {Stream, Connection};
 
 send_frame(F, {S,_C}=Acc) ->
-    lager:info("SendF: ~p", [F]),
-    lager:info("SendS: ~p", [S]),
+    lager:debug("SendF: ~p", [F]),
+    lager:debug("SendS: ~p", [S]),
     process(send, F, Acc).
 
 rst_stream(ErrorCode, StreamId, #connection_state{socket=Socket}) ->
