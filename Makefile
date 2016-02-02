@@ -13,6 +13,9 @@ ifeq ($(REBAR3),)
 REBAR3 = $(CURDIR)/rebar3
 endif
 
+clean: $(REBAR3)
+	@$(REBAR3) clean
+	rm -rf _build
 
 all: $(REBAR3)
 	@$(REBAR3) do clean, compile, eunit, ct, dialyzer

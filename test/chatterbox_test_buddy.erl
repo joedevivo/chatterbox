@@ -6,6 +6,7 @@
 
 start(Config) ->
     application:load(chatterbox),
+    ok = application:ensure_started(ranch),
     Config2 = ensure_ssl(Config),
     PreDataSettings = [
     {port, 8081},
@@ -35,6 +36,15 @@ start(Config) ->
     [ok = application:set_env(chatterbox, Key, Value) || {Key, Value} <- Settings ],
     {ok, List} = application:ensure_all_started(chatterbox),
     ct:pal("Started: ~p", [List]),
+
+    {ok, _RanchPid} =
+        ranch:start_listener(
+          chatterbox_ranch_protocol,
+          10,
+          ranch_ssl,
+          [{port, 8081}|proplists:get_value(ssl_options, Settings)],
+          chatterbox_ranch_protocol,
+          []),
     Config.
 
 ssl(SSLBool, Config) ->
@@ -51,4 +61,5 @@ ensure_ssl(Config) ->
 stop(_Config) ->
     cthr:pal("chatterbox_test_buddy:stop/1"),
     application:stop(chatterbox),
+    ranch:stop_listener(chatterbox_ranch_protocol),
     ok.

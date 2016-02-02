@@ -1,6 +1,6 @@
 -module(http2_socket).
 
--include("http2.hrl").
+-include("http2_socket.hrl").
 
 -behavior(gen_server).
 -export([
@@ -18,20 +18,12 @@
 
 -record(h2_listening_state, {
           ssl_options   :: [ssl:ssloption()],
-          listen_socket :: ssl:sslsocket() | gen_tcp:socker(),
+          listen_socket :: ssl:sslsocket() | gen_tcp:socket(),
           transport     :: gen_tcp | ssl,
           listen_ref    :: non_neg_integer(),
           server_module = http2_connection :: module(),
           acceptor_callback = fun chatterbox_sup:start_socket/0 :: fun()
          }).
-
-
--record(http2_socket_state, {
-          type           :: client | server,
-          socket         :: {gen_tcp, gen_tcp:socket()} | {ssl, ssl:sslsocket()},
-          http2_pid      :: pid(),
-          buffer = empty :: empty | {binary, binary()} | {frame, frame_header(), binary()}
-          }).
 
 -export([
          start_client_link/4,
@@ -263,12 +255,24 @@ handle_socket_data(<<>>, #http2_socket_state{
                            }=State) ->
     active_once(Transport, Socket),
     {noreply, State};
+%% This is the first data frame! It means we were started by a more
+%% generic acceptor pool, like ranch TODO: this technically will match
+%% on this binary if it ever sees it again, not just on connect. that
+%% shouldn't happen, but there could be a way to keep track of it in
+%% #state
+handle_socket_data(<<"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n", Rem/binary>>,
+                   #http2_socket_state{
+                      %socket={Transport,Socket}
+                     }=State) ->
+    handle_socket_data(Rem, State);
 handle_socket_data(Data,
                    #http2_socket_state{
                       socket={Transport, Socket},
                       buffer=Buffer,
                       http2_pid=ServerPid
                      }=State) ->
+
+    lager:debug("Data: ~p", [Data]),
 
     More = case Transport:recv(Socket, 0, 1) of %% fail fast!
         {ok, Rest} ->
