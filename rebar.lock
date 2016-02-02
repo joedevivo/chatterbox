@@ -9,8 +9,4 @@
  {<<"lager">>,
   {git,"git://github.com/basho/lager.git",
        {ref,"d33ccf3b69de09a628fe38b4d7981bb8671b8a4f"}},
-  0},
- {<<"rebar_lock_deps_plugin">>,
-  {git,"git://github.com/seth/rebar_lock_deps_plugin.git",
-       {ref,"7a5835029c42b8138325405237ea7e8516a84800"}},
   0}].
