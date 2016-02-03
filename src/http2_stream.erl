@@ -691,9 +691,9 @@ process(send,
 
 
 %% TODO: ???
-process(A, B, C) ->
-    lager:error("No process/3 for ~p, ~p, ~p", [A,B,C]),
-    C.
+process(Direction, Frame, {Stream, Connection}) ->
+    lager:error("No process/3 for ~p, ~p, ~p", [Direction,Frame,Stream]),
+    {Stream, Connection}.
 
 
 maybe_decode_request_headers(
@@ -751,7 +751,6 @@ maybe_decode_request_body(#stream_state{
       },
      Connection};
 maybe_decode_request_body(Stream, Connection) ->
-    lager:info("Not time to decode request body: ~p", [Stream]),
     {Stream, Connection}.
 
 -spec maybe_decode_response_headers(stream_state(), connection_state()) ->
@@ -837,9 +836,7 @@ recv_frame({_FH=#frame_header{
       incoming_frames=queue:new()
      }, ConnectionState};
 
-recv_frame(F, {S,_C}=Acc) ->
-    lager:debug("RecvF: ~p", [F]),
-    lager:debug("RecvS: ~p", [S]),
+recv_frame(F, {_S,_C}=Acc) ->
     process(recv, F, Acc).
 
 -spec send_frame(frame(), {stream_state(), connection_state()})
@@ -859,9 +856,7 @@ send_frame({#frame_header{
     rst_stream(?FLOW_CONTROL_ERROR, StreamId, Connection),
     {Stream, Connection};
 
-send_frame(F, {S,_C}=Acc) ->
-    lager:debug("SendF: ~p", [F]),
-    lager:debug("SendS: ~p", [S]),
+send_frame(F, {_S,_C}=Acc) ->
     process(send, F, Acc).
 
 rst_stream(ErrorCode, StreamId, #connection_state{socket=Socket}) ->

@@ -5,12 +5,12 @@
 -export([settings/0]).
 
 settings() ->
-    {ok, HTS} = application:get_env(?MODULE, header_table_size),
-    {ok, EP} = application:get_env(?MODULE, enable_push),
-    {ok, MCS} = application:get_env(?MODULE, max_concurrent_streams),
-    {ok, IWS} = application:get_env(?MODULE, initial_window_size),
-    {ok, MFS} = application:get_env(?MODULE, max_frame_size),
-    {ok, MHLS} = application:get_env(?MODULE, max_header_list_size),
+    HTS = application:get_env(?MODULE, header_table_size, 4096),
+    EP = application:get_env(?MODULE, enable_push, 1),
+    MCS = application:get_env(?MODULE, max_concurrent_streams, unlimited),
+    IWS = application:get_env(?MODULE, initial_window_size, 65535),
+    MFS = application:get_env(?MODULE, max_frame_size, 16834),
+    MHLS = application:get_env(?MODULE, max_header_list_size, unlimited),
 
     #settings{
        header_table_size=HTS,
