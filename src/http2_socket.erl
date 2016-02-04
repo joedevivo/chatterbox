@@ -151,7 +151,12 @@ handle_info({inet_async, ListenSocket, Ref, {ok, ClientSocket}},
                server_module = ServerMod,
                acceptor_callback = AcceptorCallback
               }=State) ->
+
+    %If anything crashes in here, at least there's another acceptor ready
+    AcceptorCallback(),
+
     inet_db:register_socket(ClientSocket, inet_tcp),
+
     Socket = case Transport of
         gen_tcp ->
             ClientSocket;
@@ -173,7 +178,6 @@ handle_info({inet_async, ListenSocket, Ref, {ok, ClientSocket}},
 
     case Transport:recv(Socket, length(?PREFACE), 5000) of
         {ok, <<?PREFACE>>} ->
-            AcceptorCallback(),
             active_once(Transport, Socket),
             {noreply, #http2_socket_state{
                     type = server,

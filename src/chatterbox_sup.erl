@@ -12,7 +12,7 @@ start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
 init([]) ->
-    {ok, Port} = application:get_env(port),
+    {ok, Port} = application:get_env(chatterbox, port),
     Options = [
         binary,
         {reuseaddr, true},
@@ -20,10 +20,10 @@ init([]) ->
         {backlog, 1024},
         {active, false}
     ],
-    {ok, SSLEnabled} = application:get_env(ssl),
+    {ok, SSLEnabled} = application:get_env(chatterbox, ssl),
     {Transport, SSLOptions} = case SSLEnabled of
         true ->
-            {ok, SSLOpts} = application:get_env(ssl_options),
+            {ok, SSLOpts} = application:get_env(chatterbox, ssl_options),
             {ssl, SSLOpts};
         false ->
             {gen_tcp, []}
@@ -41,5 +41,5 @@ start_socket() ->
     supervisor:start_child(?MODULE, []).
 
 empty_listeners() ->
-    {ok, ConcurrentAcceptors} = application:get_env(concurrent_acceptors),
+    {ok, ConcurrentAcceptors} = application:get_env(chatterbox, concurrent_acceptors),
     [ start_socket() || _ <- lists:seq(1,ConcurrentAcceptors)].
