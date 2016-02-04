@@ -419,8 +419,7 @@ route_frame({H, _Payload}, S = #connection_state{
 route_frame({H=#frame_header{stream_id=StreamId}, _Payload}, S = #connection_state{
                                                                     socket=_Socket})
     when H#frame_header.type == ?RST_STREAM ->
-    lager:debug("Received RST_STREAM Frame for Stream ~p", [StreamId]),
-    lager:error("Chatterbox doesn't support streams. Throwing this RST_STREAM away"),
+    lager:error("Received RST_STREAM for Stream ~p, but did nothing with it", [StreamId]),
     {next_state, connected, S};
 %%    {next_state, connected, S#connection_state{settings_sent=SS-1}};
 route_frame({

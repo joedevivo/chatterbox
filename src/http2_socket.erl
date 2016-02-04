@@ -162,7 +162,7 @@ handle_info({inet_async, ListenSocket, Ref, {ok, ClientSocket}},
             ClientSocket;
         ssl ->
             {ok, AcceptSocket} = ssl:ssl_accept(ClientSocket, SSLOptions),
-            {ok, _Upgrayedd} = ssl:negotiated_protocol(AcceptSocket),
+            {ok, <<"h2">>} = ssl:negotiated_protocol(AcceptSocket),
             AcceptSocket
     end,
 
