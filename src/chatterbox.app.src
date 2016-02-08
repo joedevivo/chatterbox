@@ -2,7 +2,7 @@
 {application, chatterbox,
  [
   {description, "chatterbox library for http2"},
-  {vsn, "0.1.0"},
+  {vsn, "0.1.1"},
   {registered, []},
   {applications, [
                   kernel,
@@ -14,15 +14,24 @@
                   lager
                  ]},
   {env, [
-    {port, 80},
-    {concurrent_acceptors, 20},
+    {port, 9909},
+    {concurrent_acceptors, 200},
     {header_table_size, 4096},
     {enable_push, 1},
     {max_concurrent_streams, unlimited},
     {initial_window_size, 65535},
     {max_frame_size, 16384},
     {max_header_list_size, unlimited},
-    {content_handler, chatterbox_static_content_handler}
+    {content_handler, chatterbox_static_content_handler},
+    {ssl, true},
+    {ssl_options, [{certfile,   "E:/Erlang18/Github/chatterbox/config/localhost.crt"},
+                   {keyfile,    "E:/Erlang18/Github/chatterbox/config/localhost.key"},
+                   {honor_cipher_order, false},
+                   {versions, ['tlsv1.2']},
+                   {next_protocols_advertised, [<<"h2">>]}]},
+    {chatterbox_static_content_handler, [
+                   {root_dir, "E:/Erlang18/Github/chatterbox/priv"}
+    ]}
   ]}
  ]}.
 %% vim: set filetype=erlang tabstop=2
