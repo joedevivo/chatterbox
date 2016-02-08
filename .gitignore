@@ -13,3 +13,4 @@ common_test/logs
 erl_crash.dump
 _build
 rebar3
+log

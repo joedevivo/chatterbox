@@ -1,0 +1,1794 @@
+2016-02-08 14:06:12 =ERROR REPORT====
+** Generic server <0.123.0> terminating 
+** Last message in was {inet_async,#Port<0.39631>,1,{ok,#Port<0.39717>}}
+** When Server state == {h2_listening_state,[{certfile,"localhost.crt"},{keyfile,"localhost.key"},{honor_cipher_order,false},{versions,['tlsv1.2']},{next_protocols_advertised,[<<"h2">>]}],#Port<0.39631>,ssl,1,http2_connection,#Fun<chatterbox_sup.start_socket.0>}
+** Reason for termination == 
+** {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+2016-02-08 14:06:12 =ERROR REPORT====
+** Generic server <0.122.0> terminating 
+** Last message in was {inet_async,#Port<0.39631>,0,{ok,#Port<0.39716>}}
+** When Server state == {h2_listening_state,[{certfile,"localhost.crt"},{keyfile,"localhost.key"},{honor_cipher_order,false},{versions,['tlsv1.2']},{next_protocols_advertised,[<<"h2">>]}],#Port<0.39631>,ssl,0,http2_connection,#Fun<chatterbox_sup.start_socket.0>}
+** Reason for termination == 
+** {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+2016-02-08 14:06:12 =ERROR REPORT====
+** Generic server <0.124.0> terminating 
+** Last message in was {inet_async,#Port<0.39631>,2,{ok,#Port<0.42462>}}
+** When Server state == {h2_listening_state,[{certfile,"localhost.crt"},{keyfile,"localhost.key"},{honor_cipher_order,false},{versions,['tlsv1.2']},{next_protocols_advertised,[<<"h2">>]}],#Port<0.39631>,ssl,2,http2_connection,#Fun<chatterbox_sup.start_socket.0>}
+** Reason for termination == 
+** {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+2016-02-08 14:06:12 =CRASH REPORT====
+  crasher:
+    initial call: http2_socket:init/1
+    pid: <0.123.0>
+    registered_name: []
+    exception exit: {{{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]},[{gen_server,terminate,7,[{file,"gen_server.erl"},{line,826}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+    ancestors: [chatterbox_sup,<0.119.0>]
+    messages: []
+    links: [<0.120.0>]
+    dictionary: []
+    trap_exit: false
+    status: running
+    heap_size: 987
+    stack_size: 27
+    reductions: 3358
+  neighbours:
+2016-02-08 14:06:12 =CRASH REPORT====
+  crasher:
+    initial call: http2_socket:init/1
+    pid: <0.122.0>
+    registered_name: []
+    exception exit: {{{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]},[{gen_server,terminate,7,[{file,"gen_server.erl"},{line,826}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+    ancestors: [chatterbox_sup,<0.119.0>]
+    messages: []
+    links: [<0.120.0>]
+    dictionary: []
+    trap_exit: false
+    status: running
+    heap_size: 987
+    stack_size: 27
+    reductions: 3358
+  neighbours:
+2016-02-08 14:06:12 =CRASH REPORT====
+  crasher:
+    initial call: http2_socket:init/1
+    pid: <0.124.0>
+    registered_name: []
+    exception exit: {{{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]},[{gen_server,terminate,7,[{file,"gen_server.erl"},{line,826}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+    ancestors: [chatterbox_sup,<0.119.0>]
+    messages: []
+    links: [<0.120.0>]
+    dictionary: []
+    trap_exit: false
+    status: running
+    heap_size: 987
+    stack_size: 27
+    reductions: 3315
+  neighbours:
+2016-02-08 14:06:12 =SUPERVISOR REPORT====
+     Supervisor: {local,chatterbox_sup}
+     Context:    child_terminated
+     Reason:     {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+     Offender:   [{pid,<0.123.0>},{id,socket},{mfargs,{http2_socket,start_server_link,undefined}},{restart_type,temporary},{shutdown,1000},{child_type,worker}]
+
+2016-02-08 14:06:12 =SUPERVISOR REPORT====
+     Supervisor: {local,chatterbox_sup}
+     Context:    child_terminated
+     Reason:     {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+     Offender:   [{pid,<0.122.0>},{id,socket},{mfargs,{http2_socket,start_server_link,undefined}},{restart_type,temporary},{shutdown,1000},{child_type,worker}]
+
+2016-02-08 14:06:12 =SUPERVISOR REPORT====
+     Supervisor: {local,chatterbox_sup}
+     Context:    child_terminated
+     Reason:     {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+     Offender:   [{pid,<0.124.0>},{id,socket},{mfargs,{http2_socket,start_server_link,undefined}},{restart_type,temporary},{shutdown,1000},{child_type,worker}]
+
+2016-02-08 14:06:13 =ERROR REPORT====
+** Generic server <0.125.0> terminating 
+** Last message in was {inet_async,#Port<0.39631>,3,{ok,#Port<0.43095>}}
+** When Server state == {h2_listening_state,[{certfile,"localhost.crt"},{keyfile,"localhost.key"},{honor_cipher_order,false},{versions,['tlsv1.2']},{next_protocols_advertised,[<<"h2">>]}],#Port<0.39631>,ssl,3,http2_connection,#Fun<chatterbox_sup.start_socket.0>}
+** Reason for termination == 
+** {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+2016-02-08 14:06:13 =CRASH REPORT====
+  crasher:
+    initial call: http2_socket:init/1
+    pid: <0.125.0>
+    registered_name: []
+    exception exit: {{{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]},[{gen_server,terminate,7,[{file,"gen_server.erl"},{line,826}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+    ancestors: [chatterbox_sup,<0.119.0>]
+    messages: []
+    links: [<0.120.0>]
+    dictionary: []
+    trap_exit: false
+    status: running
+    heap_size: 987
+    stack_size: 27
+    reductions: 3307
+  neighbours:
+2016-02-08 14:06:13 =SUPERVISOR REPORT====
+     Supervisor: {local,chatterbox_sup}
+     Context:    child_terminated
+     Reason:     {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+     Offender:   [{pid,<0.125.0>},{id,socket},{mfargs,{http2_socket,start_server_link,undefined}},{restart_type,temporary},{shutdown,1000},{child_type,worker}]
+
+2016-02-08 14:06:13 =ERROR REPORT====
+** Generic server <0.126.0> terminating 
+** Last message in was {inet_async,#Port<0.39631>,4,{ok,#Port<0.43097>}}
+** When Server state == {h2_listening_state,[{certfile,"localhost.crt"},{keyfile,"localhost.key"},{honor_cipher_order,false},{versions,['tlsv1.2']},{next_protocols_advertised,[<<"h2">>]}],#Port<0.39631>,ssl,4,http2_connection,#Fun<chatterbox_sup.start_socket.0>}
+** Reason for termination == 
+** {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+2016-02-08 14:06:13 =CRASH REPORT====
+  crasher:
+    initial call: http2_socket:init/1
+    pid: <0.126.0>
+    registered_name: []
+    exception exit: {{{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]},[{gen_server,terminate,7,[{file,"gen_server.erl"},{line,826}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+    ancestors: [chatterbox_sup,<0.119.0>]
+    messages: []
+    links: [<0.120.0>]
+    dictionary: []
+    trap_exit: false
+    status: running
+    heap_size: 987
+    stack_size: 27
+    reductions: 3307
+  neighbours:
+2016-02-08 14:06:13 =SUPERVISOR REPORT====
+     Supervisor: {local,chatterbox_sup}
+     Context:    child_terminated
+     Reason:     {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+     Offender:   [{pid,<0.126.0>},{id,socket},{mfargs,{http2_socket,start_server_link,undefined}},{restart_type,temporary},{shutdown,1000},{child_type,worker}]
+
+2016-02-08 14:06:13 =ERROR REPORT====
+** Generic server <0.127.0> terminating 
+** Last message in was {inet_async,#Port<0.39631>,5,{ok,#Port<0.43099>}}
+** When Server state == {h2_listening_state,[{certfile,"localhost.crt"},{keyfile,"localhost.key"},{honor_cipher_order,false},{versions,['tlsv1.2']},{next_protocols_advertised,[<<"h2">>]}],#Port<0.39631>,ssl,5,http2_connection,#Fun<chatterbox_sup.start_socket.0>}
+** Reason for termination == 
+** {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+2016-02-08 14:06:13 =CRASH REPORT====
+  crasher:
+    initial call: http2_socket:init/1
+    pid: <0.127.0>
+    registered_name: []
+    exception exit: {{{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]},[{gen_server,terminate,7,[{file,"gen_server.erl"},{line,826}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+    ancestors: [chatterbox_sup,<0.119.0>]
+    messages: []
+    links: [<0.120.0>]
+    dictionary: []
+    trap_exit: false
+    status: running
+    heap_size: 987
+    stack_size: 27
+    reductions: 3307
+  neighbours:
+2016-02-08 14:06:13 =SUPERVISOR REPORT====
+     Supervisor: {local,chatterbox_sup}
+     Context:    child_terminated
+     Reason:     {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+     Offender:   [{pid,<0.127.0>},{id,socket},{mfargs,{http2_socket,start_server_link,undefined}},{restart_type,temporary},{shutdown,1000},{child_type,worker}]
+
+2016-02-08 14:06:13 =ERROR REPORT====
+** Generic server <0.128.0> terminating 
+** Last message in was {inet_async,#Port<0.39631>,6,{ok,#Port<0.43101>}}
+** When Server state == {h2_listening_state,[{certfile,"localhost.crt"},{keyfile,"localhost.key"},{honor_cipher_order,false},{versions,['tlsv1.2']},{next_protocols_advertised,[<<"h2">>]}],#Port<0.39631>,ssl,6,http2_connection,#Fun<chatterbox_sup.start_socket.0>}
+** Reason for termination == 
+** {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+2016-02-08 14:06:13 =CRASH REPORT====
+  crasher:
+    initial call: http2_socket:init/1
+    pid: <0.128.0>
+    registered_name: []
+    exception exit: {{{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]},[{gen_server,terminate,7,[{file,"gen_server.erl"},{line,826}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+    ancestors: [chatterbox_sup,<0.119.0>]
+    messages: []
+    links: [<0.120.0>]
+    dictionary: []
+    trap_exit: false
+    status: running
+    heap_size: 987
+    stack_size: 27
+    reductions: 3307
+  neighbours:
+2016-02-08 14:06:13 =SUPERVISOR REPORT====
+     Supervisor: {local,chatterbox_sup}
+     Context:    child_terminated
+     Reason:     {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+     Offender:   [{pid,<0.128.0>},{id,socket},{mfargs,{http2_socket,start_server_link,undefined}},{restart_type,temporary},{shutdown,1000},{child_type,worker}]
+
+2016-02-08 14:06:13 =ERROR REPORT====
+** Generic server <0.129.0> terminating 
+** Last message in was {inet_async,#Port<0.39631>,7,{ok,#Port<0.43103>}}
+** When Server state == {h2_listening_state,[{certfile,"localhost.crt"},{keyfile,"localhost.key"},{honor_cipher_order,false},{versions,['tlsv1.2']},{next_protocols_advertised,[<<"h2">>]}],#Port<0.39631>,ssl,7,http2_connection,#Fun<chatterbox_sup.start_socket.0>}
+** Reason for termination == 
+** {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+2016-02-08 14:06:13 =CRASH REPORT====
+  crasher:
+    initial call: http2_socket:init/1
+    pid: <0.129.0>
+    registered_name: []
+    exception exit: {{{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]},[{gen_server,terminate,7,[{file,"gen_server.erl"},{line,826}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+    ancestors: [chatterbox_sup,<0.119.0>]
+    messages: []
+    links: [<0.120.0>]
+    dictionary: []
+    trap_exit: false
+    status: running
+    heap_size: 987
+    stack_size: 27
+    reductions: 3307
+  neighbours:
+2016-02-08 14:06:13 =SUPERVISOR REPORT====
+     Supervisor: {local,chatterbox_sup}
+     Context:    child_terminated
+     Reason:     {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+     Offender:   [{pid,<0.129.0>},{id,socket},{mfargs,{http2_socket,start_server_link,undefined}},{restart_type,temporary},{shutdown,1000},{child_type,worker}]
+
+2016-02-08 14:06:13 =ERROR REPORT====
+** Generic server <0.130.0> terminating 
+** Last message in was {inet_async,#Port<0.39631>,8,{ok,#Port<0.43105>}}
+** When Server state == {h2_listening_state,[{certfile,"localhost.crt"},{keyfile,"localhost.key"},{honor_cipher_order,false},{versions,['tlsv1.2']},{next_protocols_advertised,[<<"h2">>]}],#Port<0.39631>,ssl,8,http2_connection,#Fun<chatterbox_sup.start_socket.0>}
+** Reason for termination == 
+** {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+2016-02-08 14:06:13 =CRASH REPORT====
+  crasher:
+    initial call: http2_socket:init/1
+    pid: <0.130.0>
+    registered_name: []
+    exception exit: {{{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]},[{gen_server,terminate,7,[{file,"gen_server.erl"},{line,826}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+    ancestors: [chatterbox_sup,<0.119.0>]
+    messages: []
+    links: [<0.120.0>]
+    dictionary: []
+    trap_exit: false
+    status: running
+    heap_size: 987
+    stack_size: 27
+    reductions: 3307
+  neighbours:
+2016-02-08 14:06:13 =SUPERVISOR REPORT====
+     Supervisor: {local,chatterbox_sup}
+     Context:    child_terminated
+     Reason:     {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+     Offender:   [{pid,<0.130.0>},{id,socket},{mfargs,{http2_socket,start_server_link,undefined}},{restart_type,temporary},{shutdown,1000},{child_type,worker}]
+
+2016-02-08 14:06:14 =ERROR REPORT====
+** Generic server <0.131.0> terminating 
+** Last message in was {inet_async,#Port<0.39631>,9,{ok,#Port<0.43107>}}
+** When Server state == {h2_listening_state,[{certfile,"localhost.crt"},{keyfile,"localhost.key"},{honor_cipher_order,false},{versions,['tlsv1.2']},{next_protocols_advertised,[<<"h2">>]}],#Port<0.39631>,ssl,9,http2_connection,#Fun<chatterbox_sup.start_socket.0>}
+** Reason for termination == 
+** {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+2016-02-08 14:06:14 =CRASH REPORT====
+  crasher:
+    initial call: http2_socket:init/1
+    pid: <0.131.0>
+    registered_name: []
+    exception exit: {{{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]},[{gen_server,terminate,7,[{file,"gen_server.erl"},{line,826}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+    ancestors: [chatterbox_sup,<0.119.0>]
+    messages: []
+    links: [<0.120.0>]
+    dictionary: []
+    trap_exit: false
+    status: running
+    heap_size: 987
+    stack_size: 27
+    reductions: 3307
+  neighbours:
+2016-02-08 14:06:14 =SUPERVISOR REPORT====
+     Supervisor: {local,chatterbox_sup}
+     Context:    child_terminated
+     Reason:     {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+     Offender:   [{pid,<0.131.0>},{id,socket},{mfargs,{http2_socket,start_server_link,undefined}},{restart_type,temporary},{shutdown,1000},{child_type,worker}]
+
+2016-02-08 14:06:14 =ERROR REPORT====
+** Generic server <0.132.0> terminating 
+** Last message in was {inet_async,#Port<0.39631>,10,{ok,#Port<0.43109>}}
+** When Server state == {h2_listening_state,[{certfile,"localhost.crt"},{keyfile,"localhost.key"},{honor_cipher_order,false},{versions,['tlsv1.2']},{next_protocols_advertised,[<<"h2">>]}],#Port<0.39631>,ssl,10,http2_connection,#Fun<chatterbox_sup.start_socket.0>}
+** Reason for termination == 
+** {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+2016-02-08 14:06:14 =CRASH REPORT====
+  crasher:
+    initial call: http2_socket:init/1
+    pid: <0.132.0>
+    registered_name: []
+    exception exit: {{{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]},[{gen_server,terminate,7,[{file,"gen_server.erl"},{line,826}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+    ancestors: [chatterbox_sup,<0.119.0>]
+    messages: []
+    links: [<0.120.0>]
+    dictionary: []
+    trap_exit: false
+    status: running
+    heap_size: 987
+    stack_size: 27
+    reductions: 3307
+  neighbours:
+2016-02-08 14:06:14 =SUPERVISOR REPORT====
+     Supervisor: {local,chatterbox_sup}
+     Context:    child_terminated
+     Reason:     {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+     Offender:   [{pid,<0.132.0>},{id,socket},{mfargs,{http2_socket,start_server_link,undefined}},{restart_type,temporary},{shutdown,1000},{child_type,worker}]
+
+2016-02-08 14:06:14 =ERROR REPORT====
+** Generic server <0.133.0> terminating 
+** Last message in was {inet_async,#Port<0.39631>,11,{ok,#Port<0.43111>}}
+** When Server state == {h2_listening_state,[{certfile,"localhost.crt"},{keyfile,"localhost.key"},{honor_cipher_order,false},{versions,['tlsv1.2']},{next_protocols_advertised,[<<"h2">>]}],#Port<0.39631>,ssl,11,http2_connection,#Fun<chatterbox_sup.start_socket.0>}
+** Reason for termination == 
+** {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+2016-02-08 14:06:14 =CRASH REPORT====
+  crasher:
+    initial call: http2_socket:init/1
+    pid: <0.133.0>
+    registered_name: []
+    exception exit: {{{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]},[{gen_server,terminate,7,[{file,"gen_server.erl"},{line,826}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+    ancestors: [chatterbox_sup,<0.119.0>]
+    messages: []
+    links: [<0.120.0>]
+    dictionary: []
+    trap_exit: false
+    status: running
+    heap_size: 987
+    stack_size: 27
+    reductions: 3307
+  neighbours:
+2016-02-08 14:06:14 =SUPERVISOR REPORT====
+     Supervisor: {local,chatterbox_sup}
+     Context:    child_terminated
+     Reason:     {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+     Offender:   [{pid,<0.133.0>},{id,socket},{mfargs,{http2_socket,start_server_link,undefined}},{restart_type,temporary},{shutdown,1000},{child_type,worker}]
+
+2016-02-08 14:06:14 =ERROR REPORT====
+** Generic server <0.134.0> terminating 
+** Last message in was {inet_async,#Port<0.39631>,12,{ok,#Port<0.43113>}}
+** When Server state == {h2_listening_state,[{certfile,"localhost.crt"},{keyfile,"localhost.key"},{honor_cipher_order,false},{versions,['tlsv1.2']},{next_protocols_advertised,[<<"h2">>]}],#Port<0.39631>,ssl,12,http2_connection,#Fun<chatterbox_sup.start_socket.0>}
+** Reason for termination == 
+** {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+2016-02-08 14:06:14 =CRASH REPORT====
+  crasher:
+    initial call: http2_socket:init/1
+    pid: <0.134.0>
+    registered_name: []
+    exception exit: {{{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]},[{gen_server,terminate,7,[{file,"gen_server.erl"},{line,826}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+    ancestors: [chatterbox_sup,<0.119.0>]
+    messages: []
+    links: [<0.120.0>]
+    dictionary: []
+    trap_exit: false
+    status: running
+    heap_size: 987
+    stack_size: 27
+    reductions: 3307
+  neighbours:
+2016-02-08 14:06:14 =SUPERVISOR REPORT====
+     Supervisor: {local,chatterbox_sup}
+     Context:    child_terminated
+     Reason:     {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+     Offender:   [{pid,<0.134.0>},{id,socket},{mfargs,{http2_socket,start_server_link,undefined}},{restart_type,temporary},{shutdown,1000},{child_type,worker}]
+
+2016-02-08 14:06:14 =ERROR REPORT====
+** Generic server <0.135.0> terminating 
+** Last message in was {inet_async,#Port<0.39631>,13,{ok,#Port<0.43115>}}
+** When Server state == {h2_listening_state,[{certfile,"localhost.crt"},{keyfile,"localhost.key"},{honor_cipher_order,false},{versions,['tlsv1.2']},{next_protocols_advertised,[<<"h2">>]}],#Port<0.39631>,ssl,13,http2_connection,#Fun<chatterbox_sup.start_socket.0>}
+** Reason for termination == 
+** {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+2016-02-08 14:06:14 =CRASH REPORT====
+  crasher:
+    initial call: http2_socket:init/1
+    pid: <0.135.0>
+    registered_name: []
+    exception exit: {{{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]},[{gen_server,terminate,7,[{file,"gen_server.erl"},{line,826}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+    ancestors: [chatterbox_sup,<0.119.0>]
+    messages: []
+    links: [<0.120.0>]
+    dictionary: []
+    trap_exit: false
+    status: running
+    heap_size: 987
+    stack_size: 27
+    reductions: 3307
+  neighbours:
+2016-02-08 14:06:14 =SUPERVISOR REPORT====
+     Supervisor: {local,chatterbox_sup}
+     Context:    child_terminated
+     Reason:     {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+     Offender:   [{pid,<0.135.0>},{id,socket},{mfargs,{http2_socket,start_server_link,undefined}},{restart_type,temporary},{shutdown,1000},{child_type,worker}]
+
+2016-02-08 14:06:14 =ERROR REPORT====
+** Generic server <0.136.0> terminating 
+** Last message in was {inet_async,#Port<0.39631>,14,{ok,#Port<0.43117>}}
+** When Server state == {h2_listening_state,[{certfile,"localhost.crt"},{keyfile,"localhost.key"},{honor_cipher_order,false},{versions,['tlsv1.2']},{next_protocols_advertised,[<<"h2">>]}],#Port<0.39631>,ssl,14,http2_connection,#Fun<chatterbox_sup.start_socket.0>}
+** Reason for termination == 
+** {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+2016-02-08 14:06:14 =CRASH REPORT====
+  crasher:
+    initial call: http2_socket:init/1
+    pid: <0.136.0>
+    registered_name: []
+    exception exit: {{{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]},[{gen_server,terminate,7,[{file,"gen_server.erl"},{line,826}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+    ancestors: [chatterbox_sup,<0.119.0>]
+    messages: []
+    links: [<0.120.0>]
+    dictionary: []
+    trap_exit: false
+    status: running
+    heap_size: 987
+    stack_size: 27
+    reductions: 3307
+  neighbours:
+2016-02-08 14:06:15 =SUPERVISOR REPORT====
+     Supervisor: {local,chatterbox_sup}
+     Context:    child_terminated
+     Reason:     {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+     Offender:   [{pid,<0.136.0>},{id,socket},{mfargs,{http2_socket,start_server_link,undefined}},{restart_type,temporary},{shutdown,1000},{child_type,worker}]
+
+2016-02-08 14:06:15 =ERROR REPORT====
+** Generic server <0.137.0> terminating 
+** Last message in was {inet_async,#Port<0.39631>,15,{ok,#Port<0.43119>}}
+** When Server state == {h2_listening_state,[{certfile,"localhost.crt"},{keyfile,"localhost.key"},{honor_cipher_order,false},{versions,['tlsv1.2']},{next_protocols_advertised,[<<"h2">>]}],#Port<0.39631>,ssl,15,http2_connection,#Fun<chatterbox_sup.start_socket.0>}
+** Reason for termination == 
+** {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+2016-02-08 14:06:15 =CRASH REPORT====
+  crasher:
+    initial call: http2_socket:init/1
+    pid: <0.137.0>
+    registered_name: []
+    exception exit: {{{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]},[{gen_server,terminate,7,[{file,"gen_server.erl"},{line,826}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+    ancestors: [chatterbox_sup,<0.119.0>]
+    messages: []
+    links: [<0.120.0>]
+    dictionary: []
+    trap_exit: false
+    status: running
+    heap_size: 987
+    stack_size: 27
+    reductions: 3307
+  neighbours:
+2016-02-08 14:06:15 =SUPERVISOR REPORT====
+     Supervisor: {local,chatterbox_sup}
+     Context:    child_terminated
+     Reason:     {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+     Offender:   [{pid,<0.137.0>},{id,socket},{mfargs,{http2_socket,start_server_link,undefined}},{restart_type,temporary},{shutdown,1000},{child_type,worker}]
+
+2016-02-08 14:06:15 =ERROR REPORT====
+** Generic server <0.138.0> terminating 
+** Last message in was {inet_async,#Port<0.39631>,16,{ok,#Port<0.43121>}}
+** When Server state == {h2_listening_state,[{certfile,"localhost.crt"},{keyfile,"localhost.key"},{honor_cipher_order,false},{versions,['tlsv1.2']},{next_protocols_advertised,[<<"h2">>]}],#Port<0.39631>,ssl,16,http2_connection,#Fun<chatterbox_sup.start_socket.0>}
+** Reason for termination == 
+** {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+2016-02-08 14:06:15 =CRASH REPORT====
+  crasher:
+    initial call: http2_socket:init/1
+    pid: <0.138.0>
+    registered_name: []
+    exception exit: {{{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]},[{gen_server,terminate,7,[{file,"gen_server.erl"},{line,826}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+    ancestors: [chatterbox_sup,<0.119.0>]
+    messages: []
+    links: [<0.120.0>]
+    dictionary: []
+    trap_exit: false
+    status: running
+    heap_size: 987
+    stack_size: 27
+    reductions: 3306
+  neighbours:
+2016-02-08 14:06:15 =SUPERVISOR REPORT====
+     Supervisor: {local,chatterbox_sup}
+     Context:    child_terminated
+     Reason:     {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+     Offender:   [{pid,<0.138.0>},{id,socket},{mfargs,{http2_socket,start_server_link,undefined}},{restart_type,temporary},{shutdown,1000},{child_type,worker}]
+
+2016-02-08 14:06:17 =ERROR REPORT====
+** Generic server <0.139.0> terminating 
+** Last message in was {inet_async,#Port<0.39631>,17,{ok,#Port<0.43123>}}
+** When Server state == {h2_listening_state,[{certfile,"localhost.crt"},{keyfile,"localhost.key"},{honor_cipher_order,false},{versions,['tlsv1.2']},{next_protocols_advertised,[<<"h2">>]}],#Port<0.39631>,ssl,17,http2_connection,#Fun<chatterbox_sup.start_socket.0>}
+** Reason for termination == 
+** {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+2016-02-08 14:06:17 =CRASH REPORT====
+  crasher:
+    initial call: http2_socket:init/1
+    pid: <0.139.0>
+    registered_name: []
+    exception exit: {{{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]},[{gen_server,terminate,7,[{file,"gen_server.erl"},{line,826}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+    ancestors: [chatterbox_sup,<0.119.0>]
+    messages: []
+    links: [<0.120.0>]
+    dictionary: []
+    trap_exit: false
+    status: running
+    heap_size: 987
+    stack_size: 27
+    reductions: 3307
+  neighbours:
+2016-02-08 14:06:17 =SUPERVISOR REPORT====
+     Supervisor: {local,chatterbox_sup}
+     Context:    child_terminated
+     Reason:     {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+     Offender:   [{pid,<0.139.0>},{id,socket},{mfargs,{http2_socket,start_server_link,undefined}},{restart_type,temporary},{shutdown,1000},{child_type,worker}]
+
+2016-02-08 14:06:17 =ERROR REPORT====
+** Generic server <0.140.0> terminating 
+** Last message in was {inet_async,#Port<0.39631>,18,{ok,#Port<0.43124>}}
+** When Server state == {h2_listening_state,[{certfile,"localhost.crt"},{keyfile,"localhost.key"},{honor_cipher_order,false},{versions,['tlsv1.2']},{next_protocols_advertised,[<<"h2">>]}],#Port<0.39631>,ssl,18,http2_connection,#Fun<chatterbox_sup.start_socket.0>}
+** Reason for termination == 
+** {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+2016-02-08 14:06:17 =CRASH REPORT====
+  crasher:
+    initial call: http2_socket:init/1
+    pid: <0.140.0>
+    registered_name: []
+    exception exit: {{{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]},[{gen_server,terminate,7,[{file,"gen_server.erl"},{line,826}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+    ancestors: [chatterbox_sup,<0.119.0>]
+    messages: []
+    links: [<0.120.0>]
+    dictionary: []
+    trap_exit: false
+    status: running
+    heap_size: 987
+    stack_size: 27
+    reductions: 3307
+  neighbours:
+2016-02-08 14:06:17 =SUPERVISOR REPORT====
+     Supervisor: {local,chatterbox_sup}
+     Context:    child_terminated
+     Reason:     {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+     Offender:   [{pid,<0.140.0>},{id,socket},{mfargs,{http2_socket,start_server_link,undefined}},{restart_type,temporary},{shutdown,1000},{child_type,worker}]
+
+2016-02-08 14:06:17 =ERROR REPORT====
+** Generic server <0.141.0> terminating 
+** Last message in was {inet_async,#Port<0.39631>,19,{ok,#Port<0.43127>}}
+** When Server state == {h2_listening_state,[{certfile,"localhost.crt"},{keyfile,"localhost.key"},{honor_cipher_order,false},{versions,['tlsv1.2']},{next_protocols_advertised,[<<"h2">>]}],#Port<0.39631>,ssl,19,http2_connection,#Fun<chatterbox_sup.start_socket.0>}
+** Reason for termination == 
+** {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+2016-02-08 14:06:17 =CRASH REPORT====
+  crasher:
+    initial call: http2_socket:init/1
+    pid: <0.141.0>
+    registered_name: []
+    exception exit: {{{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]},[{gen_server,terminate,7,[{file,"gen_server.erl"},{line,826}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+    ancestors: [chatterbox_sup,<0.119.0>]
+    messages: []
+    links: [<0.120.0>]
+    dictionary: []
+    trap_exit: false
+    status: running
+    heap_size: 987
+    stack_size: 27
+    reductions: 3307
+  neighbours:
+2016-02-08 14:06:17 =SUPERVISOR REPORT====
+     Supervisor: {local,chatterbox_sup}
+     Context:    child_terminated
+     Reason:     {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+     Offender:   [{pid,<0.141.0>},{id,socket},{mfargs,{http2_socket,start_server_link,undefined}},{restart_type,temporary},{shutdown,1000},{child_type,worker}]
+
+2016-02-08 14:06:17 =ERROR REPORT====
+** Generic server <0.142.0> terminating 
+** Last message in was {inet_async,#Port<0.39631>,20,{ok,#Port<0.43129>}}
+** When Server state == {h2_listening_state,[{certfile,"localhost.crt"},{keyfile,"localhost.key"},{honor_cipher_order,false},{versions,['tlsv1.2']},{next_protocols_advertised,[<<"h2">>]}],#Port<0.39631>,ssl,20,http2_connection,#Fun<chatterbox_sup.start_socket.0>}
+** Reason for termination == 
+** {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+2016-02-08 14:06:17 =CRASH REPORT====
+  crasher:
+    initial call: http2_socket:init/1
+    pid: <0.142.0>
+    registered_name: []
+    exception exit: {{{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]},[{gen_server,terminate,7,[{file,"gen_server.erl"},{line,826}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+    ancestors: [chatterbox_sup,<0.119.0>]
+    messages: []
+    links: [<0.120.0>]
+    dictionary: []
+    trap_exit: false
+    status: running
+    heap_size: 987
+    stack_size: 27
+    reductions: 3307
+  neighbours:
+2016-02-08 14:06:17 =SUPERVISOR REPORT====
+     Supervisor: {local,chatterbox_sup}
+     Context:    child_terminated
+     Reason:     {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+     Offender:   [{pid,<0.142.0>},{id,socket},{mfargs,{http2_socket,start_server_link,undefined}},{restart_type,temporary},{shutdown,1000},{child_type,worker}]
+
+2016-02-08 14:06:17 =ERROR REPORT====
+** Generic server <0.143.0> terminating 
+** Last message in was {inet_async,#Port<0.39631>,21,{ok,#Port<0.43131>}}
+** When Server state == {h2_listening_state,[{certfile,"localhost.crt"},{keyfile,"localhost.key"},{honor_cipher_order,false},{versions,['tlsv1.2']},{next_protocols_advertised,[<<"h2">>]}],#Port<0.39631>,ssl,21,http2_connection,#Fun<chatterbox_sup.start_socket.0>}
+** Reason for termination == 
+** {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+2016-02-08 14:06:17 =CRASH REPORT====
+  crasher:
+    initial call: http2_socket:init/1
+    pid: <0.143.0>
+    registered_name: []
+    exception exit: {{{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]},[{gen_server,terminate,7,[{file,"gen_server.erl"},{line,826}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+    ancestors: [chatterbox_sup,<0.119.0>]
+    messages: []
+    links: [<0.120.0>]
+    dictionary: []
+    trap_exit: false
+    status: running
+    heap_size: 987
+    stack_size: 27
+    reductions: 3307
+  neighbours:
+2016-02-08 14:06:17 =SUPERVISOR REPORT====
+     Supervisor: {local,chatterbox_sup}
+     Context:    child_terminated
+     Reason:     {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+     Offender:   [{pid,<0.143.0>},{id,socket},{mfargs,{http2_socket,start_server_link,undefined}},{restart_type,temporary},{shutdown,1000},{child_type,worker}]
+
+2016-02-08 14:06:17 =ERROR REPORT====
+** Generic server <0.144.0> terminating 
+** Last message in was {inet_async,#Port<0.39631>,22,{ok,#Port<0.43133>}}
+** When Server state == {h2_listening_state,[{certfile,"localhost.crt"},{keyfile,"localhost.key"},{honor_cipher_order,false},{versions,['tlsv1.2']},{next_protocols_advertised,[<<"h2">>]}],#Port<0.39631>,ssl,22,http2_connection,#Fun<chatterbox_sup.start_socket.0>}
+** Reason for termination == 
+** {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+2016-02-08 14:06:17 =CRASH REPORT====
+  crasher:
+    initial call: http2_socket:init/1
+    pid: <0.144.0>
+    registered_name: []
+    exception exit: {{{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]},[{gen_server,terminate,7,[{file,"gen_server.erl"},{line,826}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+    ancestors: [chatterbox_sup,<0.119.0>]
+    messages: []
+    links: [<0.120.0>]
+    dictionary: []
+    trap_exit: false
+    status: running
+    heap_size: 987
+    stack_size: 27
+    reductions: 3307
+  neighbours:
+2016-02-08 14:06:17 =SUPERVISOR REPORT====
+     Supervisor: {local,chatterbox_sup}
+     Context:    child_terminated
+     Reason:     {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+     Offender:   [{pid,<0.144.0>},{id,socket},{mfargs,{http2_socket,start_server_link,undefined}},{restart_type,temporary},{shutdown,1000},{child_type,worker}]
+
+2016-02-08 14:06:18 =ERROR REPORT====
+** Generic server <0.145.0> terminating 
+** Last message in was {inet_async,#Port<0.39631>,23,{ok,#Port<0.43135>}}
+** When Server state == {h2_listening_state,[{certfile,"localhost.crt"},{keyfile,"localhost.key"},{honor_cipher_order,false},{versions,['tlsv1.2']},{next_protocols_advertised,[<<"h2">>]}],#Port<0.39631>,ssl,23,http2_connection,#Fun<chatterbox_sup.start_socket.0>}
+** Reason for termination == 
+** {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+2016-02-08 14:06:18 =CRASH REPORT====
+  crasher:
+    initial call: http2_socket:init/1
+    pid: <0.145.0>
+    registered_name: []
+    exception exit: {{{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]},[{gen_server,terminate,7,[{file,"gen_server.erl"},{line,826}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+    ancestors: [chatterbox_sup,<0.119.0>]
+    messages: []
+    links: [<0.120.0>]
+    dictionary: []
+    trap_exit: false
+    status: running
+    heap_size: 987
+    stack_size: 27
+    reductions: 3306
+  neighbours:
+2016-02-08 14:06:18 =SUPERVISOR REPORT====
+     Supervisor: {local,chatterbox_sup}
+     Context:    child_terminated
+     Reason:     {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+     Offender:   [{pid,<0.145.0>},{id,socket},{mfargs,{http2_socket,start_server_link,undefined}},{restart_type,temporary},{shutdown,1000},{child_type,worker}]
+
+2016-02-08 14:06:18 =ERROR REPORT====
+** Generic server <0.146.0> terminating 
+** Last message in was {inet_async,#Port<0.39631>,24,{ok,#Port<0.43137>}}
+** When Server state == {h2_listening_state,[{certfile,"localhost.crt"},{keyfile,"localhost.key"},{honor_cipher_order,false},{versions,['tlsv1.2']},{next_protocols_advertised,[<<"h2">>]}],#Port<0.39631>,ssl,24,http2_connection,#Fun<chatterbox_sup.start_socket.0>}
+** Reason for termination == 
+** {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+2016-02-08 14:06:18 =CRASH REPORT====
+  crasher:
+    initial call: http2_socket:init/1
+    pid: <0.146.0>
+    registered_name: []
+    exception exit: {{{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]},[{gen_server,terminate,7,[{file,"gen_server.erl"},{line,826}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+    ancestors: [chatterbox_sup,<0.119.0>]
+    messages: []
+    links: [<0.120.0>]
+    dictionary: []
+    trap_exit: false
+    status: running
+    heap_size: 987
+    stack_size: 27
+    reductions: 3307
+  neighbours:
+2016-02-08 14:06:18 =SUPERVISOR REPORT====
+     Supervisor: {local,chatterbox_sup}
+     Context:    child_terminated
+     Reason:     {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+     Offender:   [{pid,<0.146.0>},{id,socket},{mfargs,{http2_socket,start_server_link,undefined}},{restart_type,temporary},{shutdown,1000},{child_type,worker}]
+
+2016-02-08 14:06:18 =ERROR REPORT====
+** Generic server <0.147.0> terminating 
+** Last message in was {inet_async,#Port<0.39631>,25,{ok,#Port<0.43139>}}
+** When Server state == {h2_listening_state,[{certfile,"localhost.crt"},{keyfile,"localhost.key"},{honor_cipher_order,false},{versions,['tlsv1.2']},{next_protocols_advertised,[<<"h2">>]}],#Port<0.39631>,ssl,25,http2_connection,#Fun<chatterbox_sup.start_socket.0>}
+** Reason for termination == 
+** {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+2016-02-08 14:06:18 =CRASH REPORT====
+  crasher:
+    initial call: http2_socket:init/1
+    pid: <0.147.0>
+    registered_name: []
+    exception exit: {{{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]},[{gen_server,terminate,7,[{file,"gen_server.erl"},{line,826}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+    ancestors: [chatterbox_sup,<0.119.0>]
+    messages: []
+    links: [<0.120.0>]
+    dictionary: []
+    trap_exit: false
+    status: running
+    heap_size: 987
+    stack_size: 27
+    reductions: 3307
+  neighbours:
+2016-02-08 14:06:18 =SUPERVISOR REPORT====
+     Supervisor: {local,chatterbox_sup}
+     Context:    child_terminated
+     Reason:     {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+     Offender:   [{pid,<0.147.0>},{id,socket},{mfargs,{http2_socket,start_server_link,undefined}},{restart_type,temporary},{shutdown,1000},{child_type,worker}]
+
+2016-02-08 14:06:23 =ERROR REPORT====
+** Generic server <0.148.0> terminating 
+** Last message in was {inet_async,#Port<0.39631>,26,{ok,#Port<0.43141>}}
+** When Server state == {h2_listening_state,[{certfile,"localhost.crt"},{keyfile,"localhost.key"},{honor_cipher_order,false},{versions,['tlsv1.2']},{next_protocols_advertised,[<<"h2">>]}],#Port<0.39631>,ssl,26,http2_connection,#Fun<chatterbox_sup.start_socket.0>}
+** Reason for termination == 
+** {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+2016-02-08 14:06:23 =CRASH REPORT====
+  crasher:
+    initial call: http2_socket:init/1
+    pid: <0.148.0>
+    registered_name: []
+    exception exit: {{{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]},[{gen_server,terminate,7,[{file,"gen_server.erl"},{line,826}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+    ancestors: [chatterbox_sup,<0.119.0>]
+    messages: []
+    links: [<0.120.0>]
+    dictionary: []
+    trap_exit: false
+    status: running
+    heap_size: 987
+    stack_size: 27
+    reductions: 3307
+  neighbours:
+2016-02-08 14:06:23 =SUPERVISOR REPORT====
+     Supervisor: {local,chatterbox_sup}
+     Context:    child_terminated
+     Reason:     {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+     Offender:   [{pid,<0.148.0>},{id,socket},{mfargs,{http2_socket,start_server_link,undefined}},{restart_type,temporary},{shutdown,1000},{child_type,worker}]
+
+2016-02-08 14:06:23 =ERROR REPORT====
+** Generic server <0.149.0> terminating 
+** Last message in was {inet_async,#Port<0.39631>,27,{ok,#Port<0.43143>}}
+** When Server state == {h2_listening_state,[{certfile,"localhost.crt"},{keyfile,"localhost.key"},{honor_cipher_order,false},{versions,['tlsv1.2']},{next_protocols_advertised,[<<"h2">>]}],#Port<0.39631>,ssl,27,http2_connection,#Fun<chatterbox_sup.start_socket.0>}
+** Reason for termination == 
+** {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+2016-02-08 14:06:23 =CRASH REPORT====
+  crasher:
+    initial call: http2_socket:init/1
+    pid: <0.149.0>
+    registered_name: []
+    exception exit: {{{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]},[{gen_server,terminate,7,[{file,"gen_server.erl"},{line,826}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+    ancestors: [chatterbox_sup,<0.119.0>]
+    messages: []
+    links: [<0.120.0>]
+    dictionary: []
+    trap_exit: false
+    status: running
+    heap_size: 987
+    stack_size: 27
+    reductions: 3307
+  neighbours:
+2016-02-08 14:06:23 =SUPERVISOR REPORT====
+     Supervisor: {local,chatterbox_sup}
+     Context:    child_terminated
+     Reason:     {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+     Offender:   [{pid,<0.149.0>},{id,socket},{mfargs,{http2_socket,start_server_link,undefined}},{restart_type,temporary},{shutdown,1000},{child_type,worker}]
+
+2016-02-08 14:06:23 =ERROR REPORT====
+** Generic server <0.150.0> terminating 
+** Last message in was {inet_async,#Port<0.39631>,28,{ok,#Port<0.43145>}}
+** When Server state == {h2_listening_state,[{certfile,"localhost.crt"},{keyfile,"localhost.key"},{honor_cipher_order,false},{versions,['tlsv1.2']},{next_protocols_advertised,[<<"h2">>]}],#Port<0.39631>,ssl,28,http2_connection,#Fun<chatterbox_sup.start_socket.0>}
+** Reason for termination == 
+** {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+2016-02-08 14:06:23 =CRASH REPORT====
+  crasher:
+    initial call: http2_socket:init/1
+    pid: <0.150.0>
+    registered_name: []
+    exception exit: {{{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]},[{gen_server,terminate,7,[{file,"gen_server.erl"},{line,826}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+    ancestors: [chatterbox_sup,<0.119.0>]
+    messages: []
+    links: [<0.120.0>]
+    dictionary: []
+    trap_exit: false
+    status: running
+    heap_size: 987
+    stack_size: 27
+    reductions: 3306
+  neighbours:
+2016-02-08 14:06:23 =SUPERVISOR REPORT====
+     Supervisor: {local,chatterbox_sup}
+     Context:    child_terminated
+     Reason:     {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+     Offender:   [{pid,<0.150.0>},{id,socket},{mfargs,{http2_socket,start_server_link,undefined}},{restart_type,temporary},{shutdown,1000},{child_type,worker}]
+
+2016-02-08 14:06:23 =ERROR REPORT====
+** Generic server <0.151.0> terminating 
+** Last message in was {inet_async,#Port<0.39631>,29,{ok,#Port<0.43147>}}
+** When Server state == {h2_listening_state,[{certfile,"localhost.crt"},{keyfile,"localhost.key"},{honor_cipher_order,false},{versions,['tlsv1.2']},{next_protocols_advertised,[<<"h2">>]}],#Port<0.39631>,ssl,29,http2_connection,#Fun<chatterbox_sup.start_socket.0>}
+** Reason for termination == 
+** {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+2016-02-08 14:06:23 =CRASH REPORT====
+  crasher:
+    initial call: http2_socket:init/1
+    pid: <0.151.0>
+    registered_name: []
+    exception exit: {{{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]},[{gen_server,terminate,7,[{file,"gen_server.erl"},{line,826}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+    ancestors: [chatterbox_sup,<0.119.0>]
+    messages: []
+    links: [<0.120.0>]
+    dictionary: []
+    trap_exit: false
+    status: running
+    heap_size: 987
+    stack_size: 27
+    reductions: 3307
+  neighbours:
+2016-02-08 14:06:23 =SUPERVISOR REPORT====
+     Supervisor: {local,chatterbox_sup}
+     Context:    child_terminated
+     Reason:     {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+     Offender:   [{pid,<0.151.0>},{id,socket},{mfargs,{http2_socket,start_server_link,undefined}},{restart_type,temporary},{shutdown,1000},{child_type,worker}]
+
+2016-02-08 14:06:24 =ERROR REPORT====
+** Generic server <0.152.0> terminating 
+** Last message in was {inet_async,#Port<0.39631>,30,{ok,#Port<0.43149>}}
+** When Server state == {h2_listening_state,[{certfile,"localhost.crt"},{keyfile,"localhost.key"},{honor_cipher_order,false},{versions,['tlsv1.2']},{next_protocols_advertised,[<<"h2">>]}],#Port<0.39631>,ssl,30,http2_connection,#Fun<chatterbox_sup.start_socket.0>}
+** Reason for termination == 
+** {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+2016-02-08 14:06:24 =CRASH REPORT====
+  crasher:
+    initial call: http2_socket:init/1
+    pid: <0.152.0>
+    registered_name: []
+    exception exit: {{{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]},[{gen_server,terminate,7,[{file,"gen_server.erl"},{line,826}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+    ancestors: [chatterbox_sup,<0.119.0>]
+    messages: []
+    links: [<0.120.0>]
+    dictionary: []
+    trap_exit: false
+    status: running
+    heap_size: 987
+    stack_size: 27
+    reductions: 3307
+  neighbours:
+2016-02-08 14:06:24 =SUPERVISOR REPORT====
+     Supervisor: {local,chatterbox_sup}
+     Context:    child_terminated
+     Reason:     {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+     Offender:   [{pid,<0.152.0>},{id,socket},{mfargs,{http2_socket,start_server_link,undefined}},{restart_type,temporary},{shutdown,1000},{child_type,worker}]
+
+2016-02-08 14:06:24 =ERROR REPORT====
+** Generic server <0.153.0> terminating 
+** Last message in was {inet_async,#Port<0.39631>,31,{ok,#Port<0.43151>}}
+** When Server state == {h2_listening_state,[{certfile,"localhost.crt"},{keyfile,"localhost.key"},{honor_cipher_order,false},{versions,['tlsv1.2']},{next_protocols_advertised,[<<"h2">>]}],#Port<0.39631>,ssl,31,http2_connection,#Fun<chatterbox_sup.start_socket.0>}
+** Reason for termination == 
+** {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+2016-02-08 14:06:24 =CRASH REPORT====
+  crasher:
+    initial call: http2_socket:init/1
+    pid: <0.153.0>
+    registered_name: []
+    exception exit: {{{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]},[{gen_server,terminate,7,[{file,"gen_server.erl"},{line,826}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+    ancestors: [chatterbox_sup,<0.119.0>]
+    messages: []
+    links: [<0.120.0>]
+    dictionary: []
+    trap_exit: false
+    status: running
+    heap_size: 987
+    stack_size: 27
+    reductions: 3306
+  neighbours:
+2016-02-08 14:06:24 =SUPERVISOR REPORT====
+     Supervisor: {local,chatterbox_sup}
+     Context:    child_terminated
+     Reason:     {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+     Offender:   [{pid,<0.153.0>},{id,socket},{mfargs,{http2_socket,start_server_link,undefined}},{restart_type,temporary},{shutdown,1000},{child_type,worker}]
+
+2016-02-08 14:06:24 =ERROR REPORT====
+** Generic server <0.154.0> terminating 
+** Last message in was {inet_async,#Port<0.39631>,32,{ok,#Port<0.43153>}}
+** When Server state == {h2_listening_state,[{certfile,"localhost.crt"},{keyfile,"localhost.key"},{honor_cipher_order,false},{versions,['tlsv1.2']},{next_protocols_advertised,[<<"h2">>]}],#Port<0.39631>,ssl,32,http2_connection,#Fun<chatterbox_sup.start_socket.0>}
+** Reason for termination == 
+** {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+2016-02-08 14:06:24 =CRASH REPORT====
+  crasher:
+    initial call: http2_socket:init/1
+    pid: <0.154.0>
+    registered_name: []
+    exception exit: {{{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]},[{gen_server,terminate,7,[{file,"gen_server.erl"},{line,826}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+    ancestors: [chatterbox_sup,<0.119.0>]
+    messages: []
+    links: [<0.120.0>]
+    dictionary: []
+    trap_exit: false
+    status: running
+    heap_size: 987
+    stack_size: 27
+    reductions: 3307
+  neighbours:
+2016-02-08 14:06:24 =SUPERVISOR REPORT====
+     Supervisor: {local,chatterbox_sup}
+     Context:    child_terminated
+     Reason:     {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+     Offender:   [{pid,<0.154.0>},{id,socket},{mfargs,{http2_socket,start_server_link,undefined}},{restart_type,temporary},{shutdown,1000},{child_type,worker}]
+
+2016-02-08 14:06:24 =ERROR REPORT====
+** Generic server <0.155.0> terminating 
+** Last message in was {inet_async,#Port<0.39631>,33,{ok,#Port<0.43155>}}
+** When Server state == {h2_listening_state,[{certfile,"localhost.crt"},{keyfile,"localhost.key"},{honor_cipher_order,false},{versions,['tlsv1.2']},{next_protocols_advertised,[<<"h2">>]}],#Port<0.39631>,ssl,33,http2_connection,#Fun<chatterbox_sup.start_socket.0>}
+** Reason for termination == 
+** {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+2016-02-08 14:06:24 =CRASH REPORT====
+  crasher:
+    initial call: http2_socket:init/1
+    pid: <0.155.0>
+    registered_name: []
+    exception exit: {{{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]},[{gen_server,terminate,7,[{file,"gen_server.erl"},{line,826}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+    ancestors: [chatterbox_sup,<0.119.0>]
+    messages: []
+    links: [<0.120.0>]
+    dictionary: []
+    trap_exit: false
+    status: running
+    heap_size: 987
+    stack_size: 27
+    reductions: 3307
+  neighbours:
+2016-02-08 14:06:24 =SUPERVISOR REPORT====
+     Supervisor: {local,chatterbox_sup}
+     Context:    child_terminated
+     Reason:     {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+     Offender:   [{pid,<0.155.0>},{id,socket},{mfargs,{http2_socket,start_server_link,undefined}},{restart_type,temporary},{shutdown,1000},{child_type,worker}]
+
+2016-02-08 14:07:32 =ERROR REPORT====
+** Generic server <0.122.0> terminating 
+** Last message in was {inet_async,#Port<0.39562>,0,{ok,#Port<0.39647>}}
+** When Server state == {h2_listening_state,[{certfile,"localhost.crt"},{keyfile,"localhost.key"},{honor_cipher_order,false},{versions,['tlsv1.2']},{next_protocols_advertised,[<<"h2">>]}],#Port<0.39562>,ssl,0,http2_connection,#Fun<chatterbox_sup.start_socket.0>}
+** Reason for termination == 
+** {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+2016-02-08 14:07:32 =ERROR REPORT====
+** Generic server <0.123.0> terminating 
+** Last message in was {inet_async,#Port<0.39562>,1,{ok,#Port<0.39648>}}
+** When Server state == {h2_listening_state,[{certfile,"localhost.crt"},{keyfile,"localhost.key"},{honor_cipher_order,false},{versions,['tlsv1.2']},{next_protocols_advertised,[<<"h2">>]}],#Port<0.39562>,ssl,1,http2_connection,#Fun<chatterbox_sup.start_socket.0>}
+** Reason for termination == 
+** {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+2016-02-08 14:07:32 =ERROR REPORT====
+** Generic server <0.124.0> terminating 
+** Last message in was {inet_async,#Port<0.39562>,2,{ok,#Port<0.42609>}}
+** When Server state == {h2_listening_state,[{certfile,"localhost.crt"},{keyfile,"localhost.key"},{honor_cipher_order,false},{versions,['tlsv1.2']},{next_protocols_advertised,[<<"h2">>]}],#Port<0.39562>,ssl,2,http2_connection,#Fun<chatterbox_sup.start_socket.0>}
+** Reason for termination == 
+** {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+2016-02-08 14:07:32 =CRASH REPORT====
+  crasher:
+    initial call: http2_socket:init/1
+    pid: <0.122.0>
+    registered_name: []
+    exception exit: {{{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]},[{gen_server,terminate,7,[{file,"gen_server.erl"},{line,826}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+    ancestors: [chatterbox_sup,<0.119.0>]
+    messages: []
+    links: [<0.120.0>]
+    dictionary: []
+    trap_exit: false
+    status: running
+    heap_size: 987
+    stack_size: 27
+    reductions: 3357
+  neighbours:
+2016-02-08 14:07:32 =CRASH REPORT====
+  crasher:
+    initial call: http2_socket:init/1
+    pid: <0.123.0>
+    registered_name: []
+    exception exit: {{{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]},[{gen_server,terminate,7,[{file,"gen_server.erl"},{line,826}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+    ancestors: [chatterbox_sup,<0.119.0>]
+    messages: []
+    links: [<0.120.0>]
+    dictionary: []
+    trap_exit: false
+    status: running
+    heap_size: 987
+    stack_size: 27
+    reductions: 3358
+  neighbours:
+2016-02-08 14:07:32 =CRASH REPORT====
+  crasher:
+    initial call: http2_socket:init/1
+    pid: <0.124.0>
+    registered_name: []
+    exception exit: {{{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]},[{gen_server,terminate,7,[{file,"gen_server.erl"},{line,826}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+    ancestors: [chatterbox_sup,<0.119.0>]
+    messages: []
+    links: [<0.120.0>]
+    dictionary: []
+    trap_exit: false
+    status: running
+    heap_size: 987
+    stack_size: 27
+    reductions: 3315
+  neighbours:
+2016-02-08 14:07:32 =SUPERVISOR REPORT====
+     Supervisor: {local,chatterbox_sup}
+     Context:    child_terminated
+     Reason:     {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+     Offender:   [{pid,<0.122.0>},{id,socket},{mfargs,{http2_socket,start_server_link,undefined}},{restart_type,temporary},{shutdown,1000},{child_type,worker}]
+
+2016-02-08 14:07:32 =SUPERVISOR REPORT====
+     Supervisor: {local,chatterbox_sup}
+     Context:    child_terminated
+     Reason:     {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+     Offender:   [{pid,<0.123.0>},{id,socket},{mfargs,{http2_socket,start_server_link,undefined}},{restart_type,temporary},{shutdown,1000},{child_type,worker}]
+
+2016-02-08 14:07:32 =SUPERVISOR REPORT====
+     Supervisor: {local,chatterbox_sup}
+     Context:    child_terminated
+     Reason:     {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+     Offender:   [{pid,<0.124.0>},{id,socket},{mfargs,{http2_socket,start_server_link,undefined}},{restart_type,temporary},{shutdown,1000},{child_type,worker}]
+
+2016-02-08 14:07:32 =ERROR REPORT====
+** Generic server <0.125.0> terminating 
+** Last message in was {inet_async,#Port<0.39562>,3,{ok,#Port<0.43094>}}
+** When Server state == {h2_listening_state,[{certfile,"localhost.crt"},{keyfile,"localhost.key"},{honor_cipher_order,false},{versions,['tlsv1.2']},{next_protocols_advertised,[<<"h2">>]}],#Port<0.39562>,ssl,3,http2_connection,#Fun<chatterbox_sup.start_socket.0>}
+** Reason for termination == 
+** {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+2016-02-08 14:07:32 =CRASH REPORT====
+  crasher:
+    initial call: http2_socket:init/1
+    pid: <0.125.0>
+    registered_name: []
+    exception exit: {{{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]},[{gen_server,terminate,7,[{file,"gen_server.erl"},{line,826}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+    ancestors: [chatterbox_sup,<0.119.0>]
+    messages: []
+    links: [<0.120.0>]
+    dictionary: []
+    trap_exit: false
+    status: running
+    heap_size: 987
+    stack_size: 27
+    reductions: 3307
+  neighbours:
+2016-02-08 14:07:32 =SUPERVISOR REPORT====
+     Supervisor: {local,chatterbox_sup}
+     Context:    child_terminated
+     Reason:     {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+     Offender:   [{pid,<0.125.0>},{id,socket},{mfargs,{http2_socket,start_server_link,undefined}},{restart_type,temporary},{shutdown,1000},{child_type,worker}]
+
+2016-02-08 14:07:33 =ERROR REPORT====
+** Generic server <0.126.0> terminating 
+** Last message in was {inet_async,#Port<0.39562>,4,{ok,#Port<0.43096>}}
+** When Server state == {h2_listening_state,[{certfile,"localhost.crt"},{keyfile,"localhost.key"},{honor_cipher_order,false},{versions,['tlsv1.2']},{next_protocols_advertised,[<<"h2">>]}],#Port<0.39562>,ssl,4,http2_connection,#Fun<chatterbox_sup.start_socket.0>}
+** Reason for termination == 
+** {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+2016-02-08 14:07:33 =CRASH REPORT====
+  crasher:
+    initial call: http2_socket:init/1
+    pid: <0.126.0>
+    registered_name: []
+    exception exit: {{{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]},[{gen_server,terminate,7,[{file,"gen_server.erl"},{line,826}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+    ancestors: [chatterbox_sup,<0.119.0>]
+    messages: []
+    links: [<0.120.0>]
+    dictionary: []
+    trap_exit: false
+    status: running
+    heap_size: 987
+    stack_size: 27
+    reductions: 3307
+  neighbours:
+2016-02-08 14:07:33 =SUPERVISOR REPORT====
+     Supervisor: {local,chatterbox_sup}
+     Context:    child_terminated
+     Reason:     {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+     Offender:   [{pid,<0.126.0>},{id,socket},{mfargs,{http2_socket,start_server_link,undefined}},{restart_type,temporary},{shutdown,1000},{child_type,worker}]
+
+2016-02-08 14:07:33 =ERROR REPORT====
+** Generic server <0.127.0> terminating 
+** Last message in was {inet_async,#Port<0.39562>,5,{ok,#Port<0.43098>}}
+** When Server state == {h2_listening_state,[{certfile,"localhost.crt"},{keyfile,"localhost.key"},{honor_cipher_order,false},{versions,['tlsv1.2']},{next_protocols_advertised,[<<"h2">>]}],#Port<0.39562>,ssl,5,http2_connection,#Fun<chatterbox_sup.start_socket.0>}
+** Reason for termination == 
+** {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+2016-02-08 14:07:33 =CRASH REPORT====
+  crasher:
+    initial call: http2_socket:init/1
+    pid: <0.127.0>
+    registered_name: []
+    exception exit: {{{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]},[{gen_server,terminate,7,[{file,"gen_server.erl"},{line,826}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+    ancestors: [chatterbox_sup,<0.119.0>]
+    messages: []
+    links: [<0.120.0>]
+    dictionary: []
+    trap_exit: false
+    status: running
+    heap_size: 987
+    stack_size: 27
+    reductions: 3307
+  neighbours:
+2016-02-08 14:07:33 =SUPERVISOR REPORT====
+     Supervisor: {local,chatterbox_sup}
+     Context:    child_terminated
+     Reason:     {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+     Offender:   [{pid,<0.127.0>},{id,socket},{mfargs,{http2_socket,start_server_link,undefined}},{restart_type,temporary},{shutdown,1000},{child_type,worker}]
+
+2016-02-08 14:07:33 =ERROR REPORT====
+** Generic server <0.128.0> terminating 
+** Last message in was {inet_async,#Port<0.39562>,6,{ok,#Port<0.43100>}}
+** When Server state == {h2_listening_state,[{certfile,"localhost.crt"},{keyfile,"localhost.key"},{honor_cipher_order,false},{versions,['tlsv1.2']},{next_protocols_advertised,[<<"h2">>]}],#Port<0.39562>,ssl,6,http2_connection,#Fun<chatterbox_sup.start_socket.0>}
+** Reason for termination == 
+** {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+2016-02-08 14:07:33 =CRASH REPORT====
+  crasher:
+    initial call: http2_socket:init/1
+    pid: <0.128.0>
+    registered_name: []
+    exception exit: {{{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]},[{gen_server,terminate,7,[{file,"gen_server.erl"},{line,826}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+    ancestors: [chatterbox_sup,<0.119.0>]
+    messages: []
+    links: [<0.120.0>]
+    dictionary: []
+    trap_exit: false
+    status: running
+    heap_size: 987
+    stack_size: 27
+    reductions: 3307
+  neighbours:
+2016-02-08 14:07:33 =SUPERVISOR REPORT====
+     Supervisor: {local,chatterbox_sup}
+     Context:    child_terminated
+     Reason:     {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+     Offender:   [{pid,<0.128.0>},{id,socket},{mfargs,{http2_socket,start_server_link,undefined}},{restart_type,temporary},{shutdown,1000},{child_type,worker}]
+
+2016-02-08 14:07:33 =ERROR REPORT====
+** Generic server <0.129.0> terminating 
+** Last message in was {inet_async,#Port<0.39562>,7,{ok,#Port<0.43102>}}
+** When Server state == {h2_listening_state,[{certfile,"localhost.crt"},{keyfile,"localhost.key"},{honor_cipher_order,false},{versions,['tlsv1.2']},{next_protocols_advertised,[<<"h2">>]}],#Port<0.39562>,ssl,7,http2_connection,#Fun<chatterbox_sup.start_socket.0>}
+** Reason for termination == 
+** {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+2016-02-08 14:07:33 =CRASH REPORT====
+  crasher:
+    initial call: http2_socket:init/1
+    pid: <0.129.0>
+    registered_name: []
+    exception exit: {{{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]},[{gen_server,terminate,7,[{file,"gen_server.erl"},{line,826}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+    ancestors: [chatterbox_sup,<0.119.0>]
+    messages: []
+    links: [<0.120.0>]
+    dictionary: []
+    trap_exit: false
+    status: running
+    heap_size: 987
+    stack_size: 27
+    reductions: 3307
+  neighbours:
+2016-02-08 14:07:33 =SUPERVISOR REPORT====
+     Supervisor: {local,chatterbox_sup}
+     Context:    child_terminated
+     Reason:     {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+     Offender:   [{pid,<0.129.0>},{id,socket},{mfargs,{http2_socket,start_server_link,undefined}},{restart_type,temporary},{shutdown,1000},{child_type,worker}]
+
+2016-02-08 14:07:33 =ERROR REPORT====
+** Generic server <0.130.0> terminating 
+** Last message in was {inet_async,#Port<0.39562>,8,{ok,#Port<0.43104>}}
+** When Server state == {h2_listening_state,[{certfile,"localhost.crt"},{keyfile,"localhost.key"},{honor_cipher_order,false},{versions,['tlsv1.2']},{next_protocols_advertised,[<<"h2">>]}],#Port<0.39562>,ssl,8,http2_connection,#Fun<chatterbox_sup.start_socket.0>}
+** Reason for termination == 
+** {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+2016-02-08 14:07:33 =CRASH REPORT====
+  crasher:
+    initial call: http2_socket:init/1
+    pid: <0.130.0>
+    registered_name: []
+    exception exit: {{{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]},[{gen_server,terminate,7,[{file,"gen_server.erl"},{line,826}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+    ancestors: [chatterbox_sup,<0.119.0>]
+    messages: []
+    links: [<0.120.0>]
+    dictionary: []
+    trap_exit: false
+    status: running
+    heap_size: 987
+    stack_size: 27
+    reductions: 3307
+  neighbours:
+2016-02-08 14:07:33 =SUPERVISOR REPORT====
+     Supervisor: {local,chatterbox_sup}
+     Context:    child_terminated
+     Reason:     {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+     Offender:   [{pid,<0.130.0>},{id,socket},{mfargs,{http2_socket,start_server_link,undefined}},{restart_type,temporary},{shutdown,1000},{child_type,worker}]
+
+2016-02-08 14:07:46 =ERROR REPORT====
+** Generic server <0.131.0> terminating 
+** Last message in was {inet_async,#Port<0.39562>,9,{ok,#Port<0.43106>}}
+** When Server state == {h2_listening_state,[{certfile,"localhost.crt"},{keyfile,"localhost.key"},{honor_cipher_order,false},{versions,['tlsv1.2']},{next_protocols_advertised,[<<"h2">>]}],#Port<0.39562>,ssl,9,http2_connection,#Fun<chatterbox_sup.start_socket.0>}
+** Reason for termination == 
+** {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+2016-02-08 14:07:46 =CRASH REPORT====
+  crasher:
+    initial call: http2_socket:init/1
+    pid: <0.131.0>
+    registered_name: []
+    exception exit: {{{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]},[{gen_server,terminate,7,[{file,"gen_server.erl"},{line,826}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+    ancestors: [chatterbox_sup,<0.119.0>]
+    messages: []
+    links: [<0.120.0>]
+    dictionary: []
+    trap_exit: false
+    status: running
+    heap_size: 987
+    stack_size: 27
+    reductions: 3307
+  neighbours:
+2016-02-08 14:07:46 =SUPERVISOR REPORT====
+     Supervisor: {local,chatterbox_sup}
+     Context:    child_terminated
+     Reason:     {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+     Offender:   [{pid,<0.131.0>},{id,socket},{mfargs,{http2_socket,start_server_link,undefined}},{restart_type,temporary},{shutdown,1000},{child_type,worker}]
+
+2016-02-08 14:07:46 =ERROR REPORT====
+** Generic server <0.132.0> terminating 
+** Last message in was {inet_async,#Port<0.39562>,10,{ok,#Port<0.43107>}}
+** When Server state == {h2_listening_state,[{certfile,"localhost.crt"},{keyfile,"localhost.key"},{honor_cipher_order,false},{versions,['tlsv1.2']},{next_protocols_advertised,[<<"h2">>]}],#Port<0.39562>,ssl,10,http2_connection,#Fun<chatterbox_sup.start_socket.0>}
+** Reason for termination == 
+** {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+2016-02-08 14:07:46 =CRASH REPORT====
+  crasher:
+    initial call: http2_socket:init/1
+    pid: <0.132.0>
+    registered_name: []
+    exception exit: {{{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]},[{gen_server,terminate,7,[{file,"gen_server.erl"},{line,826}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+    ancestors: [chatterbox_sup,<0.119.0>]
+    messages: []
+    links: [<0.120.0>]
+    dictionary: []
+    trap_exit: false
+    status: running
+    heap_size: 987
+    stack_size: 27
+    reductions: 3307
+  neighbours:
+2016-02-08 14:07:46 =SUPERVISOR REPORT====
+     Supervisor: {local,chatterbox_sup}
+     Context:    child_terminated
+     Reason:     {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+     Offender:   [{pid,<0.132.0>},{id,socket},{mfargs,{http2_socket,start_server_link,undefined}},{restart_type,temporary},{shutdown,1000},{child_type,worker}]
+
+2016-02-08 14:07:46 =ERROR REPORT====
+** Generic server <0.133.0> terminating 
+** Last message in was {inet_async,#Port<0.39562>,11,{ok,#Port<0.43110>}}
+** When Server state == {h2_listening_state,[{certfile,"localhost.crt"},{keyfile,"localhost.key"},{honor_cipher_order,false},{versions,['tlsv1.2']},{next_protocols_advertised,[<<"h2">>]}],#Port<0.39562>,ssl,11,http2_connection,#Fun<chatterbox_sup.start_socket.0>}
+** Reason for termination == 
+** {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+2016-02-08 14:07:46 =CRASH REPORT====
+  crasher:
+    initial call: http2_socket:init/1
+    pid: <0.133.0>
+    registered_name: []
+    exception exit: {{{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]},[{gen_server,terminate,7,[{file,"gen_server.erl"},{line,826}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+    ancestors: [chatterbox_sup,<0.119.0>]
+    messages: []
+    links: [<0.120.0>]
+    dictionary: []
+    trap_exit: false
+    status: running
+    heap_size: 987
+    stack_size: 27
+    reductions: 3307
+  neighbours:
+2016-02-08 14:07:46 =SUPERVISOR REPORT====
+     Supervisor: {local,chatterbox_sup}
+     Context:    child_terminated
+     Reason:     {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+     Offender:   [{pid,<0.133.0>},{id,socket},{mfargs,{http2_socket,start_server_link,undefined}},{restart_type,temporary},{shutdown,1000},{child_type,worker}]
+
+2016-02-08 14:08:18 =ERROR REPORT====
+** Generic server <0.134.0> terminating 
+** Last message in was {inet_async,#Port<0.39562>,12,{ok,#Port<0.43112>}}
+** When Server state == {h2_listening_state,[{certfile,"localhost.crt"},{keyfile,"localhost.key"},{honor_cipher_order,false},{versions,['tlsv1.2']},{next_protocols_advertised,[<<"h2">>]}],#Port<0.39562>,ssl,12,http2_connection,#Fun<chatterbox_sup.start_socket.0>}
+** Reason for termination == 
+** {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+2016-02-08 14:08:18 =CRASH REPORT====
+  crasher:
+    initial call: http2_socket:init/1
+    pid: <0.134.0>
+    registered_name: []
+    exception exit: {{{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]},[{gen_server,terminate,7,[{file,"gen_server.erl"},{line,826}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+    ancestors: [chatterbox_sup,<0.119.0>]
+    messages: []
+    links: [<0.120.0>]
+    dictionary: []
+    trap_exit: false
+    status: running
+    heap_size: 987
+    stack_size: 27
+    reductions: 3307
+  neighbours:
+2016-02-08 14:08:18 =SUPERVISOR REPORT====
+     Supervisor: {local,chatterbox_sup}
+     Context:    child_terminated
+     Reason:     {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+     Offender:   [{pid,<0.134.0>},{id,socket},{mfargs,{http2_socket,start_server_link,undefined}},{restart_type,temporary},{shutdown,1000},{child_type,worker}]
+
+2016-02-08 14:08:18 =ERROR REPORT====
+** Generic server <0.135.0> terminating 
+** Last message in was {inet_async,#Port<0.39562>,13,{ok,#Port<0.43114>}}
+** When Server state == {h2_listening_state,[{certfile,"localhost.crt"},{keyfile,"localhost.key"},{honor_cipher_order,false},{versions,['tlsv1.2']},{next_protocols_advertised,[<<"h2">>]}],#Port<0.39562>,ssl,13,http2_connection,#Fun<chatterbox_sup.start_socket.0>}
+** Reason for termination == 
+** {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+2016-02-08 14:08:18 =CRASH REPORT====
+  crasher:
+    initial call: http2_socket:init/1
+    pid: <0.135.0>
+    registered_name: []
+    exception exit: {{{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]},[{gen_server,terminate,7,[{file,"gen_server.erl"},{line,826}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+    ancestors: [chatterbox_sup,<0.119.0>]
+    messages: []
+    links: [<0.120.0>]
+    dictionary: []
+    trap_exit: false
+    status: running
+    heap_size: 987
+    stack_size: 27
+    reductions: 3307
+  neighbours:
+2016-02-08 14:08:18 =SUPERVISOR REPORT====
+     Supervisor: {local,chatterbox_sup}
+     Context:    child_terminated
+     Reason:     {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+     Offender:   [{pid,<0.135.0>},{id,socket},{mfargs,{http2_socket,start_server_link,undefined}},{restart_type,temporary},{shutdown,1000},{child_type,worker}]
+
+2016-02-08 14:08:18 =ERROR REPORT====
+** Generic server <0.136.0> terminating 
+** Last message in was {inet_async,#Port<0.39562>,14,{ok,#Port<0.43116>}}
+** When Server state == {h2_listening_state,[{certfile,"localhost.crt"},{keyfile,"localhost.key"},{honor_cipher_order,false},{versions,['tlsv1.2']},{next_protocols_advertised,[<<"h2">>]}],#Port<0.39562>,ssl,14,http2_connection,#Fun<chatterbox_sup.start_socket.0>}
+** Reason for termination == 
+** {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+2016-02-08 14:08:18 =CRASH REPORT====
+  crasher:
+    initial call: http2_socket:init/1
+    pid: <0.136.0>
+    registered_name: []
+    exception exit: {{{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]},[{gen_server,terminate,7,[{file,"gen_server.erl"},{line,826}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+    ancestors: [chatterbox_sup,<0.119.0>]
+    messages: []
+    links: [<0.120.0>]
+    dictionary: []
+    trap_exit: false
+    status: running
+    heap_size: 987
+    stack_size: 27
+    reductions: 3307
+  neighbours:
+2016-02-08 14:08:18 =SUPERVISOR REPORT====
+     Supervisor: {local,chatterbox_sup}
+     Context:    child_terminated
+     Reason:     {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+     Offender:   [{pid,<0.136.0>},{id,socket},{mfargs,{http2_socket,start_server_link,undefined}},{restart_type,temporary},{shutdown,1000},{child_type,worker}]
+
+2016-02-08 14:08:18 =ERROR REPORT====
+** Generic server <0.137.0> terminating 
+** Last message in was {inet_async,#Port<0.39562>,15,{ok,#Port<0.43118>}}
+** When Server state == {h2_listening_state,[{certfile,"localhost.crt"},{keyfile,"localhost.key"},{honor_cipher_order,false},{versions,['tlsv1.2']},{next_protocols_advertised,[<<"h2">>]}],#Port<0.39562>,ssl,15,http2_connection,#Fun<chatterbox_sup.start_socket.0>}
+** Reason for termination == 
+** {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+2016-02-08 14:08:18 =CRASH REPORT====
+  crasher:
+    initial call: http2_socket:init/1
+    pid: <0.137.0>
+    registered_name: []
+    exception exit: {{{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]},[{gen_server,terminate,7,[{file,"gen_server.erl"},{line,826}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+    ancestors: [chatterbox_sup,<0.119.0>]
+    messages: []
+    links: [<0.120.0>]
+    dictionary: []
+    trap_exit: false
+    status: running
+    heap_size: 987
+    stack_size: 27
+    reductions: 3307
+  neighbours:
+2016-02-08 14:08:18 =SUPERVISOR REPORT====
+     Supervisor: {local,chatterbox_sup}
+     Context:    child_terminated
+     Reason:     {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+     Offender:   [{pid,<0.137.0>},{id,socket},{mfargs,{http2_socket,start_server_link,undefined}},{restart_type,temporary},{shutdown,1000},{child_type,worker}]
+
+2016-02-08 14:08:18 =ERROR REPORT====
+** Generic server <0.138.0> terminating 
+** Last message in was {inet_async,#Port<0.39562>,16,{ok,#Port<0.43120>}}
+** When Server state == {h2_listening_state,[{certfile,"localhost.crt"},{keyfile,"localhost.key"},{honor_cipher_order,false},{versions,['tlsv1.2']},{next_protocols_advertised,[<<"h2">>]}],#Port<0.39562>,ssl,16,http2_connection,#Fun<chatterbox_sup.start_socket.0>}
+** Reason for termination == 
+** {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+2016-02-08 14:08:18 =CRASH REPORT====
+  crasher:
+    initial call: http2_socket:init/1
+    pid: <0.138.0>
+    registered_name: []
+    exception exit: {{{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]},[{gen_server,terminate,7,[{file,"gen_server.erl"},{line,826}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+    ancestors: [chatterbox_sup,<0.119.0>]
+    messages: []
+    links: [<0.120.0>]
+    dictionary: []
+    trap_exit: false
+    status: running
+    heap_size: 987
+    stack_size: 27
+    reductions: 3307
+  neighbours:
+2016-02-08 14:08:18 =SUPERVISOR REPORT====
+     Supervisor: {local,chatterbox_sup}
+     Context:    child_terminated
+     Reason:     {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+     Offender:   [{pid,<0.138.0>},{id,socket},{mfargs,{http2_socket,start_server_link,undefined}},{restart_type,temporary},{shutdown,1000},{child_type,worker}]
+
+2016-02-08 14:08:18 =ERROR REPORT====
+** Generic server <0.139.0> terminating 
+** Last message in was {inet_async,#Port<0.39562>,17,{ok,#Port<0.43122>}}
+** When Server state == {h2_listening_state,[{certfile,"localhost.crt"},{keyfile,"localhost.key"},{honor_cipher_order,false},{versions,['tlsv1.2']},{next_protocols_advertised,[<<"h2">>]}],#Port<0.39562>,ssl,17,http2_connection,#Fun<chatterbox_sup.start_socket.0>}
+** Reason for termination == 
+** {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+2016-02-08 14:08:18 =CRASH REPORT====
+  crasher:
+    initial call: http2_socket:init/1
+    pid: <0.139.0>
+    registered_name: []
+    exception exit: {{{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]},[{gen_server,terminate,7,[{file,"gen_server.erl"},{line,826}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+    ancestors: [chatterbox_sup,<0.119.0>]
+    messages: []
+    links: [<0.120.0>]
+    dictionary: []
+    trap_exit: false
+    status: running
+    heap_size: 987
+    stack_size: 27
+    reductions: 3307
+  neighbours:
+2016-02-08 14:08:18 =SUPERVISOR REPORT====
+     Supervisor: {local,chatterbox_sup}
+     Context:    child_terminated
+     Reason:     {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+     Offender:   [{pid,<0.139.0>},{id,socket},{mfargs,{http2_socket,start_server_link,undefined}},{restart_type,temporary},{shutdown,1000},{child_type,worker}]
+
+2016-02-08 14:08:18 =ERROR REPORT====
+** Generic server <0.140.0> terminating 
+** Last message in was {inet_async,#Port<0.39562>,18,{ok,#Port<0.43124>}}
+** When Server state == {h2_listening_state,[{certfile,"localhost.crt"},{keyfile,"localhost.key"},{honor_cipher_order,false},{versions,['tlsv1.2']},{next_protocols_advertised,[<<"h2">>]}],#Port<0.39562>,ssl,18,http2_connection,#Fun<chatterbox_sup.start_socket.0>}
+** Reason for termination == 
+** {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+2016-02-08 14:08:18 =CRASH REPORT====
+  crasher:
+    initial call: http2_socket:init/1
+    pid: <0.140.0>
+    registered_name: []
+    exception exit: {{{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]},[{gen_server,terminate,7,[{file,"gen_server.erl"},{line,826}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+    ancestors: [chatterbox_sup,<0.119.0>]
+    messages: []
+    links: [<0.120.0>]
+    dictionary: []
+    trap_exit: false
+    status: running
+    heap_size: 987
+    stack_size: 27
+    reductions: 3307
+  neighbours:
+2016-02-08 14:08:19 =SUPERVISOR REPORT====
+     Supervisor: {local,chatterbox_sup}
+     Context:    child_terminated
+     Reason:     {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+     Offender:   [{pid,<0.140.0>},{id,socket},{mfargs,{http2_socket,start_server_link,undefined}},{restart_type,temporary},{shutdown,1000},{child_type,worker}]
+
+2016-02-08 14:08:19 =ERROR REPORT====
+** Generic server <0.141.0> terminating 
+** Last message in was {inet_async,#Port<0.39562>,19,{ok,#Port<0.43126>}}
+** When Server state == {h2_listening_state,[{certfile,"localhost.crt"},{keyfile,"localhost.key"},{honor_cipher_order,false},{versions,['tlsv1.2']},{next_protocols_advertised,[<<"h2">>]}],#Port<0.39562>,ssl,19,http2_connection,#Fun<chatterbox_sup.start_socket.0>}
+** Reason for termination == 
+** {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+2016-02-08 14:08:19 =CRASH REPORT====
+  crasher:
+    initial call: http2_socket:init/1
+    pid: <0.141.0>
+    registered_name: []
+    exception exit: {{{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]},[{gen_server,terminate,7,[{file,"gen_server.erl"},{line,826}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+    ancestors: [chatterbox_sup,<0.119.0>]
+    messages: []
+    links: [<0.120.0>]
+    dictionary: []
+    trap_exit: false
+    status: running
+    heap_size: 987
+    stack_size: 27
+    reductions: 3307
+  neighbours:
+2016-02-08 14:08:19 =SUPERVISOR REPORT====
+     Supervisor: {local,chatterbox_sup}
+     Context:    child_terminated
+     Reason:     {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+     Offender:   [{pid,<0.141.0>},{id,socket},{mfargs,{http2_socket,start_server_link,undefined}},{restart_type,temporary},{shutdown,1000},{child_type,worker}]
+
+2016-02-08 14:16:35 =ERROR REPORT====
+** Generic server <0.324.0> terminating 
+** Last message in was {inet_async,#Port<0.40627>,1,{ok,#Port<0.40781>}}
+** When Server state == {h2_listening_state,[{certfile,"localhost.crt"},{keyfile,"localhost.key"},{honor_cipher_order,false},{versions,['tlsv1.2']},{next_protocols_advertised,[<<"h2">>]}],#Port<0.40627>,ssl,1,http2_connection,#Fun<chatterbox_sup.start_socket.0>}
+** Reason for termination == 
+** {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+2016-02-08 14:16:35 =ERROR REPORT====
+** Generic server <0.323.0> terminating 
+** Last message in was {inet_async,#Port<0.40627>,0,{ok,#Port<0.40780>}}
+** When Server state == {h2_listening_state,[{certfile,"localhost.crt"},{keyfile,"localhost.key"},{honor_cipher_order,false},{versions,['tlsv1.2']},{next_protocols_advertised,[<<"h2">>]}],#Port<0.40627>,ssl,0,http2_connection,#Fun<chatterbox_sup.start_socket.0>}
+** Reason for termination == 
+** {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+2016-02-08 14:16:35 =CRASH REPORT====
+  crasher:
+    initial call: http2_socket:init/1
+    pid: <0.324.0>
+    registered_name: []
+    exception exit: {{{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]},[{gen_server,terminate,7,[{file,"gen_server.erl"},{line,826}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+    ancestors: [chatterbox_sup,<0.320.0>]
+    messages: []
+    links: [<0.321.0>]
+    dictionary: []
+    trap_exit: false
+    status: running
+    heap_size: 987
+    stack_size: 27
+    reductions: 3350
+  neighbours:
+2016-02-08 14:16:35 =SUPERVISOR REPORT====
+     Supervisor: {local,chatterbox_sup}
+     Context:    child_terminated
+     Reason:     {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+     Offender:   [{pid,<0.324.0>},{id,socket},{mfargs,{http2_socket,start_server_link,undefined}},{restart_type,temporary},{shutdown,1000},{child_type,worker}]
+
+2016-02-08 14:16:35 =CRASH REPORT====
+  crasher:
+    initial call: http2_socket:init/1
+    pid: <0.323.0>
+    registered_name: []
+    exception exit: {{{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]},[{gen_server,terminate,7,[{file,"gen_server.erl"},{line,826}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+    ancestors: [chatterbox_sup,<0.320.0>]
+    messages: []
+    links: [<0.321.0>]
+    dictionary: []
+    trap_exit: false
+    status: running
+    heap_size: 987
+    stack_size: 27
+    reductions: 3349
+  neighbours:
+2016-02-08 14:16:35 =SUPERVISOR REPORT====
+     Supervisor: {local,chatterbox_sup}
+     Context:    child_terminated
+     Reason:     {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+     Offender:   [{pid,<0.323.0>},{id,socket},{mfargs,{http2_socket,start_server_link,undefined}},{restart_type,temporary},{shutdown,1000},{child_type,worker}]
+
+2016-02-08 14:16:35 =ERROR REPORT====
+** Generic server <0.325.0> terminating 
+** Last message in was {inet_async,#Port<0.40627>,2,{ok,#Port<0.44048>}}
+** When Server state == {h2_listening_state,[{certfile,"localhost.crt"},{keyfile,"localhost.key"},{honor_cipher_order,false},{versions,['tlsv1.2']},{next_protocols_advertised,[<<"h2">>]}],#Port<0.40627>,ssl,2,http2_connection,#Fun<chatterbox_sup.start_socket.0>}
+** Reason for termination == 
+** {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+2016-02-08 14:16:35 =CRASH REPORT====
+  crasher:
+    initial call: http2_socket:init/1
+    pid: <0.325.0>
+    registered_name: []
+    exception exit: {{{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]},[{gen_server,terminate,7,[{file,"gen_server.erl"},{line,826}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+    ancestors: [chatterbox_sup,<0.320.0>]
+    messages: []
+    links: [<0.321.0>]
+    dictionary: []
+    trap_exit: false
+    status: running
+    heap_size: 987
+    stack_size: 27
+    reductions: 3306
+  neighbours:
+2016-02-08 14:16:35 =SUPERVISOR REPORT====
+     Supervisor: {local,chatterbox_sup}
+     Context:    child_terminated
+     Reason:     {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+     Offender:   [{pid,<0.325.0>},{id,socket},{mfargs,{http2_socket,start_server_link,undefined}},{restart_type,temporary},{shutdown,1000},{child_type,worker}]
+
+2016-02-08 14:16:35 =ERROR REPORT====
+** Generic server <0.326.0> terminating 
+** Last message in was {inet_async,#Port<0.40627>,3,{ok,#Port<0.44050>}}
+** When Server state == {h2_listening_state,[{certfile,"localhost.crt"},{keyfile,"localhost.key"},{honor_cipher_order,false},{versions,['tlsv1.2']},{next_protocols_advertised,[<<"h2">>]}],#Port<0.40627>,ssl,3,http2_connection,#Fun<chatterbox_sup.start_socket.0>}
+** Reason for termination == 
+** {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+2016-02-08 14:16:35 =CRASH REPORT====
+  crasher:
+    initial call: http2_socket:init/1
+    pid: <0.326.0>
+    registered_name: []
+    exception exit: {{{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]},[{gen_server,terminate,7,[{file,"gen_server.erl"},{line,826}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+    ancestors: [chatterbox_sup,<0.320.0>]
+    messages: []
+    links: [<0.321.0>]
+    dictionary: []
+    trap_exit: false
+    status: running
+    heap_size: 987
+    stack_size: 27
+    reductions: 3307
+  neighbours:
+2016-02-08 14:16:35 =SUPERVISOR REPORT====
+     Supervisor: {local,chatterbox_sup}
+     Context:    child_terminated
+     Reason:     {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+     Offender:   [{pid,<0.326.0>},{id,socket},{mfargs,{http2_socket,start_server_link,undefined}},{restart_type,temporary},{shutdown,1000},{child_type,worker}]
+
+2016-02-08 14:16:35 =ERROR REPORT====
+** Generic server <0.327.0> terminating 
+** Last message in was {inet_async,#Port<0.40627>,4,{ok,#Port<0.44052>}}
+** When Server state == {h2_listening_state,[{certfile,"localhost.crt"},{keyfile,"localhost.key"},{honor_cipher_order,false},{versions,['tlsv1.2']},{next_protocols_advertised,[<<"h2">>]}],#Port<0.40627>,ssl,4,http2_connection,#Fun<chatterbox_sup.start_socket.0>}
+** Reason for termination == 
+** {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+2016-02-08 14:16:35 =CRASH REPORT====
+  crasher:
+    initial call: http2_socket:init/1
+    pid: <0.327.0>
+    registered_name: []
+    exception exit: {{{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]},[{gen_server,terminate,7,[{file,"gen_server.erl"},{line,826}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+    ancestors: [chatterbox_sup,<0.320.0>]
+    messages: []
+    links: [<0.321.0>]
+    dictionary: []
+    trap_exit: false
+    status: running
+    heap_size: 987
+    stack_size: 27
+    reductions: 3307
+  neighbours:
+2016-02-08 14:16:35 =SUPERVISOR REPORT====
+     Supervisor: {local,chatterbox_sup}
+     Context:    child_terminated
+     Reason:     {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+     Offender:   [{pid,<0.327.0>},{id,socket},{mfargs,{http2_socket,start_server_link,undefined}},{restart_type,temporary},{shutdown,1000},{child_type,worker}]
+
+2016-02-08 14:16:35 =ERROR REPORT====
+** Generic server <0.328.0> terminating 
+** Last message in was {inet_async,#Port<0.40627>,5,{ok,#Port<0.44054>}}
+** When Server state == {h2_listening_state,[{certfile,"localhost.crt"},{keyfile,"localhost.key"},{honor_cipher_order,false},{versions,['tlsv1.2']},{next_protocols_advertised,[<<"h2">>]}],#Port<0.40627>,ssl,5,http2_connection,#Fun<chatterbox_sup.start_socket.0>}
+** Reason for termination == 
+** {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+2016-02-08 14:16:35 =CRASH REPORT====
+  crasher:
+    initial call: http2_socket:init/1
+    pid: <0.328.0>
+    registered_name: []
+    exception exit: {{{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]},[{gen_server,terminate,7,[{file,"gen_server.erl"},{line,826}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+    ancestors: [chatterbox_sup,<0.320.0>]
+    messages: []
+    links: [<0.321.0>]
+    dictionary: []
+    trap_exit: false
+    status: running
+    heap_size: 987
+    stack_size: 27
+    reductions: 3307
+  neighbours:
+2016-02-08 14:16:35 =SUPERVISOR REPORT====
+     Supervisor: {local,chatterbox_sup}
+     Context:    child_terminated
+     Reason:     {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+     Offender:   [{pid,<0.328.0>},{id,socket},{mfargs,{http2_socket,start_server_link,undefined}},{restart_type,temporary},{shutdown,1000},{child_type,worker}]
+
+2016-02-08 14:16:36 =ERROR REPORT====
+** Generic server <0.329.0> terminating 
+** Last message in was {inet_async,#Port<0.40627>,6,{ok,#Port<0.44057>}}
+** When Server state == {h2_listening_state,[{certfile,"localhost.crt"},{keyfile,"localhost.key"},{honor_cipher_order,false},{versions,['tlsv1.2']},{next_protocols_advertised,[<<"h2">>]}],#Port<0.40627>,ssl,6,http2_connection,#Fun<chatterbox_sup.start_socket.0>}
+** Reason for termination == 
+** {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+2016-02-08 14:16:36 =CRASH REPORT====
+  crasher:
+    initial call: http2_socket:init/1
+    pid: <0.329.0>
+    registered_name: []
+    exception exit: {{{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]},[{gen_server,terminate,7,[{file,"gen_server.erl"},{line,826}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+    ancestors: [chatterbox_sup,<0.320.0>]
+    messages: []
+    links: [<0.321.0>]
+    dictionary: []
+    trap_exit: false
+    status: running
+    heap_size: 987
+    stack_size: 27
+    reductions: 3307
+  neighbours:
+2016-02-08 14:16:36 =SUPERVISOR REPORT====
+     Supervisor: {local,chatterbox_sup}
+     Context:    child_terminated
+     Reason:     {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+     Offender:   [{pid,<0.329.0>},{id,socket},{mfargs,{http2_socket,start_server_link,undefined}},{restart_type,temporary},{shutdown,1000},{child_type,worker}]
+
+2016-02-08 14:16:36 =ERROR REPORT====
+** Generic server <0.330.0> terminating 
+** Last message in was {inet_async,#Port<0.40627>,7,{ok,#Port<0.44059>}}
+** When Server state == {h2_listening_state,[{certfile,"localhost.crt"},{keyfile,"localhost.key"},{honor_cipher_order,false},{versions,['tlsv1.2']},{next_protocols_advertised,[<<"h2">>]}],#Port<0.40627>,ssl,7,http2_connection,#Fun<chatterbox_sup.start_socket.0>}
+** Reason for termination == 
+** {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+2016-02-08 14:16:36 =CRASH REPORT====
+  crasher:
+    initial call: http2_socket:init/1
+    pid: <0.330.0>
+    registered_name: []
+    exception exit: {{{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]},[{gen_server,terminate,7,[{file,"gen_server.erl"},{line,826}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+    ancestors: [chatterbox_sup,<0.320.0>]
+    messages: []
+    links: [<0.321.0>]
+    dictionary: []
+    trap_exit: false
+    status: running
+    heap_size: 987
+    stack_size: 27
+    reductions: 3307
+  neighbours:
+2016-02-08 14:16:36 =SUPERVISOR REPORT====
+     Supervisor: {local,chatterbox_sup}
+     Context:    child_terminated
+     Reason:     {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+     Offender:   [{pid,<0.330.0>},{id,socket},{mfargs,{http2_socket,start_server_link,undefined}},{restart_type,temporary},{shutdown,1000},{child_type,worker}]
+
+2016-02-08 14:16:36 =ERROR REPORT====
+** Generic server <0.331.0> terminating 
+** Last message in was {inet_async,#Port<0.40627>,8,{ok,#Port<0.44060>}}
+** When Server state == {h2_listening_state,[{certfile,"localhost.crt"},{keyfile,"localhost.key"},{honor_cipher_order,false},{versions,['tlsv1.2']},{next_protocols_advertised,[<<"h2">>]}],#Port<0.40627>,ssl,8,http2_connection,#Fun<chatterbox_sup.start_socket.0>}
+** Reason for termination == 
+** {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+2016-02-08 14:16:36 =CRASH REPORT====
+  crasher:
+    initial call: http2_socket:init/1
+    pid: <0.331.0>
+    registered_name: []
+    exception exit: {{{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]},[{gen_server,terminate,7,[{file,"gen_server.erl"},{line,826}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+    ancestors: [chatterbox_sup,<0.320.0>]
+    messages: []
+    links: [<0.321.0>]
+    dictionary: []
+    trap_exit: false
+    status: running
+    heap_size: 987
+    stack_size: 27
+    reductions: 3307
+  neighbours:
+2016-02-08 14:16:36 =SUPERVISOR REPORT====
+     Supervisor: {local,chatterbox_sup}
+     Context:    child_terminated
+     Reason:     {{badmatch,{error,{options,{certfile,"localhost.crt",{error,enoent}}}}},[{http2_socket,handle_info,2,[{file,"e:/Erlang18/Github/chatterbox/_build/default/lib/chatterbox/src/http2_socket.erl"},{line,164}]},{gen_server,try_dispatch,4,[{file,"gen_server.erl"},{line,615}]},{gen_server,handle_msg,5,[{file,"gen_server.erl"},{line,681}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+     Offender:   [{pid,<0.331.0>},{id,socket},{mfargs,{http2_socket,start_server_link,undefined}},{restart_type,temporary},{shutdown,1000},{child_type,worker}]
+
+2016-02-08 14:17:36 =ERROR REPORT====
+** Generic server <0.122.0> terminating 
+** Last message in was {inet_async,#Port<0.39562>,0,{ok,#Port<0.39647>}}
+** When Server state == {h2_listening_state,[{certfile,"E:/Erlang18/Github/chatterbox/config/localhost.crt"},{keyfile,"E:/Erlang18/Github/chatterbox/config/localhost.key"},{honor_cipher_order,false},{versions,['tlsv1.2']},{next_protocols_advertised,[<<"h2">>]}],#Port<0.39562>,ssl,0,http2_connection,#Fun<chatterbox_sup.start_socket.0>}
+** Reason for termination == 
+** "Bad Preface"
+2016-02-08 14:17:36 =CRASH REPORT====
+  crasher:
+    initial call: http2_socket:init/1
+    pid: <0.122.0>
+    registered_name: []
+    exception exit: {"Bad Preface",[{gen_server,terminate,7,[{file,"gen_server.erl"},{line,826}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+    ancestors: [chatterbox_sup,<0.119.0>]
+    messages: [{'$gen_cast',{send,<<0,0,0,4,0,0,0,0,0>>}}]
+    links: [<0.120.0>,<0.149.0>]
+    dictionary: []
+    trap_exit: false
+    status: running
+    heap_size: 987
+    stack_size: 27
+    reductions: 3444
+  neighbours:
+    neighbour: [{pid,<0.152.0>},{registered_name,[]},{initial_call,{erlang,apply,2}},{current_function,{timer,sleep,1}},{ancestors,[]},{messages,[]},{links,[<0.149.0>]},{dictionary,[]},{trap_exit,false},{status,waiting},{heap_size,233},{stack_size,5},{reductions,7}]
+    neighbour: [{pid,<0.149.0>},{registered_name,[]},{initial_call,{http2_connection,init,['Argument__1']}},{current_function,{gen_fsm,loop,7}},{ancestors,[<0.122.0>,chatterbox_sup,<0.119.0>]},{messages,[]},{links,[<0.122.0>,<0.152.0>]},{dictionary,[]},{trap_exit,false},{status,waiting},{heap_size,233},{stack_size,10},{reductions,126}]
+2016-02-08 14:17:36 =SUPERVISOR REPORT====
+     Supervisor: {local,chatterbox_sup}
+     Context:    child_terminated
+     Reason:     "Bad Preface"
+     Offender:   [{pid,<0.122.0>},{id,socket},{mfargs,{http2_socket,start_server_link,undefined}},{restart_type,temporary},{shutdown,1000},{child_type,worker}]
+

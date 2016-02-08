@@ -28,7 +28,7 @@ init([]) ->
         false ->
             {gen_tcp, []}
     end,
-
+    io:format("Start Server: https://localhost:~p~n",[Port]),
     spawn_link(fun empty_listeners/0),
     {ok, ListenSocket} = gen_tcp:listen(Port, Options),
     Restart = {simple_one_for_one, 60, 3600},

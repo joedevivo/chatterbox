@@ -2,7 +2,7 @@
 {application, chatterbox,
  [
   {description, "chatterbox library for http2"},
-  {vsn, "0.1.1"},
+  {vsn, "0.1.0"},
   {registered, []},
   {applications, [
                   kernel,
@@ -13,9 +13,10 @@
                   hpack,
                   lager
                  ]},
+  {mod, {chatterbox_app, []}},
   {env, [
     {port, 9909},
-    {concurrent_acceptors, 200},
+    {concurrent_acceptors, 20},
     {header_table_size, 4096},
     {enable_push, 1},
     {max_concurrent_streams, unlimited},
