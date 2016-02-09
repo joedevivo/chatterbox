@@ -2,12 +2,12 @@
 
 Chatterbox is an HTTP/2 library for Erlang. Use as much of it as you
 want, but the goal is to implement as much of
-[https://tools.ietf.org/html/rfc7540][RFC-7540] as possible, 100% of
+[RFC-7540](https://tools.ietf.org/html/rfc7540) as possible, 100% of
 the time.
 
 It already pulls in
-[https://github.com/joedevivo/hpack][joedevivo/hpack] for the
-implementation of [https://tools.ietf.org/html/rfc7541][RFC-7541]/
+[joedevivo/hpack](https://github.com/joedevivo/hpack) for the
+implementation of [RFC-7541](https://tools.ietf.org/html/rfc7541).
 
 ## Rebar3
 
@@ -27,7 +27,7 @@ only difference is in how you start the connection.
 ### Server Side Connections
 
 A server side connection can be started with
-[https://github.com/ninenines/ranch][ninenines/ranch] using the
+[ninenines/ranch](https://github.com/ninenines/ranch) using the
 included `chatterbox_ranch_protocol` like this:
 
 ```erlang
@@ -71,7 +71,7 @@ alternative.
 
 ### Serving up the EUC 2015 Deck
 
-clone chatterbox and [https://github.com/joedevivo/euc2015][euc2015]
+clone chatterbox and [euc2015](https://github.com/joedevivo/euc2015)
 
 then set the `RootDir` above to the checkout of euc2015.
 
