@@ -3,10 +3,23 @@
 
 <head>
     <title>Chatterbox</title>
+    <link rel="stylesheet" type="text/css" href="/scripts/vendor/angular-loading-bar/build/loading-bar.css">
+    <link rel="stylesheet" type="text/css" href="/scripts/vendor/json-formatter/dist/json-formatter.css">
 </head>
 
-<body>
-    Chatterbox
+<body ng-app="app">
+    <div ui-view></div>
+
+    <script src="/scripts/vendor/jquery/dist/jquery.js" type="text/javascript"></script>
+    <script src="/scripts/vendor/angular/angular.js" type="text/javascript"></script>
+    <script src="/scripts/vendor/angular-loading-bar/build/loading-bar.js" type="text/javascript"></script>
+    <script src="/scripts/vendor/angular-local-storage/dist/angular-local-storage.js" type="text/javascript"></script>
+    <script src="/scripts/vendor/angular-ui-router/release/angular-ui-router.js" type="text/javascript"></script>
+    <script src="/scripts/vendor/angular-uuid4/angular-uuid4.js" type="text/javascript"></script>
+    <script src="/scripts/vendor/json-formatter/dist/json-formatter.js" type="text/javascript"></script>
+    <script src="/scripts/vendor/angular-resource/angular-resource.js" type="text/javascript"></script>
+    <script src="/scripts/vendor/angular-uuid-service/angular-uuid-service.js" type="text/javascript"></script>
+    <script src="/scripts/app.js" type="text/javascript"></script>
 </body>
 
 </html>

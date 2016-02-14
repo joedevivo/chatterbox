@@ -1,0 +1,32 @@
+{
+  "name": "angular-uuid-service",
+  "version": "0.1.0",
+  "main": "angular-uuid-service.js",
+  "ignore": [
+    ".editorconfig",
+    ".gitattributes",
+    ".gitignore",
+    ".jshintrc",
+    ".npmignore",
+    ".travis.yml",
+    "gulpfile.js",
+    "npm-shrinkwrap.json",
+    "package.json"
+  ],
+  "dependencies": {
+    "angular": "*"
+  },
+  "devDependencies": {
+    "angular-mocks": "*"
+  },
+  "homepage": "https://github.com/daniellmb/angular-uuid-service",
+  "_release": "0.1.0",
+  "_resolution": {
+    "type": "version",
+    "tag": "v0.1.0",
+    "commit": "90c16975d520603d434404b1bba0cdab1dc11d1f"
+  },
+  "_source": "git://github.com/daniellmb/angular-uuid-service.git",
+  "_target": "~0.1.0",
+  "_originalSource": "angular-uuid-service"
+}

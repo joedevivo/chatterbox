@@ -1,0 +1,28 @@
+{
+  "name": "chatterbox",
+  "homepage": "https://github.com/knodejs/chatterbox",
+  "authors": [
+    "Narongchai Thongkongkeaw <knodejs@gmail.com>"
+  ],
+  "description": "",
+  "main": "",
+  "moduleType": [],
+  "license": "MIT",
+  "ignore": [
+    "**/.*",
+    "node_modules",
+    "bower_components",
+    "test",
+    "tests"
+  ],
+  "dependencies": {
+    "angular-loading-bar": "~0.8.0",
+    "angular-local-storage": "~0.2.3",
+    "angular-resource": "~1.4.6",
+    "angular-uuid4": "*",
+    "jquery": "~2.1.4",
+    "json-formatter": "~0.4.0",
+    "angular-uuid-service": "~0.1.0",
+    "angular-ui-router": "^0.2.18"
+  }
+}
