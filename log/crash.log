@@ -1792,3 +1792,63 @@
      Reason:     "Bad Preface"
      Offender:   [{pid,<0.122.0>},{id,socket},{mfargs,{http2_socket,start_server_link,undefined}},{restart_type,temporary},{shutdown,1000},{child_type,worker}]
 
+2016-02-14 09:50:52 =ERROR REPORT====
+** Generic server <0.122.0> terminating 
+** Last message in was {inet_async,#Port<0.39562>,0,{ok,#Port<0.39647>}}
+** When Server state == {h2_listening_state,[{certfile,"E:/Erlang18/Github/chatterbox/config/localhost.crt"},{keyfile,"E:/Erlang18/Github/chatterbox/config/localhost.key"},{honor_cipher_order,false},{versions,['tlsv1.2']},{next_protocols_advertised,[<<"h2">>]}],#Port<0.39562>,ssl,0,http2_connection,#Fun<chatterbox_sup.start_socket.0>}
+** Reason for termination == 
+** "Bad Preface"
+2016-02-14 09:50:52 =ERROR REPORT====
+** Generic server <0.123.0> terminating 
+** Last message in was {inet_async,#Port<0.39562>,1,{ok,#Port<0.39648>}}
+** When Server state == {h2_listening_state,[{certfile,"E:/Erlang18/Github/chatterbox/config/localhost.crt"},{keyfile,"E:/Erlang18/Github/chatterbox/config/localhost.key"},{honor_cipher_order,false},{versions,['tlsv1.2']},{next_protocols_advertised,[<<"h2">>]}],#Port<0.39562>,ssl,1,http2_connection,#Fun<chatterbox_sup.start_socket.0>}
+** Reason for termination == 
+** "Bad Preface"
+2016-02-14 09:50:52 =CRASH REPORT====
+  crasher:
+    initial call: http2_socket:init/1
+    pid: <0.122.0>
+    registered_name: []
+    exception exit: {"Bad Preface",[{gen_server,terminate,7,[{file,"gen_server.erl"},{line,826}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+    ancestors: [chatterbox_sup,<0.119.0>]
+    messages: [{'$gen_cast',{send,<<0,0,0,4,0,0,0,0,0>>}}]
+    links: [<0.120.0>,<0.151.0>]
+    dictionary: []
+    trap_exit: false
+    status: running
+    heap_size: 987
+    stack_size: 27
+    reductions: 3444
+  neighbours:
+    neighbour: [{pid,<0.153.0>},{registered_name,[]},{initial_call,{erlang,apply,2}},{current_function,{timer,sleep,1}},{ancestors,[]},{messages,[]},{links,[<0.151.0>]},{dictionary,[]},{trap_exit,false},{status,waiting},{heap_size,233},{stack_size,5},{reductions,7}]
+    neighbour: [{pid,<0.151.0>},{registered_name,[]},{initial_call,{http2_connection,init,['Argument__1']}},{current_function,{gen_fsm,loop,7}},{ancestors,[<0.122.0>,chatterbox_sup,<0.119.0>]},{messages,[]},{links,[<0.122.0>,<0.153.0>]},{dictionary,[]},{trap_exit,false},{status,waiting},{heap_size,233},{stack_size,10},{reductions,126}]
+2016-02-14 09:50:52 =CRASH REPORT====
+  crasher:
+    initial call: http2_socket:init/1
+    pid: <0.123.0>
+    registered_name: []
+    exception exit: {"Bad Preface",[{gen_server,terminate,7,[{file,"gen_server.erl"},{line,826}]},{proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,240}]}]}
+    ancestors: [chatterbox_sup,<0.119.0>]
+    messages: [{'$gen_cast',{send,<<0,0,0,4,0,0,0,0,0>>}}]
+    links: [<0.120.0>,<0.152.0>]
+    dictionary: []
+    trap_exit: false
+    status: running
+    heap_size: 610
+    stack_size: 27
+    reductions: 3422
+  neighbours:
+    neighbour: [{pid,<0.154.0>},{registered_name,[]},{initial_call,{erlang,apply,2}},{current_function,{timer,sleep,1}},{ancestors,[]},{messages,[]},{links,[<0.152.0>]},{dictionary,[]},{trap_exit,false},{status,waiting},{heap_size,233},{stack_size,5},{reductions,7}]
+    neighbour: [{pid,<0.152.0>},{registered_name,[]},{initial_call,{http2_connection,init,['Argument__1']}},{current_function,{gen_fsm,loop,7}},{ancestors,[<0.123.0>,chatterbox_sup,<0.119.0>]},{messages,[]},{links,[<0.123.0>,<0.154.0>]},{dictionary,[]},{trap_exit,false},{status,waiting},{heap_size,233},{stack_size,10},{reductions,126}]
+2016-02-14 09:50:52 =SUPERVISOR REPORT====
+     Supervisor: {local,chatterbox_sup}
+     Context:    child_terminated
+     Reason:     "Bad Preface"
+     Offender:   [{pid,<0.122.0>},{id,socket},{mfargs,{http2_socket,start_server_link,undefined}},{restart_type,temporary},{shutdown,1000},{child_type,worker}]
+
+2016-02-14 09:50:52 =SUPERVISOR REPORT====
+     Supervisor: {local,chatterbox_sup}
+     Context:    child_terminated
+     Reason:     "Bad Preface"
+     Offender:   [{pid,<0.123.0>},{id,socket},{mfargs,{http2_socket,start_server_link,undefined}},{restart_type,temporary},{shutdown,1000},{child_type,worker}]
+
