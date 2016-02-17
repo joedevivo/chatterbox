@@ -4,5 +4,6 @@
           type           :: client | server,
           socket         :: {gen_tcp, gen_tcp:socket()} | {ssl, ssl:sslsocket()},
           http2_pid      :: pid(),
-          buffer = empty :: empty | {binary, binary()} | {frame, frame_header(), binary()}
+          buffer = empty :: empty | {binary, binary()} | {frame, frame_header(), binary()},
+          proxy_socket   :: term()
           }).

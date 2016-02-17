@@ -9,8 +9,6 @@
 %% important than the server API so we're going to have to work
 %% backwards from that API to get it right
 
-
-
 %% {request, Headers, Data}
 %% {request, [Frames]}
 %% A frame that is too big should know how to break itself up.
@@ -22,6 +20,7 @@
          start_link/2,
          start_link/3,
          start_link/4,
+         start_ssl_upgrade_link/4,
          send_request/3,
          get_response/2
         ]).
@@ -108,6 +107,9 @@ start_link(Transport, Host, Port, SSLOptions) ->
     {ok, SocketPid} = http2_socket:start_client_link(NewT, Host, Port, SSLOptions),
     {ok, http2_socket:get_http2_pid(SocketPid)}.
 
+start_ssl_upgrade_link(Host, Port, InitialMessage, SSLOptions) ->
+    {ok, SocketPid} = http2_socket:start_ssl_upgrade_link(Host, Port, InitialMessage, SSLOptions),
+    {ok, http2_socket:get_http2_pid(SocketPid)}.
 
 send_request(CliPid, Headers, Body) ->
     StreamId = http2_connection:new_stream(CliPid),

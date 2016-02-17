@@ -14,25 +14,7 @@ start_link(Ref, Socket, Transport, Opts) ->
 init(Ref, Socket, T, _Opts) ->
     ok = proc_lib:init_ack({ok, self()}),
     ok = ranch:accept_ack(Ref),
-
-    Transport = transport(T),
-    ok = Transport:setopts(Socket, [{active, once}]),
-
-    case Transport of
-        ssl ->
-            %%TODO: is this necessary, or have we guaranteed it with
-            %%our ssl options?
-            {ok, _Upgrayedd} = ssl:negotiated_protocol(Socket)
-    end,
-
-    {ok, Server} = http2_connection:start_link(self(), server),
-
-    gen_server:enter_loop(http2_socket,
-                          [],
-                          #http2_socket_state{
-                             http2_pid=Server,
-                             socket={Transport, Socket}
-                            }).
+    http2_socket:become({transport(T), Socket}).
 
 transport(ranch_ssl) ->
     ssl;

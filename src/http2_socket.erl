@@ -27,7 +27,10 @@
 
 -export([
          start_client_link/4,
-         start_server_link/3,
+         start_ssl_upgrade_link/4,
+         start_server_link/2,
+         become/1,
+         become/2,
          send/2,
          close/1,
          get_http2_pid/1
@@ -37,8 +40,23 @@
 start_client_link(Transport, Host, Port, SSLOptions) ->
     gen_server:start_link(?MODULE, {client, Transport, Host, Port, SSLOptions}, []).
 
-start_server_link(Transport, ListenSocket, SSLOptions) ->
-    gen_server:start_link(?MODULE, {server, Transport, ListenSocket, SSLOptions}, []).
+start_ssl_upgrade_link(Host, Port, InitialMessage, SSLOptions) ->
+    gen_server:start_link(?MODULE, {ssl_upgrade_client, Host, Port, InitialMessage, SSLOptions}, []).
+
+start_server_link({Transport, ListenSocket}, SSLOptions) ->
+    gen_server:start_link(?MODULE, {server, {Transport, ListenSocket}, SSLOptions}, []).
+
+become(Socket) ->
+    become(Socket, undefined).
+
+become({Transport, Socket}, ProxySocket) ->
+    ok = Transport:setopts(Socket, [{packet, raw}, binary]),
+    {noreply, State} = start_http2_server({Transport, Socket}),
+    gen_server:enter_loop(http2_socket,
+                          [],
+                          State#http2_socket_state{
+                             proxy_socket=ProxySocket
+                            }).
 
 -spec send(pid(), frame()|iodata()) -> ok.
 send(Pid, Frame) ->
@@ -55,12 +73,15 @@ get_http2_pid(Pid) ->
 
 %% gen_server callbacks
 -spec init( {client, gen_tcp | ssl, string(), non_neg_integer(), [ssl:ssloption()]}
-          | {server, gen_tcp | ssl, ssl:sslsocket() | gen_tcp:socket(), [ssl:ssloption()]}) ->
+          | {server, socket(), [ssl:ssloption()]}
+          | {accepted, socket(), term()}) ->
                   {ok, #http2_socket_state{} | #h2_listening_state{}}
                 | {ok, #http2_socket_state{} | #h2_listening_state{}, timeout()}
                 | ignore
                 | {stop, any()}.
-init({server, Transport, ListenSocket, SSLOptions}) ->
+%% server is for something that's listenting, waiting for an acceptor
+%% that will then negotiate things
+init({server, {Transport, ListenSocket}, SSLOptions}) ->
     %% prim_inet:async_accept is dope. It says just hang out here and
     %% wait for a message that a client has connected. That message
     %% looks like:
@@ -74,18 +95,31 @@ init({server, Transport, ListenSocket, SSLOptions}) ->
            }};
 
 init({client, Transport, Host, Port, SSLOptions}) ->
+    {ok, Socket} = Transport:connect(Host, Port, client_options(Transport, SSLOptions)),
+    ok = Transport:setopts(Socket, [{packet, raw}, binary]),
+    init_raw_client(Transport, Socket);
+init({ssl_upgrade_client, Host, Port, InitialMessage, SSLOptions}) ->
+    {ok, TCP} = gen_tcp:connect(Host, Port, [{active, false}]),
+    gen_tcp:send(TCP, InitialMessage),
+    {ok, Socket} = ssl:connect(TCP, client_options(ssl, SSLOptions)),
+    active_once(ssl, Socket),
+    ok = ssl:setopts(Socket, [{packet, raw}, binary]),
+    init_raw_client(ssl, Socket).
+
+client_options(Transport, SSLOptions) ->
     ClientSocketOptions = [
                            binary,
                            {packet, raw},
                            {active, once}
                           ],
-    Options = case Transport of
+    case Transport of
         ssl ->
-            [{client_preferred_next_protocols, {client, [<<"h2">>]}}|ClientSocketOptions ++ SSLOptions];
+            [{alpn_advertised_protocols, [<<"h2">>]}|ClientSocketOptions ++ SSLOptions];
         gen_tcp ->
             ClientSocketOptions
-    end,
-    {ok, Socket} = Transport:connect(Host, Port, Options),
+    end.
+
+init_raw_client(Transport, Socket) ->
     Transport:send(Socket, <<?PREFACE>>),
 
     %% Q: Do we want to handle the begining of the settings handshake
@@ -129,13 +163,14 @@ handle_cast({send, Frame}, State) ->
 
 socksend(Binary,
          #http2_socket_state{
-            socket={Transport, Socket}
+            socket={Transport, Socket},
+            type=T
            }=State) ->
     case Transport:send(Socket, Binary) of
         ok ->
             {noreply, State};
         {error, Reason} ->
-            lager:info("Socksend error: ~p", [Reason]),
+            lager:debug("~p {error, ~p} sending, ~p", [T, Reason, Binary]),
             {stop, Reason, State}
     end.
 
@@ -148,9 +183,8 @@ handle_info({inet_async, ListenSocket, Ref, {ok, ClientSocket}},
                listen_ref = Ref,
                transport = Transport,
                ssl_options = SSLOptions,
-               server_module = ServerMod,
                acceptor_callback = AcceptorCallback
-              }=State) ->
+              }) ->
 
     %If anything crashes in here, at least there's another acceptor ready
     AcceptorCallback(),
@@ -165,30 +199,8 @@ handle_info({inet_async, ListenSocket, Ref, {ok, ClientSocket}},
             {ok, <<"h2">>} = ssl:negotiated_protocol(AcceptSocket),
             AcceptSocket
     end,
+    start_http2_server({Transport, Socket});
 
-    %% Pass self to server module's start link. The socket negotiation
-    %% all happens here, so all we need is a place to send messages
-    {ok, ServerPid} = ServerMod:start_link(self(), server),
-
-    %% We should read the PREFACE
-
-    %% TODO: There is no accounting here for if this is not an HTTP/2
-    %% connection. This doesn't matter for https, because ALPN, but
-    %% for plain it probably does.
-
-    case Transport:recv(Socket, length(?PREFACE), 5000) of
-        {ok, <<?PREFACE>>} ->
-            active_once(Transport, Socket),
-            {noreply, #http2_socket_state{
-                    type = server,
-                    socket = {Transport, Socket},
-                    http2_pid = ServerPid
-                   }};
-        BadPreface ->
-            lager:debug("Bad Preface: ~p", [BadPreface]),
-            %% TODO: GoAway Frame?
-            {stop, "Bad Preface", State}
-    end;
 %% {tcp, Socket, Data}
 handle_info({tcp, Socket, Data},
             #http2_socket_state{
@@ -230,7 +242,10 @@ handle_info({ssl_error, Socket, Reason},
             #http2_socket_state{
                socket={ssl,Socket}
               }=State) ->
-    handle_socket_error(Reason, State).
+    handle_socket_error(Reason, State);
+handle_info({_,R}, State) ->
+    handle_socket_error(R, State).
+
 
 %% Incoming data is a series of frames. With a passive socket we can just:
 %% 1. read(9)
@@ -259,24 +274,12 @@ handle_socket_data(<<>>, #http2_socket_state{
                            }=State) ->
     active_once(Transport, Socket),
     {noreply, State};
-%% This is the first data frame! It means we were started by a more
-%% generic acceptor pool, like ranch TODO: this technically will match
-%% on this binary if it ever sees it again, not just on connect. that
-%% shouldn't happen, but there could be a way to keep track of it in
-%% #state
-handle_socket_data(<<"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n", Rem/binary>>,
-                   #http2_socket_state{
-                      %socket={Transport,Socket}
-                     }=State) ->
-    handle_socket_data(Rem, State);
 handle_socket_data(Data,
                    #http2_socket_state{
                       socket={Transport, Socket},
                       buffer=Buffer,
                       http2_pid=ServerPid
                      }=State) ->
-
-    lager:debug("Data: ~p", [Data]),
 
     More = case Transport:recv(Socket, 0, 1) of %% fail fast!
         {ok, Rest} ->
@@ -315,15 +318,14 @@ handle_socket_data(Data,
             {noreply, NewState#http2_socket_state{buffer={frame, Header, Bin}}}
     end.
 
-
 handle_socket_passive(State) ->
     {noreply, State}.
 
 handle_socket_closed(State) ->
-    {noreply, State}.
+    {stop, closed, State}.
 
-handle_socket_error(_Reason, State) ->
-    {noreply, State}.
+handle_socket_error(Reason, State) ->
+    {stop, Reason, State}.
 
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
@@ -343,3 +345,32 @@ active_once(Transport, Socket) ->
         gen_tcp -> inet
     end,
     T:setopts(Socket, [{active, once}]).
+
+-spec start_http2_server(socket()) ->
+                                {noreply, #http2_socket_state{}}
+                              | {stop, term(), #http2_socket_state{}}.
+start_http2_server({Transport, Socket}) ->
+    start_http2_server({Transport, Socket}, #http2_socket_state{}).
+
+-spec start_http2_server(socket(), #http2_socket_state{}) ->
+                                {noreply | ok, #http2_socket_state{}}
+                              | {stop, term(), #http2_socket_state{}}.
+start_http2_server({Transport, AcceptedSocket}, State) ->
+    %% Pass self to server module's start link. The socket negotiation
+    %% all happens here, so all we need is a place to send messages
+    {ok, ServerPid} = http2_connection:start_link(self(), server),
+
+    %% We should read the PREFACE
+    case Transport:recv(AcceptedSocket, length(?PREFACE), 5000) of
+        {ok, <<?PREFACE>>} ->
+            ok = active_once(Transport, AcceptedSocket),
+            {noreply, State#http2_socket_state{
+                    type = server,
+                    socket = {Transport, AcceptedSocket},
+                    http2_pid = ServerPid
+                   }};
+        BadPreface ->
+            lager:debug("Bad Preface: ~p", [BadPreface]),
+            %% TODO: GoAway Frame?
+            {stop, "Bad Preface", State}
+    end.
