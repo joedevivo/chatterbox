@@ -124,7 +124,7 @@ handshake({frame, {FH, _Payload}=Frame}, State) ->
 connected({frame, Frame},
           S = #connection_state{}
          ) ->
-    lager:debug("[connected] [next] ~p", [http2_frame:format(Frame)]),
+    lager:debug("[connected] {frame, ~p}", [http2_frame:format(Frame)]),
     route_frame(Frame, S).
 
 %% The continuation state in entered after receiving a HEADERS frame

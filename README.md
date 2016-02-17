@@ -50,7 +50,7 @@ RootDir = "/path/to/content",
 
 application:set_env(
         chatterbox,
-        {chatterbox_static_content_hander, [{root_dir, RootDir}]}),
+        {chatterbox_static_content_handler, [{root_dir, RootDir}]}),
 
 {ok, _RanchPid} =
     ranch:start_listener(
@@ -90,19 +90,23 @@ Here's how to use it!
 ```erlang
 {ok, Pid} = http2_client:start_link().
 
-Headers = [
+RequestHeaders = [
            {<<":method">>, <<"GET">>},
            {<<":path">>, <<"/index.html">>},
            {<<":scheme">>, <<"http">>},
            {<<":authority">>, <<"localhost:8080">>},
            {<<"accept">>, <<"*/*">>},
            {<<"accept-encoding">>, <<"gzip, deflate">>},
-           {<<"user-agent">>, <<"nghttp2/0.7.7">>}
+           {<<"user-agent">>, <<"chatterbox-client/0.0.1">>}
           ].
 
-{ok, StreamId} = http2_client:send_request(Pid, Headers, <<>>).
+{ok, StreamId} = http2_client:send_request(Pid, RequestHeaders, <<>>).
 
-{ok, {Headers, Body}} = http2_client:get_response(Pid, StreamId).
+%% TODO: You might need a timer:sleep in here, as this is kind of a
+%% work in progress. Ultimately, this shouldn't be necessary, but it is
+%% for now. Sorry
+
+{ok, {ResponseHeaders, ResponseBody}} = http2_client:get_response(Pid, StreamId).
 
 ```
 

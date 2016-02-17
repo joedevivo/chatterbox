@@ -206,8 +206,6 @@
           recv_window_size = ?DEFAULT_INITIAL_WINDOW_SIZE :: integer(),
           decode_context = hpack:new_decode_context() :: hpack:decode_context(),
           encode_context = hpack:new_encode_context() :: hpack:encode_context(),
-
-%% An effort to consolidate client and server states, which should actually be very similar
           settings_sent = queue:new() :: queue:queue(),
           next_available_stream_id = 2 :: stream_id(),
           streams = [] :: [{stream_id(), stream_state()}],
