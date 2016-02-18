@@ -15,7 +15,7 @@ start(Config) ->
                    {keyfile,    "../../../../config/localhost.key"},
                    {honor_cipher_order, false},
                    {versions, ['tlsv1.2']},
-                   {next_protocols_advertised, [<<"h2">>]}]}
+                   {alpn_preferred_protocols, [<<"h2">>]}]}
     ],
 
     Settings =
@@ -45,6 +45,8 @@ start(Config) ->
           [{port, 8081}|proplists:get_value(ssl_options, Settings)],
           chatterbox_ranch_protocol,
           []),
+    lager:set_loglevel(cth_readable_lager_backend, debug),
+
     Config.
 
 ssl(SSLBool, Config) ->

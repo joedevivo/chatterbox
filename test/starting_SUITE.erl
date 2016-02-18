@@ -18,7 +18,7 @@ identifies_protocol(Config) ->
                {active, false}
               ],
     {ok, SSLOptions} = application:get_env(chatterbox, ssl_options),
-    Options =  ClientOptions ++ SSLOptions ++ [{client_preferred_next_protocols, {client, [<<"h2">>]}}],
+    Options =  ClientOptions ++ SSLOptions ++ [{alpn_advertised_protocols, [<<"h2">>]}],
 
     {ok, Socket} = ssl:connect("localhost", Port, Options),
     ct:pal("Socket to me: ~p", [Socket]),

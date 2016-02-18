@@ -82,6 +82,7 @@ get_http2_pid(Pid) ->
 %% server is for something that's listenting, waiting for an acceptor
 %% that will then negotiate things
 init({server, {Transport, ListenSocket}, SSLOptions}) ->
+    process_flag(trap_exit, true),
     %% prim_inet:async_accept is dope. It says just hang out here and
     %% wait for a message that a client has connected. That message
     %% looks like:
@@ -95,10 +96,12 @@ init({server, {Transport, ListenSocket}, SSLOptions}) ->
            }};
 
 init({client, Transport, Host, Port, SSLOptions}) ->
+%    process_flag(trap_exit, true),
     {ok, Socket} = Transport:connect(Host, Port, client_options(Transport, SSLOptions)),
     ok = Transport:setopts(Socket, [{packet, raw}, binary]),
     init_raw_client(Transport, Socket);
 init({ssl_upgrade_client, Host, Port, InitialMessage, SSLOptions}) ->
+%    process_flag(trap_exit, true),
     {ok, TCP} = gen_tcp:connect(Host, Port, [{active, false}]),
     gen_tcp:send(TCP, InitialMessage),
     {ok, Socket} = ssl:connect(TCP, client_options(ssl, SSLOptions)),
@@ -243,7 +246,8 @@ handle_info({ssl_error, Socket, Reason},
                socket={ssl,Socket}
               }=State) ->
     handle_socket_error(Reason, State);
-handle_info({_,R}, State) ->
+handle_info({_,R}=M, State) ->
+    lager:error("BOOM! ~p", [M]),
     handle_socket_error(R, State).
 
 

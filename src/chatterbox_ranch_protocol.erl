@@ -9,10 +9,10 @@
         ]).
 
 start_link(Ref, Socket, Transport, Opts) ->
-    proc_lib:start_link(?MODULE, init, [Ref, Socket, Transport, Opts]).
+    Pid = proc_lib:spawn_link(?MODULE, init, [Ref, Socket, Transport, Opts]),
+    {ok, Pid}.
 
 init(Ref, Socket, T, _Opts) ->
-    ok = proc_lib:init_ack({ok, self()}),
     ok = ranch:accept_ack(Ref),
     http2_socket:become({transport(T), Socket}).
 

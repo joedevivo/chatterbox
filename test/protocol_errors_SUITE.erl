@@ -18,7 +18,6 @@ all() -> [
 ].
 
 init_per_testcase(_, Config) ->
-    lager_common_test_backend:bounce(debug),
     Config0 = chatterbox_test_buddy:start(Config),
     Config0.
 

@@ -6,7 +6,8 @@
 
 all() ->
     [
-     complex_request
+     complex_request,
+     upgrade_tcp_connection
     ].
 
 init_per_suite(Config) ->
@@ -15,7 +16,6 @@ init_per_suite(Config) ->
     chatterbox_test_buddy:start(NewConfig).
 
 init_per_testcase(_, Config) ->
-    lager_common_test_backend:bounce(debug),
     Config.
 
 end_per_suite(Config) ->
@@ -28,7 +28,7 @@ complex_request(_Config) ->
         [
          {<<":method">>, <<"GET">>},
          {<<":path">>, <<"/index.html">>},
-         {<<":scheme">>, <<"http">>},
+         {<<":scheme">>, <<"https">>},
          {<<":authority">>, <<"localhost:8080">>},
          {<<"accept">>, <<"*/*">>},
          {<<"accept-encoding">>, <<"gzip, deflate">>},
@@ -43,5 +43,31 @@ complex_request(_Config) ->
 
     cthr:pal("Response Headers: ~p", [ResponseHeaders]),
     cthr:pal("Response Body: ~p", [ResponseBody]),
+
+    ok.
+
+upgrade_tcp_connection(_Config) ->
+    {ok, Client} = http2_client:start_ssl_upgrade_link("localhost", 8081, <<>>, []),
+
+    RequestHeaders =
+        [
+         {<<":method">>, <<"GET">>},
+         {<<":path">>, <<"/index.html">>},
+         {<<":scheme">>, <<"https">>},
+         {<<":authority">>, <<"localhost:8080">>},
+         {<<"accept">>, <<"*/*">>},
+         {<<"accept-encoding">>, <<"gzip, deflate">>},
+         {<<"user-agent">>, <<"chattercli/0.0.1 :D">>}
+        ],
+    {ok, StreamId} = http2_client:send_request(Client, RequestHeaders, <<>>),
+
+    %% That's it, the request is sent.
+    timer:sleep(1000),
+
+    {ok, {ResponseHeaders, ResponseBody}} = http2_client:get_response(Client, StreamId),
+
+    cthr:pal("Response Headers: ~p", [ResponseHeaders]),
+    cthr:pal("Response Body: ~p", [ResponseBody]),
+
 
     ok.
