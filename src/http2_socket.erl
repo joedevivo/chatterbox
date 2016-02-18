@@ -33,7 +33,8 @@
          become/2,
          send/2,
          close/1,
-         get_http2_pid/1
+         get_http2_pid/1,
+         get_http2_peer/1
         ]).
 
 %% Public API
@@ -69,6 +70,10 @@ close(Pid) ->
 -spec get_http2_pid(pid()) -> pid().
 get_http2_pid(Pid) ->
     gen_server:call(Pid, pid).
+
+-spec get_http2_peer(pid()) -> {inet:ip_address(), inet:port_number()}.
+get_http2_peer(Pid) ->
+    gen_server:call(Pid, peer).
 
 
 %% gen_server callbacks
@@ -145,6 +150,18 @@ init_raw_client(Transport, Socket) ->
 
 handle_call(pid, _From, #http2_socket_state{http2_pid=Pid}=State) ->
     {reply, Pid, State};
+handle_call(peer, _From, #http2_socket_state{socket={Type, Socket}}=State) ->
+    Module = case Type of
+                 gen_tcp -> inet;
+                 ssl -> ssl
+             end,
+    case Module:peername(Socket) of
+        {error, _}=Error ->
+            lager:warning("failed to fetch peer for ~p socket", [Module]),
+            {reply, Error, State};
+        {ok, AddrPort} ->
+            {reply, AddrPort, State}
+    end;
 handle_call(Msg, _From, State) ->
     lager:warning("http2_socket:handle_call should never happen: ~p", [Msg]),
     {noreply, State}.
