@@ -9,6 +9,8 @@
 -behaviour(gen_server).
 
 -include("http2.hrl").
+-include_lib("eunit/include/eunit.hrl").
+-include_lib("common_test/include/ct.hrl").
 
 %% gen_server
 %% start on a socket.
@@ -28,7 +30,8 @@
          send_frames/2,
          send_unaltered_frames/2,
          send_request/3,
-         get_frames/2
+         get_frames/2,
+         wait_for_n_frames/3
         ]).
 
 %% gen_server callbacks
@@ -109,6 +112,32 @@ send_request(Pid, Headers, Body) ->
 
 get_frames(Pid, StreamId) ->
     gen_server:call(Pid, {get_frames, StreamId}).
+
+wait_for_n_frames(Pid, StreamId, N) ->
+    wait_for_n_frames(Pid, StreamId, N, 0, []).
+
+wait_for_n_frames(_Pid, StreamId, N, Attempts, Acc)
+  when Attempts > 20 ->
+    lager:error("Timed out waiting for ~p frames on Stream ~p", [N, StreamId]),
+    lager:error("Did receive ~p frames.", [length(Acc)]),
+    lager:error("  those frames were ~p", [Acc]),
+    case length(Acc) == N of
+        true ->
+            Acc;
+        _ ->
+            ?assertEqual(length(Acc), length([]))
+    end;
+wait_for_n_frames(Pid, StreamId, N, Attempts, Acc) ->
+    Frames = Acc ++ get_frames(Pid, StreamId),
+
+    case length(Frames) >= N of
+        true ->
+            ?assertEqual(N, length(Frames)),
+            Frames;
+        false ->
+            timer:sleep(100),
+            wait_for_n_frames(Pid, StreamId, N, Attempts + 1, Frames)
+    end.
 
 %% gen_server callbacks
 

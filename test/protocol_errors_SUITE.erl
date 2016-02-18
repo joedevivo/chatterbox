@@ -57,10 +57,8 @@ one_frame(Frame, _Config) ->
     {ok, Client} = http2c:start_link(),
     http2c:send_unaltered_frames(Client, [Frame]),
 
-    %% How do I get the response? Should be GOAWAY with PROTOCOL_ERROR
-    timer:sleep(100),
+    Resp = http2c:wait_for_n_frames(Client, 0, 1),
 
-    Resp = http2c:get_frames(Client, 0),
     ct:pal("Resp: ~p", [Resp]),
 
     ?assertEqual(1, length(Resp)),

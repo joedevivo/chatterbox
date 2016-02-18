@@ -21,18 +21,18 @@ identifies_protocol(Config) ->
     Options =  ClientOptions ++ SSLOptions ++ [{alpn_advertised_protocols, [<<"h2">>]}],
 
     {ok, Socket} = ssl:connect("localhost", Port, Options),
-    ct:pal("Socket to me: ~p", [Socket]),
+    cthr:pal("Socket to me: ~p", [Socket]),
 
     try ssl:negotiated_protocol(Socket) of
          {ok, NextProtocol} ->
-            ct:pal("NextProtocol: ~p", [NextProtocol]),
+            cthr:pal("NextProtocol: ~p", [NextProtocol]),
             <<"h2">> = NextProtocol,
             ?assertEqual(<<"h2">>, NextProtocol)
     catch
         E:M ->
-            ct:pal("~p:~p", [E,M])
+            cthr:pal("~p:~p", [E,M])
     end,
-    timer:sleep(1000),
+
     ok.
 
 end_per_testcase(_, Config) ->

@@ -38,8 +38,6 @@ basic_continuation(_Config) ->
 
     <<H1:8/binary,H2:8/binary,H3/binary>> = HeadersBin,
 
-    %% break them up into 3 frames
-
     Frames = [
               {#frame_header{length=8,type=?HEADERS,flags=?FLAG_END_STREAM,stream_id=3},#headers{block_fragment=H1}},
               {#frame_header{length=8,type=?CONTINUATION,stream_id=3},#continuation{block_fragment=H2}},
@@ -47,13 +45,10 @@ basic_continuation(_Config) ->
     ],
     http2c:send_unaltered_frames(Client, Frames),
 
-    timer:sleep(100),
-
-    Resp = http2c:get_frames(Client, 3),
+    Resp = http2c:wait_for_n_frames(Client, 3, 2),
     cthr:pal("Resp: ~p", [Resp]),
 
     ?assertEqual(2, length(Resp)),
-
     ok.
 
 
@@ -75,8 +70,6 @@ basic_continuation_end_stream_first(_Config) ->
 
     <<H1:8/binary,H2:8/binary,H3/binary>> = HeadersBin,
 
-    %% break them up into 3 frames
-
     Frames = [
               {#frame_header{length=8,type=?HEADERS,flags=?FLAG_END_STREAM,stream_id=3},#headers{block_fragment=H1}},
               {#frame_header{length=8,type=?CONTINUATION,stream_id=3},#continuation{block_fragment=H2}},
@@ -84,13 +77,9 @@ basic_continuation_end_stream_first(_Config) ->
     ],
     http2c:send_unaltered_frames(Client, Frames),
 
-    timer:sleep(100),
-
-    Resp = http2c:get_frames(Client, 3),
+    Resp = http2c:wait_for_n_frames(Client, 3, 2),
     cthr:pal("Resp: ~p", [Resp]),
-
     ?assertEqual(2, length(Resp)),
-
     ok.
 
 
@@ -112,8 +101,6 @@ bad_frame_wrong_type_between_continuations(_Config) ->
 
     <<H1:8/binary,H2:8/binary,H3/binary>> = HeadersBin,
 
-    %% break them up into 3 frames
-
     Frames = [
               {#frame_header{length=8,type=?HEADERS,stream_id=3},#headers{block_fragment=H1}},
               {#frame_header{length=8,type=?CONTINUATION,stream_id=3},#continuation{block_fragment=H2}},
@@ -122,14 +109,10 @@ bad_frame_wrong_type_between_continuations(_Config) ->
     ],
     http2c:send_unaltered_frames(Client, Frames),
 
-    timer:sleep(100),
-
-    Resp = http2c:get_frames(Client, 3),
+    Resp = http2c:wait_for_n_frames(Client, 3, 0),
     cthr:pal("Resp: ~p", [Resp]),
-
     ?assertEqual(0, length(Resp)),
-
-    Resp2 = http2c:get_frames(Client, 0),
+    Resp2 = http2c:wait_for_n_frames(Client, 0, 1),
     1 = length(Resp2),
 
     [{_GoAwayH, GoAway}] = Resp2,
@@ -154,8 +137,6 @@ bad_frame_wrong_stream_between_continuations(_Config) ->
 
     <<H1:8/binary,H2:8/binary,H3/binary>> = HeadersBin,
 
-    %% break them up into 3 frames
-
     Frames = [
               {#frame_header{length=8,type=?HEADERS,stream_id=3},#headers{block_fragment=H1}},
               {#frame_header{length=8,type=?CONTINUATION,stream_id=3},#continuation{block_fragment=H2}},
@@ -164,14 +145,13 @@ bad_frame_wrong_stream_between_continuations(_Config) ->
     ],
     http2c:send_unaltered_frames(Client, Frames),
 
-    timer:sleep(100),
-
-    Resp = http2c:get_frames(Client, 3),
+    Resp = http2c:wait_for_n_frames(Client, 3, 0),
     cthr:pal("Resp: ~p", [Resp]),
 
     ?assertEqual(0, length(Resp)),
 
-    Resp2 = http2c:get_frames(Client, 0),
+    Resp2 = http2c:wait_for_n_frames(Client, 0, 1),
+
     1 = length(Resp2),
 
     [{_GoAwayH, GoAway}] = Resp2,
