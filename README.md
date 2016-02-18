@@ -88,7 +88,7 @@ differences.
 Here's how to use it!
 
 ```erlang
-{ok, Pid} = http2_client:start_link().
+{ok, Pid} = http2_client:start_link(),
 
 RequestHeaders = [
            {<<":method">>, <<"GET">>},
@@ -98,17 +98,43 @@ RequestHeaders = [
            {<<"accept">>, <<"*/*">>},
            {<<"accept-encoding">>, <<"gzip, deflate">>},
            {<<"user-agent">>, <<"chatterbox-client/0.0.1">>}
-          ].
+          ],
 
-{ok, StreamId} = http2_client:send_request(Pid, RequestHeaders, <<>>).
+RequestBody = <<>>,
 
-%% TODO: You might need a timer:sleep in here, as this is kind of a
-%% work in progress. Ultimately, this shouldn't be necessary, but it is
-%% for now. Sorry
-
-{ok, {ResponseHeaders, ResponseBody}} = http2_client:get_response(Pid, StreamId).
-
+{ok, {ResponseHeaders, ResponseBody}}
+    = http2_client:sync_request(Pid, RequestHeaders, RequestBody).
 ```
+
+But wait! There's more. If you want to be smart about multiplexing,
+you can make an async request on a stream like this!
+
+``` erlang
+{ok, StreamId} = http2_client:send_request(Pid, RequestHeaders, <<>>).
+```
+
+Now you can just hang around and wait. I'm pretty sure (read:
+UNTESTED) that you'll have a process message like `{'END_STREAM',
+StreamId}` waiting for you in your process mailbox, since that's how
+`sync_request/3` works, and they use mostly the same codepath.
+
+So you can use a receive block, like this
+
+```erlang
+receive
+    {'END_STREAM', StreamId} ->
+        {ok, {ResponseHeaders, ResponseBody}} = http2_client:get_response(Pid, StreamId)
+end,
+```
+
+Or you can manually check for a response by calling
+
+```erlang
+http2_client:get_response(Pid, StreamId),
+```
+
+which will return an `{error, stream_not_finished}` if
+it's... well... not finished.
 
 There still needs to be some way of detecting that a promise has been
 pushed from the server, either actively or passively. In theory, if

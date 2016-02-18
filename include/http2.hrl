@@ -239,7 +239,8 @@
           response_end_headers = false :: boolean(),
           response_end_stream = false :: boolean(),
           next_state = undefined :: undefined | stream_state_name(),
-          promised_stream = undefined :: undefined |  stream_state()
+          promised_stream = undefined :: undefined |  stream_state(),
+          notify_pid = undefined :: undefined | pid()
 }).
 
 -type stream_state() :: #stream_state{}.

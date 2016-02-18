@@ -14,6 +14,7 @@
          send_body/3,
          is_push/1,
          new_stream/1,
+         new_stream/2,
          send_promise/4,
          get_response/2
 ]).
@@ -75,7 +76,11 @@ is_push(Pid) ->
 
 -spec new_stream(pid()) -> stream_id().
 new_stream(Pid) ->
-    gen_fsm:sync_send_all_state_event(Pid, new_stream).
+    new_stream(Pid, self()).
+
+-spec new_stream(pid(), pid()) -> stream_id().
+new_stream(Pid, NotifyPid) ->
+    gen_fsm:sync_send_all_state_event(Pid, {new_stream, NotifyPid}).
 
 -spec send_promise(pid(), stream_id(), stream_id(), hpack:headers()) -> ok.
 send_promise(Pid, StreamId, NewStreamId, Headers) ->
@@ -607,7 +612,7 @@ handle_sync_event({get_response, StreamId}, _F, StateName,
                 {error, stream_not_finished}
         end,
     {reply, Reply, StateName, Connection};
-handle_sync_event(new_stream, _F, StateName,
+handle_sync_event({new_stream, NotifyPid}, _F, StateName,
                   State=#connection_state{
                            streams=Streams,
                            next_available_stream_id=NextId,
@@ -618,7 +623,7 @@ handle_sync_event(new_stream, _F, StateName,
     lager:debug("added stream #~p to ~p", [NextId, Streams]),
     {reply, NextId, StateName, State#connection_state{
                                  next_available_stream_id=NextId+2,
-                                 streams=[{NextId, NewStream}|Streams]
+                                 streams=[{NextId, NewStream#stream_state{notify_pid=NotifyPid}}|Streams]
                                 }};
 handle_sync_event(is_push, _F, StateName,
                   State=#connection_state{

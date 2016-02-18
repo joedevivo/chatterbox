@@ -34,12 +34,7 @@ complex_request(_Config) ->
          {<<"accept-encoding">>, <<"gzip, deflate">>},
          {<<"user-agent">>, <<"chattercli/0.0.1 :D">>}
         ],
-    {ok, StreamId} = http2_client:send_request(Client, RequestHeaders, <<>>),
-
-    %% That's it, the request is sent.
-    timer:sleep(1000),
-
-    {ok, {ResponseHeaders, ResponseBody}} = http2_client:get_response(Client, StreamId),
+    {ok, {ResponseHeaders, ResponseBody}} = http2_client:sync_request(Client, RequestHeaders, <<>>),
 
     cthr:pal("Response Headers: ~p", [ResponseHeaders]),
     cthr:pal("Response Body: ~p", [ResponseBody]),
@@ -59,15 +54,7 @@ upgrade_tcp_connection(_Config) ->
          {<<"accept-encoding">>, <<"gzip, deflate">>},
          {<<"user-agent">>, <<"chattercli/0.0.1 :D">>}
         ],
-    {ok, StreamId} = http2_client:send_request(Client, RequestHeaders, <<>>),
-
-    %% That's it, the request is sent.
-    timer:sleep(1000),
-
-    {ok, {ResponseHeaders, ResponseBody}} = http2_client:get_response(Client, StreamId),
-
+    {ok, {ResponseHeaders, ResponseBody}} = http2_client:sync_request(Client, RequestHeaders, <<>>),
     cthr:pal("Response Headers: ~p", [ResponseHeaders]),
     cthr:pal("Response Body: ~p", [ResponseBody]),
-
-
     ok.

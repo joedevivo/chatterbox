@@ -22,6 +22,7 @@
          start_link/4,
          start_ssl_upgrade_link/4,
          send_request/3,
+         sync_request/3,
          get_response/2
         ]).
 
@@ -111,6 +112,16 @@ start_ssl_upgrade_link(Host, Port, InitialMessage, SSLOptions) ->
     {ok, SocketPid} = http2_socket:start_ssl_upgrade_link(Host, Port, InitialMessage, SSLOptions),
     {ok, http2_socket:get_http2_pid(SocketPid)}.
 
+sync_request(CliPid, Headers, Body) ->
+    StreamId = http2_connection:new_stream(CliPid),
+    http2_connection:send_headers(CliPid, StreamId, Headers),
+    http2_connection:send_body(CliPid,StreamId,Body),
+    receive
+        {'END_STREAM', StreamId} ->
+            http2_connection:get_response(CliPid, StreamId)
+    after 5000 ->
+        {error, timeout}
+    end.
 send_request(CliPid, Headers, Body) ->
     StreamId = http2_connection:new_stream(CliPid),
     http2_connection:send_headers(CliPid, StreamId, Headers),

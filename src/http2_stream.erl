@@ -784,10 +784,18 @@ maybe_decode_response_body(
      incoming_frames=IFQ,
      state=half_closed_local,
      response_end_headers=true,
-     response_end_stream=true
+     response_end_stream=true,
+     notify_pid = NotifyPid,
+     stream_id = StreamId
     }=Stream,
   #connection_state{}=Connection) ->
     Data = [ D || {#frame_header{type=?DATA}, #data{data=D}} <- queue:to_list(IFQ)],
+    case NotifyPid of
+        undefined ->
+            ok;
+        _ ->
+            NotifyPid ! {'END_STREAM', StreamId}
+    end,
     {Stream#stream_state{
        state=closed,
        incoming_frames=queue:new(),
