@@ -16,7 +16,8 @@
          new_stream/1,
          new_stream/2,
          send_promise/4,
-         get_response/2
+         get_response/2,
+         get_peer/1
 ]).
 
 %% gen_fsm callbacks
@@ -69,6 +70,11 @@ send_headers(Pid, StreamId, Headers) ->
 send_body(Pid, StreamId, Body) ->
     gen_fsm:send_all_state_event(Pid, {send_body, StreamId, Body}),
     ok.
+
+-spec get_peer(pid()) ->
+    {ok, {inet:ip_address(), inet:port_number()}} | {error, term()}.
+get_peer(Pid) ->
+    gen_fsm:sync_send_all_state_event(Pid, get_peer).
 
 -spec is_push(pid()) -> boolean().
 is_push(Pid) ->
@@ -634,6 +640,8 @@ handle_sync_event(is_push, _F, StateName,
         _ -> false
     end,
     {reply, IsPush, StateName, State};
+handle_sync_event(get_peer, _F, StateName, State=#connection_state{socket=Pid}) ->
+    {reply, http2_socket:get_http2_peer(Pid), StateName, State};
 handle_sync_event(_E, _F, StateName, State) ->
     {next_state, StateName, State}.
 
