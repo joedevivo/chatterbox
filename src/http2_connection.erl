@@ -6,7 +6,8 @@
 
 -export([
          start/2,
-         start_link/2
+         start_link/2,
+         stop/1
         ]).
 
 -export([
@@ -99,6 +100,10 @@ send_promise(Pid, StreamId, NewStreamId, Headers) ->
 get_response(Pid, StreamId) ->
     gen_fsm:sync_send_all_state_event(Pid, {get_response, StreamId}).
 
+-spec stop(pid()) -> ok.
+stop(Pid) ->
+    gen_fsm:send_all_state_event(Pid, stop).
+
 -spec init({pid(), 1|2}) ->
                   {ok, handshake, #connection_state{}, timeout()}.
 init({SocketPid, FirstStreamId}) ->
@@ -161,7 +166,7 @@ continuation(_, State) ->
 closing(Message, State=#connection_state{
         socket=Socket
     }) ->
-    lager:debug("[closing] ~p", [Message]),
+    lager:debug("[closing] s ~p", [Message]),
     http2_socket:close(Socket),
     {stop, normal, State};
 closing(Message, State) ->
@@ -601,6 +606,8 @@ handle_event({check_settings_ack, {Ref, NewSettings}},
             %% YAY!
             {next_state, StateName, State}
     end;
+handle_event(stop, _StateName, State) ->
+    go_away(0, State);
 handle_event(_E, StateName, State) ->
     {next_state, StateName, State}.
 

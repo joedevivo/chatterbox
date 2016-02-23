@@ -21,6 +21,7 @@
          start_link/3,
          start_link/4,
          start_ssl_upgrade_link/4,
+         stop/1,
          send_request/3,
          sync_request/3,
          get_response/2
@@ -111,6 +112,10 @@ start_link(Transport, Host, Port, SSLOptions) ->
 start_ssl_upgrade_link(Host, Port, InitialMessage, SSLOptions) ->
     {ok, SocketPid} = http2_socket:start_ssl_upgrade_link(Host, Port, InitialMessage, SSLOptions),
     {ok, http2_socket:get_http2_pid(SocketPid)}.
+
+-spec stop(pid()) -> ok.
+stop(Pid) ->
+    http2_connection:stop(Pid).
 
 sync_request(CliPid, Headers, Body) ->
     StreamId = http2_connection:new_stream(CliPid),
