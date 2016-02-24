@@ -14,7 +14,7 @@ start_link(Ref, Socket, Transport, Opts) ->
 
 init(Ref, Socket, T, _Opts) ->
     ok = ranch:accept_ack(Ref),
-    http2_socket:become({transport(T), Socket}).
+    http2_connection:become({transport(T), Socket}).
 
 transport(ranch_ssl) ->
     ssl;

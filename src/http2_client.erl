@@ -106,12 +106,10 @@ start_link(Transport, Host, Port, SSLOptions) ->
                http -> gen_tcp;
                https -> ssl
            end,
-    {ok, SocketPid} = http2_socket:start_client_link(NewT, Host, Port, SSLOptions),
-    {ok, http2_socket:get_http2_pid(SocketPid)}.
+    http2_connection:start_client_link(NewT, Host, Port, SSLOptions).
 
 start_ssl_upgrade_link(Host, Port, InitialMessage, SSLOptions) ->
-    {ok, SocketPid} = http2_socket:start_ssl_upgrade_link(Host, Port, InitialMessage, SSLOptions),
-    {ok, http2_socket:get_http2_pid(SocketPid)}.
+    http2_connection:start_ssl_upgrade_link(Host, Port, InitialMessage, SSLOptions).
 
 -spec stop(pid()) -> ok.
 stop(Pid) ->

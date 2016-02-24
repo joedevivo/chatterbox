@@ -38,7 +38,7 @@ times_out_on_no_ack_of_server_settings(Config) ->
 
     {ok, Socket} = Transport:connect("localhost", Port, Options),
 
-    Transport:send(Socket, <<?PREAMBLE>>),
+    Transport:send(Socket, <<?PREFACE>>),
 
     %% Now send client settings so the problem becomes that we do not ack
     ClientSettings = #settings{},
@@ -91,7 +91,7 @@ protocol_error_on_never_send_client_settings(Config) ->
     ct:pal("Type: ~p", [FH#frame_header.type]),
     ?GOAWAY = FH#frame_header.type,
     ct:pal("Error code: ~p", [GoAway#goaway.error_code]),
-    ?PROTOCOL_ERROR = GoAway#goaway.error_code,
+    ?SETTINGS_TIMEOUT = GoAway#goaway.error_code,
     ok.
 
 default_setting_honored_before_ack(_Config) ->

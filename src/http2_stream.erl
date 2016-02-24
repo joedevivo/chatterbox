@@ -120,12 +120,11 @@ process(send, F={#frame_header{
                              state=idle
                             },
             ConnectionState = #connection_state{
-                                 socket=Socket
                                 }
            }) ->
     %% We're not going to store headers we sent, so just send them and
     %% move on
-    http2_socket:send(Socket, F),
+    http2_connection:send_frame(self(), F),
 
     EndStream = ?IS_FLAG(Flags, ?FLAG_END_STREAM),
     EndHeaders = ?IS_FLAG(Flags, ?FLAG_END_HEADERS),
@@ -157,9 +156,8 @@ process(send, F={#frame_header{
             state=idle
            }=Stream,
          #connection_state{
-            socket=Socket
            }=Connection}) ->
-    http2_socket:send(Socket, F),
+    http2_connection:send_frame(self(), F),
 
     EndHeaders = ?IS_FLAG(Flags, ?FLAG_END_HEADERS),
 
@@ -299,7 +297,6 @@ process(send,
             state=State
            }=Stream,
          #connection_state{
-            socket=Socket,
 %            recv_settings=#settings{initial_window_size=RecvWindowSize},
 %            send_settings=#settings{initial_window_size=SendWindowSize},
             streams=Streams
@@ -309,7 +306,7 @@ process(send,
 
     lager:debug("Send Promise ~p -> ~p", [Stream#stream_state.stream_id, PSID]),
     %% ok, we have to send it.
-    http2_socket:send(Socket, http2_frame:to_binary(F)),
+    http2_connection:send_frame(self(), http2_frame:to_binary(F)),
 
     EndHeaders = ?IS_FLAG(Flags, ?FLAG_END_HEADERS),
 
@@ -351,12 +348,11 @@ process(send,
             promised_stream=PromisedStream
            }=Stream,
          #connection_state{
-            socket=Socket,
             streams=Streams
            }=Connection})
   when State =:= open;
        State =:= half_closed_remote ->
-    http2_socket:send(Socket, F),
+    http2_connection:send_frame(self(), F),
     EndHeaders = ?IS_FLAG(Flags, ?FLAG_END_HEADERS),
 
     NewPromise =
@@ -394,10 +390,9 @@ process(send,
             state=reserved_local
            }=Stream,
          #connection_state{
-            socket=Socket
            }=Connection})
   when ?IS_FLAG(Flags, ?FLAG_END_HEADERS) ->
-    http2_socket:send(Socket, F),
+    http2_connection:send_frame(self(), F),
     {Stream#stream_state{
        response_end_headers=true,
        state=half_closed_remote
@@ -510,13 +505,12 @@ process(send,
             send_window_size=SSWS
            }=Stream,
          #connection_state{
-            send_window_size=CSWS,
-            socket=Socket
+            send_window_size=CSWS
            }=Connection})
   when ?NOT_FLAG(Flags, ?FLAG_END_STREAM),
        SSWS >= L, CSWS >= L,
        State =:= open orelse State =:= half_closed_remote ->
-    http2_socket:send(Socket, F),
+    http2_connection:send_frame(self(), F),
     {Stream#stream_state{
        send_window_size=SSWS-L
       },
@@ -536,13 +530,12 @@ process(send,
             send_window_size=SSWS
            }=Stream,
          #connection_state{
-            send_window_size=CSWS,
-            socket=Socket
+            send_window_size=CSWS
            }=Connection})
   when ?IS_FLAG(Flags, ?FLAG_END_STREAM),
        SSWS >= L, CSWS >= L,
        State =:= open orelse State =:= half_closed_remote ->
-    http2_socket:send(Socket, F),
+    http2_connection:send_frame(self(), F),
     NewStream = Stream#stream_state{
                   state=half_closed_local,
                   send_window_size=SSWS-L
@@ -649,11 +642,10 @@ process(send,
             state=half_closed_remote
             }=Stream,
          #connection_state{
-            socket=Socket
            }=Connection})
   when Type =:= ?HEADERS;
        Type =:= ?CONTINUATION ->
-    http2_socket:send(Socket, F),
+    http2_connection:send_frame(self(), F),
     case ?IS_FLAG(Flags, ?FLAG_END_STREAM) of
         true ->
             {Stream#stream_state{state=closed},
@@ -673,12 +665,11 @@ process(send,
             send_window_size=SSWS
            }=Stream,
          #connection_state{
-            send_window_size=CSWS,
-            socket=Socket
+            send_window_size=CSWS
            }=Connection})
   when ?IS_FLAG(Flags, ?FLAG_END_STREAM),
        SSWS >= L, CSWS >= L ->
-    http2_socket:send(Socket, F),
+    http2_connection:send_frame(self(), F),
     NewStream = Stream#stream_state{
                   state=closed,
                   send_window_size=SSWS-L
@@ -867,12 +858,12 @@ send_frame({#frame_header{
 send_frame(F, {_S,_C}=Acc) ->
     process(send, F, Acc).
 
-rst_stream(ErrorCode, StreamId, #connection_state{socket=Socket}) ->
+rst_stream(ErrorCode, StreamId, #connection_state{}) ->
     RstStream = #rst_stream{error_code=ErrorCode},
     RstStreamBin = http2_frame:to_binary(
                      {#frame_header{
                          stream_id=StreamId
                         },
                       RstStream}),
-    http2_socket:send(Socket, RstStreamBin),
+    http2_connection:send_frame(self(), RstStreamBin),
     ok.
