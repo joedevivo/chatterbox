@@ -167,7 +167,7 @@ init([]) ->
     {ok, Socket} = Transport:connect(Host, Port, Options),
 
     %% Send the preamble
-    Transport:send(Socket, <<?PREAMBLE>>),
+    Transport:send(Socket, <<?PREFACE>>),
 
     %% Settings Handshake
     {_SSH, ServerSettings} = http2_frame:read({Transport, Socket}, 1000),
@@ -214,9 +214,8 @@ handle_call({get_frames, StreamId}, _From, #http2c_state{incoming_frames=IF}=S) 
     {reply, ToReturn, S#http2c_state{incoming_frames=ToPutBack}};
 handle_call(send_settings, _From, #http2c_state{connection=C}) ->
     {reply, C#connection_state.send_settings};
-handle_call(_Request, _From, State) ->
-    Reply = ok,
-    {reply, Reply, State}.
+handle_call(Request, _From, State) ->
+    {reply, {unknown_request, Request}, State}.
 
 %% Handling cast messages
 -spec handle_cast(any(), #http2c_state{}) ->

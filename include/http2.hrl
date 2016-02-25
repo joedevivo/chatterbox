@@ -187,19 +187,18 @@
 
 
 -type transport() :: gen_tcp | ssl.
--type socket() :: {gen_tcp, gen_tcp:socket()|undefined} | {ssl, ssl:sslsocket()|undefined}.
+-type socket() :: {gen_tcp, inet:socket()|undefined} | {ssl, ssl:sslsocket()|undefined}.
 
-%% TODO: I don't know where I got PREAMBLE from, it's PREFACE in the spec
--define(PREAMBLE, "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n").
 -define(PREFACE, "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n").
 
 -define(DEFAULT_INITIAL_WINDOW_SIZE, 65535).
 
 
 -record(connection_state, {
+          type = undefined :: client | server | undefined,
           ssl_options = [],
           listen_ref :: non_neg_integer(),
-          socket = undefined :: undefined | pid(),
+          socket = undefined :: undefined | pid() | socket(),
           send_settings = #settings{} :: settings(),
           recv_settings = #settings{} :: settings(),
           send_window_size = ?DEFAULT_INITIAL_WINDOW_SIZE :: integer(),
@@ -210,7 +209,8 @@
           next_available_stream_id = 2 :: stream_id(),
           streams = [] :: [{stream_id(), stream_state()}],
           continuation_stream_id = undefined :: stream_id() | undefined,
-          content_handler = application:get_env(chatterbox, content_handler, chatterbox_static_content_handler) :: module()
+          content_handler = application:get_env(chatterbox, content_handler, chatterbox_static_content_handler) :: module(),
+          buffer = empty :: empty | {binary, binary()} | {frame, frame_header(), binary()}
 }).
 
 -type connection_state() :: #connection_state{}.
