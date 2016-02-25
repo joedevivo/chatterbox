@@ -5,6 +5,10 @@
 -include("http2.hrl").
 -compile(export_all). %% for now
 -export([
+         start_client_link/4,
+         start_ssl_upgrade_link/4,
+         start_server_link/2,
+         become/1,
          stop/1
         ]).
 
@@ -48,17 +52,29 @@
           acceptor_callback = fun chatterbox_sup:start_socket/0 :: fun()
          }).
 
-
-
+-spec start_client_link(gen_tcp | ssl,
+                        inet:ip_address() | inet:hostname(),
+                        inet:port_number(),
+                        [ssl:ssloption()]) ->
+                               {ok, pid()} | ignore | {error, term()}.
 start_client_link(Transport, Host, Port, SSLOptions) ->
     gen_fsm:start_link(?MODULE, {client, Transport, Host, Port, SSLOptions}, []).
 
+-spec start_ssl_upgrade_link(inet:ip_address() | inet:hostname(),
+                             inet:port_number(),
+                             binary(),
+                             [ssl:ssloption()]) ->
+                                    {ok, pid()} | ignore | {error, term()}.
 start_ssl_upgrade_link(Host, Port, InitialMessage, SSLOptions) ->
     gen_fsm:start_link(?MODULE, {client_ssl_upgrade, Host, Port, InitialMessage, SSLOptions}, []).
 
+-spec start_server_link(socket(),
+                        [ssl:ssloption()]) ->
+                               {ok, pid()} | ignore | {error, term()}.
 start_server_link({Transport, ListenSocket}, SSLOptions) ->
     gen_fsm:start_link(?MODULE, {server, {Transport, ListenSocket}, SSLOptions}, []).
 
+-spec become(socket()) -> no_return().
 become({Transport, Socket}) ->
     ok = Transport:setopts(Socket, [{packet, raw}, binary]),
     {_, _, NewState} = start_http2_server(#connection_state{
