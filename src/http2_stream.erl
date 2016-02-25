@@ -2,14 +2,346 @@
 
 -include("http2.hrl").
 
+%% Public API
 -export([
-         recv_frame/2,
+         start_link/5,
+         start_link/6,
+         recv_h/2,
+         send_pp/2,
+         recv_es/1,
+         recv_pp/2,
+         recv_wu/2,
          send_frame/2,
+         recv_frame/2,
+         stream_id/0,
+         connection/0,
+         get_response/1
+        ]).
+
+%% gen_fsm callbacks
+-behaviour(gen_fsm).
+-export([
+         init/1,
+         terminate/3,
+         handle_event/3,
+         handle_sync_event/4,
+         handle_info/3,
+         code_change/4
+        ]).
+
+%% gen_fsm states
+-export([
+         idle/2,
+         open/2,
+         half_closed_remote/2,
+         closed/3
+        ]).
+
+
+-export([
+         recv_frame/3,
+         send_frame/3,
          new/2,
          new/3
         ]).
 
 -export_type([stream_state/0]).
+
+-callback init() -> {ok, any()}.
+
+-callback on_receive_request_headers(
+            Headers :: hpack:headers(),
+            CustomState :: any()) ->
+    {ok, NewState :: any()}.
+
+-callback on_send_push_promise(
+            Headers :: hpack:headers(),
+            CustomState :: any()) ->
+
+    {ok, NewState :: any()}.
+
+-callback on_receive_request_data(
+            iodata(),
+            CustomState :: any())->
+    {ok, NewState :: any()}.
+
+-callback on_request_end_stream(
+            StreamId :: stream_id(),
+            Conn :: pid(),
+            CustomState :: any()) ->
+    {ok, NewState :: any()}.
+
+%% Public AP
+-spec start_link(stream_id(), pid(), pos_integer(), pos_integer(), module()) ->
+                        {ok, pid()} | ignore | {error, term()}.
+start_link(StreamId, ConnectionPid, SendWindowSize, RecvWindowSize, CB) ->
+    gen_fsm:start_link(?MODULE, {StreamId, ConnectionPid, SendWindowSize, RecvWindowSize, CB, ConnectionPid}, []).
+
+-spec start_link(stream_id(), pid(), pos_integer(), pos_integer(), module(), pid()) ->
+                        {ok, pid()} | ignore | {error, term()}.
+start_link(StreamId, ConnectionPid, SendWindowSize, RecvWindowSize, CB, NotifyPid) ->
+    gen_fsm:start_link(?MODULE, {StreamId, ConnectionPid, SendWindowSize, RecvWindowSize, CB, NotifyPid}, []).
+
+-spec recv_h(pid(), hpack:headers()) ->
+                    ok.
+recv_h(Pid, Headers) ->
+    gen_fsm:send_event(Pid, {recv_h, Headers}).
+
+-spec send_pp(pid(), hpack:headers()) ->
+                     ok.
+send_pp(Pid, Headers) ->
+    gen_fsm:send_event(Pid, {send_pp, Headers}).
+
+-spec recv_pp(pid(), hpack:headers()) ->
+                     ok.
+recv_pp(Pid, Headers) ->
+    gen_fsm:send_event(Pid, {recv_pp, Headers}).
+
+-spec recv_es(pid()) -> ok.
+recv_es(Pid) ->
+    gen_fsm:send_event(Pid, recv_es).
+
+-spec recv_wu(pid(), {frame_header(), window_update()}) ->
+                     ok.
+recv_wu(Pid, Frame) ->
+    gen_fsm:send_all_state_event(Pid, {recv_wu, Frame}).
+
+-spec recv_frame(pid(), frame()) ->
+                        ok.
+recv_frame(Pid, Frame) ->
+    gen_fsm:send_event(Pid, {recv_frame, Frame}).
+
+-spec send_frame(pid(), frame()) ->
+                        ok.
+send_frame(Pid, Frame) ->
+    gen_fsm:send_event(Pid, {send_frame, Frame}).
+
+-spec stream_id() -> stream_id().
+stream_id() ->
+    gen_fsm:sync_send_all_state_event(self(), stream_id).
+
+-spec connection() -> pid().
+connection() ->
+    gen_fsm:sync_send_all_state_event(self(), connection).
+
+-spec get_response(pid()) ->
+                          {ok, {hpack:headers(), iodata()}}
+                              | {error, term()}.
+get_response(Pid) ->
+    gen_fsm:sync_send_event(Pid, get_response).
+
+%% States
+%% - idle
+%% - reserved_local
+%% - open
+%% - half_closed_remote
+%% - closed
+
+init({StreamId, ConnectionPid, SendWindowSize, RecvWindowSize, CB, NotifyPid}) ->
+    lager:info("Hi, I'm ~p, aka stream ~p", [self(), StreamId]),
+    {ok, NewCustomState} = CB:init(),
+
+    {ok, idle, #stream_state{
+                  callback_mod=CB,
+                  stream_id=StreamId,
+                  connection=ConnectionPid,
+                  send_window_size=SendWindowSize,
+                  recv_window_size=RecvWindowSize,
+                  custom_state=NewCustomState,
+                  notify_pid=NotifyPid
+                 }}.
+
+
+%% Server 'RECV H'
+idle({recv_h, Headers},
+     #stream_state{
+        callback_mod=CB,
+        custom_state=CustomState
+       }=Stream) ->
+    {ok, NewCustomState} = CB:on_receive_request_headers(Headers, CustomState),
+    {next_state,
+     open,
+     Stream#stream_state{
+       request_headers=Headers,
+       custom_state=NewCustomState
+      }};
+%% Server 'SEND PP'
+idle({send_pp, Headers},
+     #stream_state{
+        callback_mod=CB,
+        custom_state=CustomState
+       }=Stream) ->
+    {ok, NewCustomState} = CB:on_send_push_promise(Headers, CustomState),
+    {next_state,
+     reserved_local,
+     Stream#stream_state{
+       request_headers=Headers,
+       custom_state=NewCustomState
+       }};
+%% Client 'RECV PP'
+idle({recv_pp, Headers},
+     #stream_state{
+       }=Stream) ->
+    {next_state,
+     reserved_remote,
+     Stream#stream_state{
+       request_headers=Headers
+      }};
+%% Client 'SEND H'
+idle({send_h, Headers},
+     #stream_state{
+       }=Stream) ->
+    {next_state, open,
+     Stream#stream_state{
+        request_headers=Headers
+       }};
+idle(Message, State) ->
+    lager:error("stream idle processing unexpected message: ~p", [Message]),
+    %% Never should happen.
+    {next_state, idle, State}.
+
+open(recv_es,
+     #stream_state{
+        stream_id=StreamId,
+        connection=Conn,
+        callback_mod=CB,
+        custom_state=CustomState
+       }=Stream) ->
+    {ok, NewCustom} = CB:on_request_end_stream(StreamId, Conn, CustomState),
+    {next_state,
+     half_closed_remote,
+     Stream#stream_state{
+       custom_state=NewCustom
+      }};
+open({recv_frame,
+      {#frame_header{
+          type=?DATA
+         }, _}},
+     Stream) ->
+    {next_state, open, Stream};
+
+open({recv_frame, {H,_}},
+     Stream)
+  when H#frame_header.type == ?DATA,
+       H#frame_header.length > Stream#stream_state.recv_window_size ->
+    %%PROTOCOL_ERROR
+    {next_state,
+     closed,
+     Stream};
+
+open({recv_frame,
+      {#frame_header{
+          length=L,
+          flags=Flags,
+          type=?DATA
+         },_}=F},
+     #stream_state{
+        incoming_frames=IFQ,
+        recv_window_size=SRWS,
+        callback_mod=CB,
+        custom_state=CustomState
+       }=Stream)
+  when ?NOT_FLAG(Flags, ?FLAG_END_STREAM) ->
+    {ok, NewCustomState} = CB:on_receive_request_data(F, CustomState),
+    {next_state,
+     open,
+     Stream#stream_state{
+       incoming_frames=queue:in(F, IFQ),
+       recv_window_size=SRWS-L,
+       custom_state=NewCustomState
+      }};
+open({recv_frame,
+      {#frame_header{
+              length=L,
+              flags=Flags,
+              type=?DATA
+         }, _Payload}=F},
+     #stream_state{
+        incoming_frames=IFQ,
+        recv_window_size=SRWS,
+        callback_mod=CB,
+        custom_state=CustomState
+       }=Stream)
+  when ?IS_FLAG(Flags, ?FLAG_END_STREAM) ->
+    {ok, CustomState1} = CB:on_receive_request_data(F, CustomState),
+    {ok, NewCustomState} = CB:on_request_end_stream(CustomState1),
+    {next_state,
+     half_closed_remote,
+     Stream#stream_state{
+       incoming_frames=queue:in(F, IFQ),
+       recv_window_size=SRWS-L,
+       request_end_stream=true,
+       custom_state=NewCustomState
+      }};
+open(_, Stream) ->
+    %% Other?
+    {next_state, open, Stream}.
+
+half_closed_remote(Msg, Stream) ->
+
+    lager:info("Hi! ~p, ~p", [Msg, Stream]),
+    {next_state, half_closed_remote, Stream}.
+
+
+closed(get_response,
+       _From,
+       #stream_state{
+          response_headers=H,
+          response_body=B
+         }=Stream
+       ) ->
+    {reply, {ok, {H, B}}, closed, Stream}.
+
+
+handle_event({recv_wu,
+              {#frame_header{
+                  type=?WINDOW_UPDATE,
+                  stream_id=StreamId
+                 },
+               #window_update{
+                  window_size_increment=WSI
+                 }
+              }},
+              StateName,
+              #stream_state{
+                 stream_id=StreamId,
+                 send_window_size=SWS,
+                 queued_frames=QF
+                }=Stream)
+             ->
+    NewSendWindow = WSI + SWS,
+    NewStream = Stream#stream_state{
+                 send_window_size=NewSendWindow,
+                 queued_frames=queue:new()
+                },
+    lager:debug("Stream ~p send window now: ~p", [StreamId, NewSendWindow]),
+    lists:foldl(
+      fun(Frame, S) -> send_frame(Frame, S) end,
+      NewStream,
+      queue:to_list(QF)),
+    {next_state, StateName, Stream};
+handle_event(_E, StateName, State) ->
+    {next_state, StateName, State}.
+
+handle_sync_event(stream_id, _F, StateName, State=#stream_state{stream_id=StreamId}) ->
+    {reply, StreamId, StateName, State};
+handle_sync_event(connection, _F, StateName, State=#stream_state{connection=Conn}) ->
+    {reply, Conn, StateName, State};
+handle_sync_event(E, _F, StateName, State) ->
+    lager:info("Wat ~p", [E]),
+    {reply, wat, StateName, State}.
+
+handle_info(M, _StateName, State) ->
+    lager:error("BOOM! ~p", [M]),
+    {stop, normal, State}.
+
+code_change(_OldVsn, StateName, State, _Extra) ->
+    {ok, StateName, State}.
+
+terminate(normal, _StateName, _State) ->
+    ok;
+terminate(_Reason, _StateName, _State) ->
+    lager:debug("terminate reason: ~p~n", [_Reason]).
 
 %% idle streams don't actually exist, and may never exist. Isn't that
 %% fun? According to my interpretation of the spec, every stream from
@@ -795,7 +1127,7 @@ maybe_decode_response_body(
 maybe_decode_response_body(Stream, Connection) ->
     {Stream, Connection}.
 
--spec recv_frame(frame(), {stream_state(), connection_state()}) ->
+-spec recv_frame(frame(), stream_state(), connection_state()) ->
                         {stream_state(), connection_state()}.
 %% Errors first, since they're usually easier to detect.
 
@@ -804,11 +1136,11 @@ recv_frame({_FH=#frame_header{
                    length=L,
                    type=?DATA
                   }, _P},
-           {S = #stream_state{
+           S = #stream_state{
                    stream_id=StreamId,
                    recv_window_size=SRWS
                 },
-          ConnectionState})
+          ConnectionState)
   when L > SRWS ->
     rst_stream(?FLOW_CONTROL_ERROR, StreamId, ConnectionState),
     {S#stream_state{
@@ -821,12 +1153,12 @@ recv_frame({_FH=#frame_header{
                    length=L,
                    type=?DATA
                   }, _P},
-           {S = #stream_state{
+           S = #stream_state{
                 },
             ConnectionState=#connection_state{
               recv_window_size=CRWS
              }
-           })
+           )
   when L > CRWS ->
     http2_connection:go_away(?FLOW_CONTROL_ERROR, ConnectionState),
     {S#stream_state{
@@ -835,28 +1167,28 @@ recv_frame({_FH=#frame_header{
       incoming_frames=queue:new()
      }, ConnectionState};
 
-recv_frame(F, {_S,_C}=Acc) ->
-    process(recv, F, Acc).
+recv_frame(F, S, C) ->
+    process(recv, F, {S,C}).
 
--spec send_frame(frame(), {stream_state(), connection_state()})
+-spec send_frame(frame(), stream_state(), connection_state())
                 -> {stream_state(), connection_state()}.
 
 send_frame({#frame_header{
                length=L,
                type=?DATA},_},
-           {#stream_state{
+           #stream_state{
                stream_id=StreamId,
                send_window_size=SSWS
               } = Stream,
             #connection_state{
                send_window_size=CSWS
-              }=Connection})
+              }=Connection)
   when L > SSWS; L > CSWS ->
     rst_stream(?FLOW_CONTROL_ERROR, StreamId, Connection),
     {Stream, Connection};
 
-send_frame(F, {_S,_C}=Acc) ->
-    process(send, F, Acc).
+send_frame(F, S,C) ->
+    process(send, F,{S,C}).
 
 rst_stream(ErrorCode, StreamId, #connection_state{}) ->
     RstStream = #rst_stream{error_code=ErrorCode},

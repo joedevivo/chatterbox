@@ -40,7 +40,6 @@
         ]).
 
 -export([
-         get_stream/2,
          go_away/2
         ]).
 
@@ -214,7 +213,9 @@ continuation({frame, {#frame_header{
                          type=?CONTINUATION
                         }, _}=Frame},
              #connection_state{
-                continuation_stream_id = StreamId
+                continuation = #continuation_state{
+                                  stream_id = StreamId
+                                  }
                } = State) ->
     lager:debug("[continuation] [next] ~p", [http2_frame:format(Frame)]),
     route_frame(Frame, State);
@@ -375,25 +376,33 @@ route_frame({H, _Payload},
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Stream level frames
 %%
-%% Maybe abstract it all into http2_stream?
 
-%% TODO Route data frames to streams.
+%% receive data frame bigger than connection recv window
+route_frame({H,_Payload}, S)
+    when H#frame_header.type == ?DATA,
+         H#frame_header.length > S#connection_state.recv_window_size ->
+    lager:debug("Received DATA Frame for Stream ~p with L > CRWS", [H#frame_header.stream_id]),
+    go_away(?FLOW_CONTROL_ERROR, S);
+
 route_frame(F={H=#frame_header{
-                  stream_id=StreamId}, _Payload},
+                    length=L,
+                    stream_id=StreamId}, _Payload},
             S = #connection_state{
+                   recv_window_size=CRWS,
                    streams=Streams,
                    socket=_Socket
                   })
     when H#frame_header.type == ?DATA ->
     lager:debug("Received DATA Frame for Stream ~p", [StreamId]),
 
-    {Stream, NewStreamsTail} = get_stream(StreamId, Streams),
-    %% Decrement stream & connection recv_window L happens in http2_stream:recv_frame
-    {FinalStream, NewConnectionState} = http2_stream:recv_frame(F, {Stream, S}),
+    StreamPid = proplists:get_value(StreamId, Streams),
+    http2_stream:recv_frame(StreamPid, F),
 
-    {next_state, connected, NewConnectionState#connection_state{
-                              streams=[{StreamId,FinalStream}|NewStreamsTail]
-                             }};
+    {next_state,
+     connected,
+     S#connection_state{
+       recv_window_size=CRWS-L
+      }};
 
 %%%%%%%%%
 %% Begin Refactor of headers/continuation into http2_stream
@@ -410,14 +419,17 @@ route_frame(F={H=#frame_header{
 %% The only thing we need to know about in this gen_fsm is wether or
 %% not we are going to remain in the connected state or transition
 %% into the continuation state
-route_frame({H=#frame_header{
-                  type=?HEADERS,
-                  stream_id=StreamId
-                 }, _Payload} = Frame,
+route_frame({#frame_header{
+                type=?HEADERS,
+                stream_id=StreamId,
+                flags=Flags
+               }, _Payload} = Frame,
             S = #connection_state{
                    recv_settings=#settings{initial_window_size=RecvWindowSize},
                    send_settings=#settings{initial_window_size=SendWindowSize},
-                   streams = Streams
+                   streams = Streams,
+                   decode_context = DecodeContext,
+                   stream_callback_mod=CB
             }) ->
     lager:debug("Received HEADERS Frame for Stream ~p", [StreamId]),
     %% Three things could be happening here.
@@ -432,54 +444,94 @@ route_frame({H=#frame_header{
     %% Fortunately, the only thing we need to do here is create a new
     %% stream if this is the first scenario. The stream will already
     %% exist if this is a PP or Response
-    {Stream, NewTail} =
-        case get_stream(StreamId, Streams) of
-            notfound ->
-                lager:debug("Stream ~p notfound", [StreamId]),
-                {http2_stream:new(StreamId, {SendWindowSize, RecvWindowSize}),
-                 Streams};
-            {NewStream, Tail} ->
-                lager:debug("Stream ~p found! ~p", [StreamId, NewStream]),
-                {NewStream, Tail}
+
+    {StreamPid, NewStreams} =
+        case proplists:get_value(StreamId, Streams, undefined) of
+            undefined ->
+                lager:debug("Spawning new pid for stream ~p", [StreamId]),
+                {ok, Pid} = http2_stream:start_link(StreamId, self(), SendWindowSize, RecvWindowSize, CB),
+                {Pid, [{StreamId, Pid}|Streams]};
+            SPid ->
+                {SPid, Streams}
         end,
+    % Is ths all to the stream?
+    EndStream = ?IS_FLAG(Flags, ?FLAG_END_STREAM),
 
-    NextState = case ?IS_FLAG(H#frame_header.flags, ?FLAG_END_HEADERS) of
-                            true ->
-                                connected;
-                            false ->
-                                continuation
-                        end,
-
-    lager:debug("recv(~p, {~p, ~p})",[Frame, Stream, S]),
-    R = http2_stream:recv_frame(Frame, {Stream, S}),
-    lager:debug("?? ~p",[R]),
-    {NewStream1, NewConnectionState} = R,
-    {next_state, NextState, NewConnectionState#connection_state{
-                                 streams = [{StreamId, NewStream1}|NewTail],
-                                 continuation_stream_id = StreamId
-                                }};
+    %% We spawned an idle stream if it didn't exist.
+    lager:debug("recv(~p, {~p, ~p})",[Frame, StreamId, S]),
+    case ?IS_FLAG(Flags, ?FLAG_END_HEADERS) of
+        true ->
+            HeadersBin = http2_frame_headers:from_frames([Frame]),
+            {Headers, NewDecodeContext} = hpack:decode(HeadersBin, DecodeContext),
+            http2_stream:recv_h(StreamPid, Headers),
+            case EndStream of
+                true ->
+                    http2_stream:recv_es(StreamPid);
+                false ->
+                    ok
+            end,
+            {next_state, connected,
+             S#connection_state{
+               streams = NewStreams,
+               decode_context=NewDecodeContext
+              }};
+        false ->
+            {next_state, continuation,
+             S#connection_state{
+               streams = NewStreams,
+               continuation = #continuation_state{
+                                 stream_id = StreamId,
+                                 frames = queue:from_list([Frame]),
+                                 end_stream = EndStream
+                                 }
+              }}
+    end;
 route_frame(F={H=#frame_header{
                     stream_id=StreamId,
                     type=?CONTINUATION
                    }, _Payload},
             S = #connection_state{
-                   streams = Streams
+                   streams = Streams,
+                   continuation = #continuation_state{
+                                     frames = CFQ,
+                                     stream_id = StreamId,
+                                     end_stream = EndStream,
+                                     type=ContType
+                                     } = Cont,
+                   decode_context = DecodeContext
                   }) ->
     lager:debug("Received CONTINUATION Frame for Stream ~p", [StreamId]),
-    {Stream, NewStreamsTail} = get_stream(StreamId, Streams),
-    {NewStream, NewConnectionState} = http2_stream:recv_frame(F, {Stream, S}),
-    NewStreams = [{StreamId,NewStream}|NewStreamsTail],
+    StreamPid = proplists:get_value(StreamId, Streams),
 
-    NextState = case ?IS_FLAG(H#frame_header.flags, ?FLAG_END_HEADERS) of
-                    true ->
-                        connected;
-                    false ->
-                        continuation
-                end,
+    Queue = queue:in(F, CFQ),
 
-    {next_state, NextState, NewConnectionState#connection_state{
-                              streams = NewStreams
-                             }};
+    case ?IS_FLAG(H#frame_header.flags, ?FLAG_END_HEADERS) of
+        true ->
+            HeadersBin = http2_frame_headers:from_frames(queue:to_list(Queue)),
+            {Headers, NewDecodeContext} = hpack:decode(HeadersBin, DecodeContext),
+            case ContType of
+                headers ->
+                    http2_stream:recv_h(StreamPid, Headers);
+                push_promise ->
+                    http2_stream:recv_pp(StreamId, Headers)
+            end,
+            case EndStream of
+                true ->
+                    http2_stream:recv_es(StreamPid);
+                false ->
+                    ok
+            end,
+            {next_state, connected,
+             S#connection_state{
+               decode_context=NewDecodeContext,
+               continuation=undefined
+              }};
+        false ->
+            {next_state, continuation,
+             S#connection_state{
+               continuation=Cont#continuation_state{frames = Queue}
+              }}
+    end;
 
 route_frame({H, _Payload}, S = #connection_state{
                                   socket=_Socket})
@@ -497,25 +549,42 @@ route_frame({H=#frame_header{stream_id=StreamId}, _Payload}, S = #connection_sta
     when H#frame_header.type == ?RST_STREAM ->
     lager:error("Received RST_STREAM for Stream ~p, but did nothing with it", [StreamId]),
     {next_state, connected, S};
-%%    {next_state, connected, S#connection_state{settings_sent=SS-1}};
-route_frame({
-              H=#frame_header{stream_id=StreamId}, _Payload}=F,
+route_frame({H=#frame_header{
+                  stream_id=StreamId,
+                  flags=Flags
+                 }, _Payload}=Frame,
             #connection_state{
+               decode_context=DecodeContext,
                streams=Streams
-              }=Connection)
+              }=S)
     when H#frame_header.type == ?PUSH_PROMISE ->
+
+    %% TODO OOOOOOOOOOOPS! PUSH_PROMISE can have continuations too!
+    %% will need rework after this refactor, issue #10
     lager:debug("Received PUSH_PROMISE Frame for Stream ~p", [StreamId]),
-    {Stream, StreamTail} = get_stream(StreamId, Streams),
-    {NewStream, NewConnection} =
-        http2_stream:recv_frame(F, {Stream, Connection#connection_state{streams=StreamTail}}),
+    StreamPid = proplists:get_value(StreamId, Streams),
 
+    lager:debug("recv(~p, {~p, ~p})",[Frame, StreamId, S]),
+    case ?IS_FLAG(Flags, ?FLAG_END_HEADERS) of
+        true ->
+            HeadersBin = http2_frame_headers:from_frames(Frame),
+            {Headers, NewDecodeContext} = hpack:decode(HeadersBin, DecodeContext),
+            http2_stream:recv_pp(StreamPid, Headers),
 
-
-    {next_state,
-     connected,
-     NewConnection#connection_state{
-       streams=[{StreamId, NewStream}|NewConnection#connection_state.streams]
-      }};
+            {next_state, connected,
+             S#connection_state{
+               decode_context=NewDecodeContext
+              }};
+        false ->
+            {next_state, continuation,
+             S#connection_state{
+               continuation = #continuation_state{
+                                 stream_id = StreamId,
+                                 frames = queue:from_list([Frame]),
+                                 type = push_promise
+                                 }
+              }}
+    end;
 
 %% The case for PING
 
@@ -564,19 +633,17 @@ route_frame(F={H=#frame_header{stream_id=StreamId}, #window_update{}},
                    streams=Streams})
     when H#frame_header.type == ?WINDOW_UPDATE ->
     lager:debug("Received WINDOW_UPDATE Frame for Stream ~p", [StreamId]),
-    case lists:keyfind(StreamId, 1, Streams) of
-        {StreamId, Stream} ->
-            NewStreamsTail = lists:keydelete(StreamId, 1, Streams),
-            %NewSendWindow = WSI+Stream#stream_state.send_window_size,
-            {NStream, NConn} = http2_stream:recv_frame(F, {Stream, S}),
-            %%NStream = chatterbox_static_content_handler:send_while_window_open(Stream#stream_state{send_window_size=NewSendWindow}, C),
-            %%NewStreams = [{StreamId, Stream#stream_state{send_window_size=NewSendWindow}}|NewStreamsTail],
-            NewStreams = [{StreamId, NStream}|NewStreamsTail],
-            {next_state, connected, NConn#connection_state{streams=NewStreams}};
+    StreamPid = proplists:get_value(StreamId, Streams),
+
+    case StreamPid of
+        undefined ->
+            lager:error("Window update for a stream that we don't think exists!");
+
         _ ->
-            lager:error("Window update for a stream that we don't think exists!"),
-            {next_state, connected, S}
-    end;
+            http2_stream:recv_wu(StreamPid, F)
+
+    end,
+    {next_state, connected, S};
 
 %route_frame({error, closed}, State) ->
 %    {stop, normal, State};
@@ -589,40 +656,42 @@ route_frame(Frame, State) ->
 
 handle_event({send_headers, StreamId, Headers},
              StateName,
-             State=#connection_state{
-                      encode_context=EncodeContext,
-                      streams = Streams
-                     }
+             #connection_state{
+                encode_context=EncodeContext,
+                streams = Streams,
+                socket = {Transport, Socket}
+               }=Connection
             ) ->
     lager:debug("{send headers, ~p, ~p}", [StreamId, Headers]),
-    {Stream, StreamTail} = get_stream(StreamId, Streams),
-    lager:debug("stream ~p", [Stream]),
+    StreamPid = proplists:get_value(StreamId, Streams),
+
     {HeaderFrame, NewContext} = http2_frame_headers:to_frame(StreamId, Headers, EncodeContext),
-    {NewStream, NewConnection} = http2_stream:send_frame(HeaderFrame, {Stream, State}),
-    {next_state, StateName, NewConnection#connection_state{
-                              encode_context=NewContext,
-                              streams=[{StreamId, NewStream}|StreamTail]
-                             }};
+
+    http2_stream:send_frame(StreamPid, HeaderFrame),
+    Transport:send(Socket, http2_frame:to_binary(HeaderFrame)),
+
+    {next_state, StateName,
+     Connection#connection_state{
+       encode_context=NewContext
+      }};
 handle_event({send_body, StreamId, Body},
              StateName,
-             State=#connection_state{
-                      streams=Streams,
-                      send_settings=SendSettings
-                     }
+             #connection_state{
+                streams=Streams,
+                send_settings=SendSettings,
+                socket={Transport,Socket}
+               }=Connection
             ) ->
-    {Stream, StreamTail} = get_stream(StreamId, Streams),
-    DataFrames = http2_frame_data:to_frames(StreamId, Body, SendSettings),
-    {NewStream, NewConnection}
-        = lists:foldl(
-            fun(Frame, S) ->
-                    http2_stream:send_frame(Frame, S)
-            end,
-            {Stream, State},
-            DataFrames),
+    StreamPid = proplists:get_value(StreamId, Streams),
 
-    {next_state, StateName, NewConnection#connection_state{
-                              streams=[{StreamId, NewStream}|StreamTail]
-                             }};
+    DataFrames = http2_frame_data:to_frames(StreamId, Body, SendSettings),
+    [ begin
+          http2_stream:send_frame(StreamPid, Frame),
+          Transport:send(Socket, http2_frame:to_binary(Frame))
+      end || Frame <- DataFrames],
+
+    {next_state, StateName,
+     Connection};
 handle_event({send_promise, StreamId, NewStreamId, Headers},
              StateName,
              #connection_state{
@@ -630,28 +699,27 @@ handle_event({send_promise, StreamId, NewStreamId, Headers},
                 encode_context=OldContext
                }=Connection
             ) ->
-    {Stream, StreamTail} = get_stream(StreamId, Streams),
+    NewStreamPid = proplists:get_value(NewStreamId, Streams),
+
+    %% TODO: This could be a series of frames, not just one
     {PromiseFrame, NewContext} = http2_frame_push_promise:to_frame(
                                    StreamId,
                                    NewStreamId,
                                    Headers,
                                    OldContext
                                   ),
-    {NewStream, NewConnection} =
-        http2_stream:send_frame(PromiseFrame,
-                                {Stream,
-                                 Connection#connection_state{
-                                   streams=StreamTail
-                                  }
-                                }),
 
-    {X,_} = get_stream(NewStreamId, NewConnection#connection_state.streams),
-    lager:debug("Promise sent, Stream: ~p", [X]),
+    %% Send the PP Frame
+    Binary = http2_frame:to_binary(PromiseFrame),
+    socksend(Connection, Binary),
 
-    {next_state, StateName, NewConnection#connection_state{
-                              encode_context=NewContext,
-                              streams=[{StreamId, NewStream}|NewConnection#connection_state.streams]
-                             }};
+    %% Get the promised stream rolling
+    http2_stream:send_pp(NewStreamPid, Headers),
+
+    {next_state, StateName,
+     Connection#connection_state{
+       encode_context=NewContext
+      }};
 
 handle_event({check_settings_ack, {Ref, NewSettings}},
              StateName,
@@ -682,28 +750,24 @@ handle_sync_event({get_response, StreamId}, _F, StateName,
                   #connection_state{
                      streams=Streams
                     }=Connection) ->
-    {Stream, _} = get_stream(StreamId, Streams),
-    Reply =
-        case Stream#stream_state.response_end_stream of
-            true ->
-                {ok, {Stream#stream_state.response_headers,
-                      Stream#stream_state.response_body}};
-            false ->
-                {error, stream_not_finished}
-        end,
+    StreamPid = proplists:get_value(StreamId, Streams),
+    Reply = http2_stream:get_response(StreamPid),
+
     {reply, Reply, StateName, Connection};
 handle_sync_event({new_stream, NotifyPid}, _F, StateName,
                   State=#connection_state{
                            streams=Streams,
                            next_available_stream_id=NextId,
                            recv_settings=#settings{initial_window_size=RecvWindowSize},
-                           send_settings=#settings{initial_window_size=SendWindowSize}
+                           send_settings=#settings{initial_window_size=SendWindowSize},
+                           stream_callback_mod=CB
                           }) ->
-    NewStream = http2_stream:new(NextId, {SendWindowSize, RecvWindowSize}),
+    {ok, NewStreamPid} = http2_stream:start_link(NextId, self(), SendWindowSize, RecvWindowSize, CB, NotifyPid),
+
     lager:debug("added stream #~p to ~p", [NextId, Streams]),
     {reply, NextId, StateName, State#connection_state{
                                  next_available_stream_id=NextId+2,
-                                 streams=[{NextId, NewStream#stream_state{notify_pid=NotifyPid}}|Streams]
+                                 streams=[{NextId, NewStreamPid}|Streams]
                                 }};
 handle_sync_event(is_push, _F, StateName,
                   State=#connection_state{
@@ -820,24 +884,6 @@ terminate(normal, _StateName, _State) ->
 terminate(_Reason, _StateName, _State) ->
     lager:debug("terminate reason: ~p~n", [_Reason]).
 
-
--spec get_stream(stream_id(), [{stream_id(), stream_state()}]) ->
-                        {stream_state(), [{stream_id(), stream_state()}]}
-                            | notfound | toomany.
-get_stream(StreamId, Streams) ->
-
-
-    case lists:partition(fun({Sid, _}) ->
-                                 Sid =:= StreamId
-                         end,
-                         Streams) of
-        {[{StreamId, Stream}], Leftovers} ->
-            {Stream, Leftovers};
-        {[], Streams} ->
-            notfound;
-        _ ->
-            toomany
-        end.
 
 -spec go_away(error_code(), #connection_state{}) -> {next_state, closing, #connection_state{}}.
 go_away(ErrorCode,
