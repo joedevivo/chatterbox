@@ -4,8 +4,7 @@
 
 %% Public API
 -export([
-         start_link/5,
-         start_link/6,
+         start_link/1,
          recv_h/2,
          send_pp/2,
          recv_es/1,
@@ -32,6 +31,7 @@
 %% gen_fsm states
 -export([
          idle/2,
+         reserved_local/2,
          open/2,
          half_closed_remote/2,
          closed/3
@@ -45,6 +45,33 @@
          new/3
         ]).
 
+
+-type stream_option_name() ::
+        stream_id
+      | connection
+      | initial_send_window_size
+      | initial_recv_window_size
+      | callback_module
+      | notify_pid
+      | socket.
+
+-type stream_option() ::
+          {stream_id, stream_id()}
+        | {connection, pid()}
+        | {socket, sock:socket()}
+        | {initial_send_window_size, non_neg_integer()}
+        | {initial_recv_window_size, non_neg_integer()}
+        | {callback_module, module()}
+        | {notify_pid, pid()}.
+
+-type stream_options() ::
+        [stream_option()].
+
+-export_type([
+              stream_option_name/0,
+              stream_option/0,
+              stream_options/0
+             ]).
 -export_type([stream_state/0]).
 
 -callback init() -> {ok, any()}.
@@ -72,15 +99,10 @@
     {ok, NewState :: any()}.
 
 %% Public AP
--spec start_link(stream_id(), pid(), pos_integer(), pos_integer(), module()) ->
+-spec start_link(stream_options()) ->
                         {ok, pid()} | ignore | {error, term()}.
-start_link(StreamId, ConnectionPid, SendWindowSize, RecvWindowSize, CB) ->
-    gen_fsm:start_link(?MODULE, {StreamId, ConnectionPid, SendWindowSize, RecvWindowSize, CB, ConnectionPid}, []).
-
--spec start_link(stream_id(), pid(), pos_integer(), pos_integer(), module(), pid()) ->
-                        {ok, pid()} | ignore | {error, term()}.
-start_link(StreamId, ConnectionPid, SendWindowSize, RecvWindowSize, CB, NotifyPid) ->
-    gen_fsm:start_link(?MODULE, {StreamId, ConnectionPid, SendWindowSize, RecvWindowSize, CB, NotifyPid}, []).
+start_link(StreamOptions) ->
+    gen_fsm:start_link(?MODULE, StreamOptions, []).
 
 -spec recv_h(pid(), hpack:headers()) ->
                     ok.
@@ -137,12 +159,22 @@ get_response(Pid) ->
 %% - half_closed_remote
 %% - closed
 
-init({StreamId, ConnectionPid, SendWindowSize, RecvWindowSize, CB, NotifyPid}) ->
+init(StreamOptions) ->
+    StreamId = proplists:get_value(stream_id, StreamOptions),
+    ConnectionPid = proplists:get_value(connection, StreamOptions),
+    SendWindowSize = proplists:get_value(initial_send_window_size, StreamOptions),
+    RecvWindowSize = proplists:get_value(initial_recv_window_size, StreamOptions),
+    CB = proplists:get_value(callback_module, StreamOptions),
+    NotifyPid = proplists:get_value(notify_pid, StreamOptions, ConnectionPid),
+    Socket = proplists:get_value(socket, StreamOptions),
+
+    %% TODO: Check for CB implementing this behaviour
     lager:info("Hi, I'm ~p, aka stream ~p", [self(), StreamId]),
     {ok, NewCustomState} = CB:init(),
 
     {ok, idle, #stream_state{
                   callback_mod=CB,
+                  socket=Socket,
                   stream_id=StreamId,
                   connection=ConnectionPid,
                   send_window_size=SendWindowSize,
@@ -177,7 +209,10 @@ idle({send_pp, Headers},
      Stream#stream_state{
        request_headers=Headers,
        custom_state=NewCustomState
-       }};
+       }, 0};
+       %% zero timeout lets us start dealing with reserved local,
+       %% because there is no END_STREAM event
+
 %% Client 'RECV PP'
 idle({recv_pp, Headers},
      #stream_state{
@@ -199,6 +234,20 @@ idle(Message, State) ->
     lager:error("stream idle processing unexpected message: ~p", [Message]),
     %% Never should happen.
     {next_state, idle, State}.
+
+reserved_local(timeout,
+               #stream_state{
+                  stream_id=StreamId,
+                  connection=Conn,
+                  custom_state=CustomState,
+                  callback_mod=CB
+                  }=Stream) ->
+    {ok, NewCustom} = CB:on_request_end_stream(StreamId, Conn, CustomState),
+    {next_state,
+     half_closed_remote,
+     Stream#stream_state{
+       custom_state=NewCustom
+      }}.
 
 open(recv_es,
      #stream_state{
@@ -277,10 +326,27 @@ open(_, Stream) ->
     %% Other?
     {next_state, open, Stream}.
 
-half_closed_remote(Msg, Stream) ->
+half_closed_remote(
+                  {send_frame,
+                   {
+                     #frame_header{
+                        flags=Flags
+                       },_
+                   }=F}=_Msg,
+  #stream_state{
+     socket=Socket
+    }=Stream) ->
 
-    lager:info("Hi! ~p, ~p", [Msg, Stream]),
-    {next_state, half_closed_remote, Stream}.
+    lager:info("StreamSocket ~p", [Socket]),
+    %% lager:info("Hi! ~p, ~p", [Msg, Stream]),
+    ok = sock:send(Socket, http2_frame:to_binary(F)),
+
+    case ?IS_FLAG(Flags, ?FLAG_END_STREAM) of
+        true ->
+            {next_state, closed, Stream};
+        _ ->
+            {next_state, half_closed_remote, Stream}
+    end.
 
 
 closed(get_response,
@@ -315,6 +381,7 @@ handle_event({recv_wu,
                  queued_frames=queue:new()
                 },
     lager:debug("Stream ~p send window now: ~p", [StreamId, NewSendWindow]),
+    %% TODO: This fold is the previous version of window update
     lists:foldl(
       fun(Frame, S) -> send_frame(Frame, S) end,
       NewStream,

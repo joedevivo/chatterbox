@@ -2,7 +2,13 @@
 
 -include("http2.hrl").
 
--export([settings/0]).
+-export([
+         start/0,
+         settings/0
+        ]).
+
+start() ->
+    chatterbox_sup:start_link().
 
 settings() ->
     HTS = application:get_env(?MODULE, header_table_size, 4096),

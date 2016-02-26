@@ -429,7 +429,8 @@ route_frame({#frame_header{
                    send_settings=#settings{initial_window_size=SendWindowSize},
                    streams = Streams,
                    decode_context = DecodeContext,
-                   stream_callback_mod=CB
+                   stream_callback_mod=CB,
+                   socket=Socket
             }) ->
     lager:debug("Received HEADERS Frame for Stream ~p", [StreamId]),
     %% Three things could be happening here.
@@ -449,7 +450,15 @@ route_frame({#frame_header{
         case proplists:get_value(StreamId, Streams, undefined) of
             undefined ->
                 lager:debug("Spawning new pid for stream ~p", [StreamId]),
-                {ok, Pid} = http2_stream:start_link(StreamId, self(), SendWindowSize, RecvWindowSize, CB),
+                {ok, Pid} = http2_stream:start_link(
+                              [
+                               {stream_id, StreamId},
+                               {connection, self()},
+                               {initial_send_window_size, SendWindowSize},
+                               {initial_recv_window_size, RecvWindowSize},
+                               {callback_module, CB},
+                               {socket, Socket}
+                             ]),
                 {Pid, [{StreamId, Pid}|Streams]};
             SPid ->
                 {SPid, Streams}
@@ -659,7 +668,7 @@ handle_event({send_headers, StreamId, Headers},
              #connection_state{
                 encode_context=EncodeContext,
                 streams = Streams,
-                socket = {Transport, Socket}
+                socket = _Socket
                }=Connection
             ) ->
     lager:debug("{send headers, ~p, ~p}", [StreamId, Headers]),
@@ -668,7 +677,7 @@ handle_event({send_headers, StreamId, Headers},
     {HeaderFrame, NewContext} = http2_frame_headers:to_frame(StreamId, Headers, EncodeContext),
 
     http2_stream:send_frame(StreamPid, HeaderFrame),
-    Transport:send(Socket, http2_frame:to_binary(HeaderFrame)),
+    %Transport:send(Socket, http2_frame:to_binary(HeaderFrame)),
 
     {next_state, StateName,
      Connection#connection_state{
@@ -679,15 +688,17 @@ handle_event({send_body, StreamId, Body},
              #connection_state{
                 streams=Streams,
                 send_settings=SendSettings,
-                socket={Transport,Socket}
+                socket=Socket
                }=Connection
             ) ->
     StreamPid = proplists:get_value(StreamId, Streams),
 
     DataFrames = http2_frame_data:to_frames(StreamId, Body, SendSettings),
+
+    lager:info("ConnectionSocket ~p", [Socket]),
     [ begin
-          http2_stream:send_frame(StreamPid, Frame),
-          Transport:send(Socket, http2_frame:to_binary(Frame))
+          http2_stream:send_frame(StreamPid, Frame)
+          %ok = sock:send(Socket, http2_frame:to_binary(Frame))
       end || Frame <- DataFrames],
 
     {next_state, StateName,
@@ -760,9 +771,19 @@ handle_sync_event({new_stream, NotifyPid}, _F, StateName,
                            next_available_stream_id=NextId,
                            recv_settings=#settings{initial_window_size=RecvWindowSize},
                            send_settings=#settings{initial_window_size=SendWindowSize},
-                           stream_callback_mod=CB
+                           stream_callback_mod=CB,
+                           socket=Socket
                           }) ->
-    {ok, NewStreamPid} = http2_stream:start_link(NextId, self(), SendWindowSize, RecvWindowSize, CB, NotifyPid),
+    {ok, NewStreamPid} = http2_stream:start_link(
+                           [
+                            {stream_id, NextId},
+                            {connection, self()},
+                            {initial_send_window_size, SendWindowSize},
+                            {initial_recv_window_size, RecvWindowSize},
+                            {callback_module, CB},
+                            {notify_pid, NotifyPid},
+                            {socket, Socket}
+                           ]),
 
     lager:debug("added stream #~p to ~p", [NextId, Streams]),
     {reply, NextId, StateName, State#connection_state{
@@ -954,7 +975,7 @@ start_http2_server(#connection_state{
     case Transport:recv(Socket, length(?PREFACE), 5000) of
         {ok, <<?PREFACE>>} ->
             ok = active_once({Transport, Socket}),
-            NewState =              State#connection_state{
+            NewState = State#connection_state{
                next_available_stream_id=2
               },
             {next_state,
@@ -998,11 +1019,10 @@ handle_socket_data(<<>>,
 handle_socket_data(Data,
                    StateName,
                    #connection_state{
-                      socket={Transport, Socket},
+                      socket=Socket,
                       buffer=Buffer
                      }=State) ->
-
-    More = case Transport:recv(Socket, 0, 1) of %% fail fast!
+    More = case sock:recv(Socket, 0, 1) of %% fail fast
         {ok, Rest} ->
             Rest;
         %% It's not really an error, it's what we want
@@ -1049,10 +1069,10 @@ handle_socket_error(Reason, _StateName, State) ->
     {stop, Reason, State}.
 
 socksend(#connection_state{
-            socket={Transport, Socket},
+            socket=Socket,
             type=T
            }, Data) ->
-    case Transport:send(Socket, Data) of
+    case sock:send(Socket, Data) of
         ok ->
             ok;
         {error, Reason} ->

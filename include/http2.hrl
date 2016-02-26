@@ -235,6 +235,7 @@
 -record(stream_state, {
           stream_id = undefined :: stream_id(),
           connection = undefined :: undefined | pid(),
+          socket = undefined :: sock:socket(),
           state = idle :: stream_state_name(),
           send_window_size = ?DEFAULT_INITIAL_WINDOW_SIZE :: integer(),
           recv_window_size = ?DEFAULT_INITIAL_WINDOW_SIZE :: integer(),

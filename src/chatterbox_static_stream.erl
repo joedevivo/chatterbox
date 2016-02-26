@@ -24,7 +24,7 @@ on_receive_request_headers(Headers, State) ->
 
 on_send_push_promise(Headers, State) ->
     lager:info("on_send_push_promise(~p, ~p)", [Headers, State]),
-    {ok, State}.
+    {ok, State#cb_static{req_headers=Headers}}.
 
 on_receive_request_data(Bin, State)->
     lager:info("on_receive_request_data(~p, ~p)", [Bin, State]),
@@ -38,7 +38,7 @@ on_request_end_stream(StreamId, ConnPid, State) ->
 
     Path = binary_to_list(proplists:get_value(<<":path">>, Headers)),
 
-   %% QueryString Hack?
+    %% QueryString Hack?
     Path2 = case string:chr(Path, $?) of
         0 -> Path;
         X -> string:substr(Path, 1, X-1)
@@ -104,7 +104,6 @@ on_request_end_stream(StreamId, ConnPid, State) ->
                             [dot_hack(lists:last(M)) || M <- Matches];
                         _ -> []
                     end,
-
                     lager:debug("Resources to push: ~p", [Resources]),
 
                     NewStreams =
@@ -119,9 +118,7 @@ on_request_end_stream(StreamId, ConnPid, State) ->
                                    ),
 
                     lager:debug("New Streams for promises: ~p", [NewStreams]),
-
                     %[spawn_handle(ConnPid, NewStreamId, PHeaders, <<>>) || {NewStreamId, PHeaders} <- NewStreams],
-
                     ok;
                 _ ->
                     ok
