@@ -43,9 +43,7 @@
 
 -export([
          recv_frame/3,
-         send_frame/3,
-         new/2,
-         new/3
+         send_frame/3
         ]).
 
 
@@ -523,23 +521,6 @@ terminate(_Reason, _StateName, _State) ->
 %% were idle are considered closed. Where we'll account for this? who
 %% knows? probably in the http2_connection
 
--spec new(stream_id(),
-          {pos_integer(), pos_integer()}) ->
-                 stream_state().
-new(StreamId, {SendWindowSize, RecvWindowSize}) ->
-    new(StreamId, {SendWindowSize, RecvWindowSize}, idle).
-
--spec new(stream_id(),
-          {pos_integer(), pos_integer()},
-          stream_state_name()) ->
-                 stream_state().
-new(StreamId, {SendWindowSize, RecvWindowSize}, StateName) ->
-    #stream_state{
-       stream_id=StreamId,
-       send_window_size = SendWindowSize,
-       recv_window_size = RecvWindowSize,
-       state = StateName
-      }.
 
 %% This module was a mess because I tried to order clauses in a
 %% logical flow, so you could follow a set of function clauses through
@@ -689,63 +670,60 @@ process(send, F={#frame_header{
 %% hope! I'd have preferred to put this down where we deal with the
 %% open/half_closed states, but I want you to read this first, so you
 %% understand what the recv CONTINUATION clause is doing.
-process(recv, F={#frame_header{
-                   flags=Flags,
-                   type=?PUSH_PROMISE
-                  },#push_promise{
-                       promised_stream_id=PSID
-                      }},
-           {Stream=#stream_state{
-                      state=State
-                     },
-            Connection=#connection_state{
-                          recv_settings=#settings{initial_window_size=RecvWindowSize},
-                          send_settings=#settings{initial_window_size=SendWindowSize},
-                          streams=Streams
-                         }})
-  when State =:= open;
-       State =:= half_closed_local ->
+%process(recv, F={#frame_header{
+%                   flags=Flags,
+%                   type=?PUSH_PROMISE
+%                  },#push_promise{
+%                       promised_stream_id=PSID
+%                      }},
+%           {Stream=#stream_state{
+%                      state=State
+%                     },
+%            Connection=#connection_state{
+%                          %recv_settings=#settings{initial_window_size=RecvWindowSize},
+%                          %send_settings=#settings{initial_window_size=SendWindowSize},
+%                          streams=Streams
+%                         }})
+%  when State =:= open;
+%       State =:= half_closed_local ->
 
-    lager:debug("OMG Promise: ~p", [PSID]),
+%    lager:debug("OMG Promise: ~p", [PSID]),
 
     %% Create the promised stream
-    NewStream = new(PSID, {SendWindowSize, RecvWindowSize}),
-    EndHeaders = ?IS_FLAG(Flags, ?FLAG_END_HEADERS),
-    lager:debug("Promise ~p End? ~p", [PSID, EndHeaders]),
-    NewerStream =
-        NewStream#stream_state{
-          incoming_frames=queue:in(F,queue:new()),
-          request_end_stream = true,
-          request_end_headers = EndHeaders,
-          next_state = reserved_remote
-         },
+%    NewStream = 2,%new(PSID, {SendWindowSize, RecvWindowSize}),
+%    EndHeaders = ?IS_FLAG(Flags, ?FLAG_END_HEADERS),
+%    lager:debug("Promise ~p End? ~p", [PSID, EndHeaders]),
+%    NewerStream =
+%        NewStream#stream_state{
+%          incoming_frames=queue:in(F,queue:new()),
+%          request_end_stream = true,
+%          request_end_headers = EndHeaders,
+%          next_state = reserved_remote
+%         },
 
-    lager:debug("Newer: ~p", [NewerStream]),
-    {PromisedStream, NewConnection} =
-        maybe_decode_request_headers(
-          NewerStream,
-          Connection),
-    lager:debug("Promised: ~p", [PromisedStream]),
-
-
-
-    case EndHeaders of
-        true ->
+%    lager:debug("Newer: ~p", [NewerStream]),
+%    {PromisedStream, NewConnection} =
+%        maybe_decode_request_headers(
+%          NewerStream,
+%          Connection),
+%    lager:debug("Promised: ~p", [PromisedStream]),
+%    case EndHeaders of
+%        true ->
             %% We're returning the stream UNCHANGED! only adding the Promised
             %% Stream to the connection, NewConnection may have an updated
             %% hpack decode context, otherwise, it's unchanged too.
-            {Stream,
-             NewConnection#connection_state{
-               streams=[{PSID, PromisedStream}|Streams]
-              }};
-        false ->
+%            {Stream,
+%             NewConnection#connection_state{
+%               streams=[{PSID, PromisedStream}|Streams]
+%              }};
+%        false ->
             %% If we're not done with the headers, keep this stream in
             %% a working space instead of adding it to the connection
-            {Stream#stream_state{
-               promised_stream = NewStream
-              },
-             NewConnection}
-    end;
+ %           {Stream#stream_state{
+ %              promised_stream = NewStream
+ %             },
+ %            NewConnection}
+ %   end;
 
 %% We also have to account for CONTINUATIONs that are following PPs.
 process(recv, F={#frame_header{
@@ -788,58 +766,53 @@ process(recv, F={#frame_header{
 %% Sending a PP is the same thing as receiving. We can only send in
 %% the open or half_closed_remote states, but it creates a new stream
 %% in the idle state
-process(send,
-        F={#frame_header{
-              type=?PUSH_PROMISE,
-              flags=Flags
-             }, #push_promise{
-                   promised_stream_id=PSID
-                  }},
-        {#stream_state{
-            state=State
-           }=Stream,
-         #connection_state{
+%process(send,
+%        F={#frame_header{
+%              type=?PUSH_PROMISE,
+%              flags=Flags
+%             }, #push_promise{
+%                   promised_stream_id=PSID
+%                  }},
+%        {#stream_state{
+%            state=State
+%           }=Stream,
+%         #connection_state{
 %            recv_settings=#settings{initial_window_size=RecvWindowSize},
 %            send_settings=#settings{initial_window_size=SendWindowSize},
-            streams=Streams
-           }=Connection})
-  when State =:= open;
-       State =:= half_closed_remote ->
-
-    lager:debug("Send Promise ~p -> ~p", [Stream#stream_state.stream_id, PSID]),
+%            streams=Streams
+%           }=Connection})
+%  when State =:= open;
+%       State =:= half_closed_remote ->
+%    lager:debug("Send Promise ~p -> ~p", [Stream#stream_state.stream_id, PSID]),
     %% ok, we have to send it.
-    http2_connection:send_frame(self(), http2_frame:to_binary(F)),
-
-    EndHeaders = ?IS_FLAG(Flags, ?FLAG_END_HEADERS),
-
+%    http2_connection:send_frame(self(), http2_frame:to_binary(F)),
+%    EndHeaders = ?IS_FLAG(Flags, ?FLAG_END_HEADERS),
     %% Now we need to construct the promised stream
-    {NewStream, StreamTail} = http2_connection:get_stream(PSID, Streams),%  new(PSID, {SendWindowSize, RecvWindowSize}),
-
-    NewerStream =
-        NewStream#stream_state{
-          request_end_stream=true,
-          request_end_headers=EndHeaders,
-          next_state=reserved_local
-         },
-
-    case EndHeaders of
-        true ->
-            PromisedStream =
-                NewerStream#stream_state{
-                  state=reserved_local
-                 },
-            {Stream,
-             Connection#connection_state{
-               streams=[{PSID, PromisedStream}|StreamTail]
-              }};
-        false ->
-            {Stream#stream_state{
-               promised_stream=NewerStream
-               },
-             Connection#connection_state{
-               streams=StreamTail
-              }}
-    end;
+%    {NewStream, StreamTail} = http2_connection:get_stream(PSID, Streams),%  new(PSID, {SendWindowSize, RecvWindowSize}),
+%    NewerStream =
+%        NewStream#stream_state{
+%          request_end_stream=true,
+%          request_end_headers=EndHeaders,
+%          next_state=reserved_local
+%         },
+%    case EndHeaders of
+%        true ->
+%            PromisedStream =
+%                NewerStream#stream_state{
+%                  state=reserved_local
+%                 },
+%            {Stream,
+%             Connection#connection_state{
+%               streams=[{PSID, PromisedStream}|StreamTail]
+%              }};
+%        false ->
+%            {Stream#stream_state{
+%               promised_stream=NewerStream
+%               },
+%             Connection#connection_state{
+%               streams=StreamTail
+%              }}
+%    end;
 process(send,
         F={#frame_header{
               type=?CONTINUATION,

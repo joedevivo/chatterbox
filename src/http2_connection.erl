@@ -523,7 +523,7 @@ route_frame(F={H=#frame_header{
                 headers ->
                     http2_stream:recv_h(StreamPid, Headers);
                 push_promise ->
-                    http2_stream:recv_pp(StreamId, Headers)
+                    http2_stream:recv_pp(StreamPid, Headers)
             end,
             case EndStream of
                 true ->
@@ -577,7 +577,7 @@ route_frame({H=#frame_header{
     lager:debug("recv(~p, {~p, ~p})",[Frame, StreamId, S]),
     case ?IS_FLAG(Flags, ?FLAG_END_HEADERS) of
         true ->
-            HeadersBin = http2_frame_headers:from_frames(Frame),
+            HeadersBin = http2_frame_headers:from_frames([Frame]),
             {Headers, NewDecodeContext} = hpack:decode(HeadersBin, DecodeContext),
             http2_stream:recv_pp(StreamPid, Headers),
 
