@@ -723,8 +723,8 @@ handle_sync_event(get_peer, _F, StateName, State=#connection_state{socket={Trans
         {error, _}=Error ->
             lager:warning("failed to fetch peer for ~p socket", [Module]),
             {reply, Error, StateName, State};
-        {ok, AddrPort} ->
-            {reply, AddrPort, StateName, State}
+        {ok, _AddrPort}=OK ->
+            {reply, OK, StateName, State}
     end;
 handle_sync_event(_E, _F, StateName, State) ->
     {next_state, StateName, State}.
