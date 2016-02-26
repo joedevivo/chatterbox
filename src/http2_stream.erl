@@ -6,6 +6,7 @@
 -export([
          start_link/1,
          recv_h/2,
+         send_h/2,
          send_pp/2,
          recv_es/1,
          recv_pp/2,
@@ -32,7 +33,9 @@
 -export([
          idle/2,
          reserved_local/2,
+         reserved_remote/2,
          open/2,
+         half_closed_local/2,
          half_closed_remote/2,
          closed/3
         ]).
@@ -108,6 +111,11 @@ start_link(StreamOptions) ->
                     ok.
 recv_h(Pid, Headers) ->
     gen_fsm:send_event(Pid, {recv_h, Headers}).
+
+-spec send_h(pid(), hpack:headers()) ->
+                    ok.
+send_h(Pid, Headers) ->
+    gen_fsm:send_event(Pid, {send_h, Headers}).
 
 -spec send_pp(pid(), hpack:headers()) ->
                      ok.
@@ -244,9 +252,26 @@ reserved_local(timeout,
                   }=Stream) ->
     {ok, NewCustom} = CB:on_request_end_stream(StreamId, Conn, CustomState),
     {next_state,
-     half_closed_remote,
+     reserved_local,
      Stream#stream_state{
        custom_state=NewCustom
+      }};
+reserved_local({send_h, Headers},
+              #stream_state{
+                }=Stream) ->
+    {next_state,
+     half_closed_remote,
+     Stream#stream_state{
+       response_headers=Headers
+      }}.
+
+reserved_remote({recv_h, Headers},
+               #stream_state{
+                 }=Stream) ->
+    {next_state,
+     half_closed_local,
+     Stream#stream_state{
+       response_headers=Headers
       }}.
 
 open(recv_es,
@@ -262,12 +287,26 @@ open(recv_es,
      Stream#stream_state{
        custom_state=NewCustom
       }};
-open({recv_frame,
+
+open({send_frame,
       {#frame_header{
-          type=?DATA
-         }, _}},
-     Stream) ->
-    {next_state, open, Stream};
+          type=?DATA,
+          flags=Flags
+         }, _}=F},
+     #stream_state{
+        socket=Socket
+       }=Stream) ->
+    sock:send(Socket, http2_frame:to_binary(F)),
+
+    case ?IS_FLAG(Flags, ?FLAG_END_STREAM) of
+        true ->
+            {next_state,
+             half_closed_local,
+             Stream};
+        _ ->
+            {next_state, open, Stream}
+    end;
+
 
 open({recv_frame, {H,_}},
      Stream)
@@ -309,11 +348,13 @@ open({recv_frame,
         incoming_frames=IFQ,
         recv_window_size=SRWS,
         callback_mod=CB,
-        custom_state=CustomState
+        custom_state=CustomState,
+        connection=ConnPid,
+        stream_id=StreamId
        }=Stream)
   when ?IS_FLAG(Flags, ?FLAG_END_STREAM) ->
     {ok, CustomState1} = CB:on_receive_request_data(F, CustomState),
-    {ok, NewCustomState} = CB:on_request_end_stream(CustomState1),
+    {ok, NewCustomState} = CB:on_request_end_stream(StreamId, ConnPid, CustomState1),
     {next_state,
      half_closed_remote,
      Stream#stream_state{
@@ -322,10 +363,28 @@ open({recv_frame,
        request_end_stream=true,
        custom_state=NewCustomState
       }};
+open({recv_frame,
+      {#frame_header{
+          flags=Flags,
+          type=?DATA
+         }, _}},
+     Stream)
+  when ?IS_FLAG(Flags, ?FLAG_END_STREAM) ->
+    lager:info("?IS_FLAG(Flags, ?FLAG_END_STREAM) = ~p", [?IS_FLAG(Flags, ?FLAG_END_STREAM)]),
+    {next_state, open, Stream};
+
 open(_, Stream) ->
     %% Other?
     {next_state, open, Stream}.
 
+half_closed_remote(
+  {send_h, Headers},
+  #stream_state{}=Stream) ->
+    {next_state,
+     half_closed_remote,
+     Stream#stream_state{
+       response_headers=Headers
+      }};
 half_closed_remote(
                   {send_frame,
                    {
@@ -348,6 +407,50 @@ half_closed_remote(
             {next_state, half_closed_remote, Stream}
     end.
 
+half_closed_local(
+  {recv_h, Headers},
+  #stream_state{
+    }=Stream) ->
+    {next_state,
+     half_closed_local,
+     Stream#stream_state{
+       response_headers=Headers}};
+half_closed_local(
+  {recv_frame,
+   {#frame_header{
+       flags=Flags
+      },_}=F},
+  #stream_state{
+     stream_id=StreamId,
+     incoming_frames=IFQ,
+     notify_pid = NotifyPid
+     } = Stream) ->
+
+    lager:info("client got ~p", [F]),
+    NewQ = queue:in(F, IFQ),
+
+    case ?IS_FLAG(Flags, ?FLAG_END_STREAM) of
+        true ->
+            Data = [ D || {#frame_header{type=?DATA}, #data{data=D}} <- queue:to_list(IFQ)],
+            case NotifyPid of
+                undefined ->
+                    ok;
+                _ ->
+                    lager:info("I should notify!"),
+                    NotifyPid ! {'END_STREAM', StreamId}
+            end,
+            {next_state, closed,
+             Stream#stream_state{
+               incoming_frames=queue:new(),
+               response_body = Data
+              }};
+        _ ->
+            {next_state,
+             half_closed_local,
+             Stream#stream_state{
+               incoming_frames=NewQ
+              }}
+    end.
 
 closed(get_response,
        _From,

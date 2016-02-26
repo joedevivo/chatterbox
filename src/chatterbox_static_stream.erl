@@ -107,15 +107,16 @@ on_request_end_stream(StreamId, ConnPid, State) ->
                     lager:debug("Resources to push: ~p", [Resources]),
 
                     NewStreams =
-                        lists:foldl(fun(R, Acc) ->
-                                            NewStreamId = http2_connection:new_stream(ConnPid),
-                                            PHeaders = generate_push_promise_headers(Headers, <<$/,R/binary>>),
-                                            http2_connection:send_promise(ConnPid, StreamId, NewStreamId, PHeaders),
-                                            [{NewStreamId, PHeaders}|Acc]
-                                    end,
-                                    [],
-                                    Resources
-                                   ),
+                        lists:foldl(
+                          fun(R, Acc) ->
+                                  NewStreamId = http2_connection:new_stream(ConnPid),
+                                  PHeaders = generate_push_promise_headers(Headers, <<$/,R/binary>>),
+                                  http2_connection:send_promise(ConnPid, StreamId, NewStreamId, PHeaders),
+                                  [{NewStreamId, PHeaders}|Acc]
+                          end,
+                          [],
+                          Resources
+                         ),
 
                     lager:debug("New Streams for promises: ~p", [NewStreams]),
                     %[spawn_handle(ConnPid, NewStreamId, PHeaders, <<>>) || {NewStreamId, PHeaders} <- NewStreams],
@@ -123,6 +124,22 @@ on_request_end_stream(StreamId, ConnPid, State) ->
                 _ ->
                     ok
             end,
+
+            %% Ooof. I need to do a bunch of things here, and it'd be
+            %% best to keep the process messages on the low side.
+
+            %% For each chunk of data:
+
+            %% 1. Ask the connection if it's got enough bytes in the
+            %% send window.
+            %% maybe just send the frame header?
+
+            %% If it doesn't, we need to put this frame in a place
+            %% that will get looked at when our connection window size
+            %% increases.
+
+            %% If it does, we still need to try and check stream level flow control.
+
             http2_connection:send_body(ConnPid, StreamId, Data),
             ok;
         {false, false} ->

@@ -467,7 +467,7 @@ route_frame({#frame_header{
     EndStream = ?IS_FLAG(Flags, ?FLAG_END_STREAM),
 
     %% We spawned an idle stream if it didn't exist.
-    lager:debug("recv(~p, {~p, ~p})",[Frame, StreamId, S]),
+    %%lager:debug("recv(~p, {~p, ~p})",[Frame, StreamId, S]),
     case ?IS_FLAG(Flags, ?FLAG_END_HEADERS) of
         true ->
             HeadersBin = http2_frame_headers:from_frames([Frame]),
@@ -491,7 +491,8 @@ route_frame({#frame_header{
                continuation = #continuation_state{
                                  stream_id = StreamId,
                                  frames = queue:from_list([Frame]),
-                                 end_stream = EndStream
+                                 end_stream = EndStream,
+                                 type=headers
                                  }
               }}
     end;
@@ -668,16 +669,15 @@ handle_event({send_headers, StreamId, Headers},
              #connection_state{
                 encode_context=EncodeContext,
                 streams = Streams,
-                socket = _Socket
+                socket = Socket
                }=Connection
             ) ->
     lager:debug("{send headers, ~p, ~p}", [StreamId, Headers]),
     StreamPid = proplists:get_value(StreamId, Streams),
 
     {HeaderFrame, NewContext} = http2_frame_headers:to_frame(StreamId, Headers, EncodeContext),
-
-    http2_stream:send_frame(StreamPid, HeaderFrame),
-    %Transport:send(Socket, http2_frame:to_binary(HeaderFrame)),
+    sock:send(Socket, http2_frame:to_binary(HeaderFrame)),
+    http2_stream:send_h(StreamPid, Headers),
 
     {next_state, StateName,
      Connection#connection_state{
@@ -687,15 +687,13 @@ handle_event({send_body, StreamId, Body},
              StateName,
              #connection_state{
                 streams=Streams,
-                send_settings=SendSettings,
-                socket=Socket
+                send_settings=SendSettings
                }=Connection
             ) ->
     StreamPid = proplists:get_value(StreamId, Streams),
 
     DataFrames = http2_frame_data:to_frames(StreamId, Body, SendSettings),
 
-    lager:info("ConnectionSocket ~p", [Socket]),
     [ begin
           http2_stream:send_frame(StreamPid, Frame)
           %ok = sock:send(Socket, http2_frame:to_binary(Frame))
