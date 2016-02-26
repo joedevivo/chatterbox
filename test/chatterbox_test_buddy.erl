@@ -21,14 +21,14 @@ start(Config) ->
     Settings =
         case ?config(www_root, Config) of
             undefined ->
-                [{chatterbox_static_content_handler,
+                [{chatterbox_static_stream,
                   [{root_dir, code:priv_dir(chatterbox)}]}|PreDataSettings];
             data_dir ->
                 Root = ?config(data_dir, Config),
-                [{chatterbox_static_content_handler,
+                [{chatterbox_static_stream,
                   [{root_dir, Root}]}|PreDataSettings];
             WWWRoot ->
-                [{chatterbox_static_content_handler,
+                [{chatterbox_static_stream,
                   [{root_dir, WWWRoot}]}|PreDataSettings]
         end,
 

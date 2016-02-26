@@ -15,7 +15,8 @@
          recv_frame/2,
          stream_id/0,
          connection/0,
-         get_response/1
+         get_response/1,
+         notify_pid/1
         ]).
 
 %% gen_fsm callbacks
@@ -158,6 +159,12 @@ connection() ->
 get_response(Pid) ->
     gen_fsm:sync_send_event(Pid, get_response).
 
+-spec notify_pid(pid()) ->
+                          {ok, pid()}
+                              | {error, term()}.
+notify_pid(Pid) ->
+    gen_fsm:sync_send_all_state_event(Pid, notify_pid).
+
 %% States
 %% - idle
 %% - reserved_local
@@ -209,6 +216,7 @@ idle({send_pp, Headers},
         callback_mod=CB,
         custom_state=CustomState
        }=Stream) ->
+    lager:info("send_pp ~p", [Stream#stream_state.stream_id]),
     {ok, NewCustomState} = CB:on_send_push_promise(Headers, CustomState),
     {next_state,
      reserved_local,
@@ -248,6 +256,8 @@ reserved_local(timeout,
                   custom_state=CustomState,
                   callback_mod=CB
                   }=Stream) ->
+    lager:info("timeout ~p", [Stream#stream_state.stream_id]),
+    lager:info("state ~p", [Stream]),
     {ok, NewCustom} = CB:on_request_end_stream(StreamId, Conn, CustomState),
     {next_state,
      reserved_local,
@@ -393,8 +403,6 @@ half_closed_remote(
   #stream_state{
      socket=Socket
     }=Stream) ->
-
-    lager:info("StreamSocket ~p", [Socket]),
     %% lager:info("Hi! ~p, ~p", [Msg, Stream]),
     ok = sock:send(Socket, http2_frame:to_binary(F)),
 
@@ -434,7 +442,7 @@ half_closed_local(
                 undefined ->
                     ok;
                 _ ->
-                    lager:info("I should notify!"),
+                    lager:info("I should notify! ~p ~p", [NotifyPid, StreamId]),
                     NotifyPid ! {'END_STREAM', StreamId}
             end,
             {next_state, closed,
@@ -491,6 +499,8 @@ handle_event({recv_wu,
 handle_event(_E, StateName, State) ->
     {next_state, StateName, State}.
 
+handle_sync_event(notify_pid, _F, StateName, State=#stream_state{notify_pid=NP}) ->
+    {reply, {ok,NP}, StateName, State};
 handle_sync_event(stream_id, _F, StateName, State=#stream_state{stream_id=StreamId}) ->
     {reply, StreamId, StateName, State};
 handle_sync_event(connection, _F, StateName, State=#stream_state{connection=Conn}) ->

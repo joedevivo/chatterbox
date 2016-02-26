@@ -20,7 +20,8 @@
          new_stream/2,
          send_promise/4,
          get_response/2,
-         get_peer/1
+         get_peer/1,
+         get_streams/1
 ]).
 
 %% gen_fsm callbacks
@@ -172,6 +173,10 @@ send_promise(Pid, StreamId, NewStreamId, Headers) ->
 get_response(Pid, StreamId) ->
     gen_fsm:sync_send_all_state_event(Pid, {get_response, StreamId}).
 
+-spec get_streams(pid()) -> [{stream_id(), pid()}].
+get_streams(Pid) ->
+    gen_fsm:sync_send_all_state_event(Pid, streams).
+
 -spec stop(pid()) -> ok.
 stop(Pid) ->
     gen_fsm:send_all_state_event(Pid, stop).
@@ -312,8 +317,8 @@ route_frame({#frame_header{
 route_frame({H, Payload}, S = #connection_state{
                                  send_settings=SS=#settings{
                                                      initial_window_size=OldIWS
-                                                    },
-                                 streams = Streams
+                                                    }
+%                                 streams = Streams
                                 })
     when H#frame_header.type == ?SETTINGS,
          ?NOT_FLAG(H#frame_header.flags, ?FLAG_ACK) ->
@@ -328,26 +333,26 @@ route_frame({H, Payload}, S = #connection_state{
         NewIWS ->
             OldIWS - NewIWS
     end,
+    lager:info("Delta ~p", [Delta]),
     NewSendSettings = http2_frame_settings:overlay(SS, Payload),
 
     %% Adjust all open and half_closed_remote streams send_window_size
     %% TODO: This will probably come in handy on the client side too
-    NewStreams = lists:map(fun({StreamId, Stream=#stream_state{state=open,send_window_size=SWS}}) ->
-                               {StreamId, Stream#stream_state{
-                                            send_window_size=SWS - Delta
-                                           }};
-                              ({StreamId, Stream=#stream_state{state=half_closed_remote,send_window_size=SWS}}) ->
-                               {StreamId, Stream#stream_state{
-                                            send_window_size=SWS - Delta
-                                           }};
-                              (X) -> X
-                           end, Streams),
+    %NewStreams = lists:map(fun({StreamId, Stream=#stream_state{state=open,send_window_size=SWS}}) ->
+    %                           {StreamId, Stream#stream_state{
+    %                                        send_window_size=SWS - Delta
+    %                                       }};
+    %                          ({StreamId, Stream=#stream_state{state=half_closed_remote,send_window_size=SWS}}) ->
+    %                           {StreamId, Stream#stream_state{
+    %                                        send_window_size=SWS - Delta
+    %                                       }};
+    %                          (X) -> X
+    %                       end, Streams),
     lager:info("Sending Settings ACK"),
     socksend(S, http2_frame_settings:ack()),
     lager:info("Sent Settings ACK"),
     {next_state, connected, S#connection_state{
-                              send_settings=NewSendSettings,
-                              streams=NewStreams
+                              send_settings=NewSendSettings
                              }};
 %% This is the case where we got an ACK, so dequeue settings we're
 %% waiting to apply
@@ -562,29 +567,50 @@ route_frame({H=#frame_header{stream_id=StreamId}, _Payload}, S = #connection_sta
 route_frame({H=#frame_header{
                   stream_id=StreamId,
                   flags=Flags
-                 }, _Payload}=Frame,
+                 },
+             #push_promise{
+                promised_stream_id=PSID
+                }}=Frame,
             #connection_state{
                decode_context=DecodeContext,
-               streams=Streams
+               streams=Streams,
+               socket=Socket,
+               recv_settings=#settings{initial_window_size=RecvWindowSize},
+               send_settings=#settings{initial_window_size=SendWindowSize},
+               stream_callback_mod=CB
               }=S)
     when H#frame_header.type == ?PUSH_PROMISE ->
 
     %% TODO OOOOOOOOOOOPS! PUSH_PROMISE can have continuations too!
     %% will need rework after this refactor, issue #10
-    lager:debug("Received PUSH_PROMISE Frame for Stream ~p", [StreamId]),
-    StreamPid = proplists:get_value(StreamId, Streams),
+    lager:debug("Received PUSH_PROMISE Frame on Stream ~p for Stream ~p", [StreamId, PSID]),
+
+    OldStreamPid = proplists:get_value(StreamId, Streams),
+    {ok, NotifyPid} = http2_stream:notify_pid(OldStreamPid),
+    {ok, NewStreamPid} = http2_stream:start_link(
+                           [
+                            {stream_id, PSID},
+                            {connection, self()},
+                            {initial_send_window_size, SendWindowSize},
+                            {initial_recv_window_size, RecvWindowSize},
+                            {callback_module, CB},
+                            {notify_pid, NotifyPid},
+                            {socket, Socket}
+                           ]),
+
+    lager:error("StreamPid ~p", [NewStreamPid]),
 
     lager:debug("recv(~p, {~p, ~p})",[Frame, StreamId, S]),
     case ?IS_FLAG(Flags, ?FLAG_END_HEADERS) of
         true ->
             HeadersBin = http2_frame_headers:from_frames([Frame]),
             {Headers, NewDecodeContext} = hpack:decode(HeadersBin, DecodeContext),
-            http2_stream:recv_pp(StreamPid, Headers),
+            http2_stream:recv_pp(NewStreamPid, Headers),
 
             {next_state, connected,
              S#connection_state{
-               decode_context=NewDecodeContext
-              }};
+               decode_context=NewDecodeContext,
+               streams=[{PSID, NewStreamPid}|Streams]}};
         false ->
             {next_state, continuation,
              S#connection_state{
@@ -592,7 +618,8 @@ route_frame({H=#frame_header{
                                  stream_id = StreamId,
                                  frames = queue:from_list([Frame]),
                                  type = push_promise
-                                 }
+                                 },
+               streams=[{PSID, NewStreamPid}|Streams]
               }}
     end;
 
@@ -755,6 +782,11 @@ handle_event(stop, _StateName, State) ->
 handle_event(_E, StateName, State) ->
     {next_state, StateName, State}.
 
+handle_sync_event(streams, _F, StateName,
+                  #connection_state{
+                     streams=Streams
+                    }=Connection) ->
+    {reply, Streams, StateName, Connection};
 handle_sync_event({get_response, StreamId}, _F, StateName,
                   #connection_state{
                      streams=Streams
@@ -1020,12 +1052,15 @@ handle_socket_data(Data,
                       socket=Socket,
                       buffer=Buffer
                      }=State) ->
-    More = case sock:recv(Socket, 0, 1) of %% fail fast
-        {ok, Rest} ->
-            Rest;
-        %% It's not really an error, it's what we want
-        {error, timeout} ->
-            <<>>
+    More =
+        case sock:recv(Socket, 0, 1) of %% fail fast
+            {ok, Rest} ->
+                Rest;
+            %% It's not really an error, it's what we want
+            {error, timeout} ->
+                <<>>;
+            _ ->
+                <<>>
     end,
 
     %% What is buffer?
