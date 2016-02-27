@@ -117,7 +117,7 @@
 -record(settings, {header_table_size        = 4096,
                    enable_push              = 1,
                    max_concurrent_streams   = unlimited,
-                   initial_window_size      = 66665535,
+                   initial_window_size      = 65535,
                    max_frame_size           = 16384,
                    max_header_list_size     = unlimited}).
 -define(DEFAULT_SETTINGS, #settings{}).
@@ -191,7 +191,7 @@
 
 -define(PREFACE, "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n").
 
--define(DEFAULT_INITIAL_WINDOW_SIZE, 66665535).
+-define(DEFAULT_INITIAL_WINDOW_SIZE, 65535).
 
 
 -record(continuation_state, {

@@ -15,7 +15,7 @@ settings() ->
     EP = application:get_env(?MODULE, enable_push, 1),
     MCS = application:get_env(?MODULE, max_concurrent_streams, unlimited),
     IWS = application:get_env(?MODULE, initial_window_size, 65535),
-    MFS = application:get_env(?MODULE, max_frame_size, 16834),
+    MFS = application:get_env(?MODULE, max_frame_size, 16384),
     MHLS = application:get_env(?MODULE, max_header_list_size, unlimited),
 
     #settings{

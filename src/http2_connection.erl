@@ -317,7 +317,8 @@ route_frame({#frame_header{
 route_frame({H, Payload}, S = #connection_state{
                                  send_settings=SS=#settings{
                                                      initial_window_size=OldIWS
-                                                    }
+                                                    },
+                                 send_window_size=SWS
 %                                 streams = Streams
                                 })
     when H#frame_header.type == ?SETTINGS,
@@ -334,7 +335,18 @@ route_frame({H, Payload}, S = #connection_state{
             OldIWS - NewIWS
     end,
     lager:info("Delta ~p", [Delta]),
+    lager:info("New SendWindowSize ~p", [SWS-Delta]),
     NewSendSettings = http2_frame_settings:overlay(SS, Payload),
+
+    %% We've just got connection settings from a peer. He have a
+    %% couple of jobs to do here w.r.t. flow control
+
+    %% If Delta != 0, we need to change the connection's
+    %% send_window_size and every stream's send_window_size in the
+    %% state open or half_closed_remote
+
+    %%Handling the connection level suff in the state below, streams are still TODO
+
 
     %% Adjust all open and half_closed_remote streams send_window_size
     %% TODO: This will probably come in handy on the client side too
@@ -348,28 +360,40 @@ route_frame({H, Payload}, S = #connection_state{
     %                                       }};
     %                          (X) -> X
     %                       end, Streams),
-    lager:info("Sending Settings ACK"),
     socksend(S, http2_frame_settings:ack()),
-    lager:info("Sent Settings ACK"),
+    lager:debug("Sent Settings ACK"),
     {next_state, connected, S#connection_state{
-                              send_settings=NewSendSettings
+                              send_settings=NewSendSettings,
+                              send_window_size=SWS-Delta
                              }};
 %% This is the case where we got an ACK, so dequeue settings we're
 %% waiting to apply
 route_frame({H, _Payload},
             S = #connection_state{
-                   settings_sent=SS
+                   settings_sent=SS,
+                   recv_window_size=RWS,
+                   recv_settings=#settings{
+                                    initial_window_size=OldIWS
+                                   }
                   })
     when H#frame_header.type == ?SETTINGS,
          ?IS_FLAG(H#frame_header.flags, ?FLAG_ACK) ->
     lager:debug("Received SETTINGS ACK"),
     case queue:out(SS) of
         {{value, {_Ref, NewSettings}}, NewSS} ->
+
+            Delta = case NewSettings#settings.initial_window_size of
+                        undefined ->
+                            0;
+                        NewIWS ->
+                            OldIWS - NewIWS
+                    end,
             {next_state,
              connected,
              S#connection_state{
                settings_sent=NewSS,
-               recv_settings=NewSettings
+               recv_settings=NewSettings,
+               recv_window_size=RWS-Delta
               }};
         X ->
             lager:info("queue:out -> ~p", [X]),

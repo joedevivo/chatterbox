@@ -13,7 +13,7 @@ all() ->
 
 init_per_suite(Config) ->
     %% We'll start up a chatterbox server once, with this data_dir.
-    NewConfig = [{www_root, data_dir}|Config],
+    NewConfig = [{www_root, data_dir},{initial_window_size,99999999}|Config],
     chatterbox_test_buddy:start(NewConfig).
 
 init_per_testcase(_, Config) ->
