@@ -48,7 +48,13 @@ times_out_on_no_ack_of_server_settings(Config) ->
     %% Settings Frame
 
     %% Two receives. one for server settings, and one for client settings ack
-    {ok, _Settings1 = <<0,0,0,4,_,0,0,0,0>>} = Transport:recv(Socket, 9, 1000),
+    {ok, _Settings1 = <<0,0,L1,4,_,0,0,0,0>>} = Transport:recv(Socket, 9, 1000),
+    case L1 of
+        0 ->
+            ok;
+        _ ->
+            {ok, _DontCare} = Transport:recv(Socket, L1, 1000)
+    end,
     {ok, _Settings2 = <<0,0,0,4,_,0,0,0,0>>} = Transport:recv(Socket, 9, 1000),
 
     %% Since we never send our ack, we should get a settings timeout in 5000ms
@@ -81,7 +87,13 @@ protocol_error_on_never_send_client_settings(Config) ->
     Transport:send(Socket, <<?PREFACE>>),
 
     %% This is the settings frame. Do not ACK
-    {ok, _Settings1 = <<0,0,0,4,0,0,0,0,0>>} = Transport:recv(Socket, 9, 1000),
+    {ok, _Settings1 = <<0,0,L,4,0,0,0,0,0>>} = Transport:recv(Socket, 9, 1000),
+    case L of
+        0 ->
+            ok;
+        _ ->
+            {ok, _DontCare} = Transport:recv(Socket, L, 1000)
+    end,
 
     ct:pal("waiting for timeout, should arrive in 5000ms"),
     {ok, GoAwayBin} = Transport:recv(Socket, 0, 6000),

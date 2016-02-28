@@ -12,9 +12,10 @@ start_link(Ref, Socket, Transport, Opts) ->
     Pid = proc_lib:spawn_link(?MODULE, init, [Ref, Socket, Transport, Opts]),
     {ok, Pid}.
 
-init(Ref, Socket, T, _Opts) ->
+init(Ref, Socket, T, Opts) ->
     ok = ranch:accept_ack(Ref),
-    http2_connection:become({transport(T), Socket}).
+    Http2Settings = proplists:get_value(http2_settings, Opts, chatterbox:settings(server)),
+    http2_connection:become({transport(T), Socket}, Http2Settings).
 
 transport(ranch_ssl) ->
     ssl;

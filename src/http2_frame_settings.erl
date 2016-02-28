@@ -7,6 +7,7 @@
 -export([
          format/1,
          read_binary/2,
+         send/1,
          send/2,
          ack/0,
          ack/1,
@@ -95,6 +96,14 @@ overlay(S, {settings, [{?SETTINGS_MAX_HEADER_LIST_SIZE, Val}|PList]}) ->
 overlay(S, {settings, []}) ->
     S.
 
+-spec send(settings()) -> binary().
+send(Settings) ->
+    List = http2_settings:to_proplist(Settings),
+    Payload = make_payload(List),
+    L = size(Payload),
+    Header = <<L:24,?SETTINGS:8,16#0:8,0:1,0:31>>,
+    <<Header/binary, Payload/binary>>.
+
 -spec send(settings(), settings()) -> binary().
 send(PrevSettings, NewSettings) ->
     Diff = http2_settings:diff(PrevSettings, NewSettings),
@@ -109,6 +118,8 @@ make_payload(Diff) ->
 
 make_payload_([], BinAcc) ->
     BinAcc;
+make_payload_([{_, unlimited}|Tail], BinAcc) ->
+    make_payload_(Tail, BinAcc);
 make_payload_([{<<Setting>>, Value}|Tail], BinAcc) ->
     make_payload_(Tail, <<Setting:16,Value:32,BinAcc/binary>>).
 

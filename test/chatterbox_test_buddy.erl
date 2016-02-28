@@ -32,26 +32,27 @@ start(Config) ->
                   [{root_dir, WWWRoot}]}|PreDataSettings]
         end,
 
-    application:set_env(chatterbox, header_table_size,
+    application:set_env(chatterbox, server_header_table_size,
                         proplists:get_value(header_table_size, Config, 4096)),
-    application:set_env(chatterbox, enable_push,
+    application:set_env(chatterbox, server_enable_push,
                         proplists:get_value(enable_push, Config, 1)),
 
-    application:set_env(chatterbox, max_concurrent_streams,
+    application:set_env(chatterbox, server_max_concurrent_streams,
                         proplists:get_value(max_concurrent_streams, Config, unlimited)),
 
-    application:set_env(chatterbox, initial_window_size,
+    application:set_env(chatterbox, server_initial_window_size,
                         proplists:get_value(initial_window_size, Config, 65535)),
 
-    application:set_env(chatterbox, max_frame_size,
+    application:set_env(chatterbox, server_max_frame_size,
                         proplists:get_value(max_frame_size, Config, 16384)),
 
-    application:set_env(chatterbox, max_header_list_size,
+    application:set_env(chatterbox, server_max_header_list_size,
                         proplists:get_value(max_header_list_size, Config, unlimited)),
 
-    cthr:pal("Settings ~p", [Settings]),
+    ct:pal("Settings ~p", [Settings]),
     [ok = application:set_env(chatterbox, Key, Value) || {Key, Value} <- Settings ],
     {ok, List} = application:ensure_all_started(chatterbox),
+
     ct:pal("Started: ~p", [List]),
 
     {ok, _RanchPid} =
@@ -78,7 +79,7 @@ ensure_ssl(Config) ->
     end.
 
 stop(_Config) ->
-    cthr:pal("chatterbox_test_buddy:stop/1"),
+    ct:pal("chatterbox_test_buddy:stop/1"),
     application:stop(chatterbox),
     ranch:stop_listener(chatterbox_ranch_protocol),
     ok.

@@ -106,10 +106,10 @@ start_link(Transport, Host, Port, SSLOptions) ->
                http -> gen_tcp;
                https -> ssl
            end,
-    http2_connection:start_client_link(NewT, Host, Port, SSLOptions).
+    http2_connection:start_client_link(NewT, Host, Port, SSLOptions, chatterbox:settings(client)).
 
 start_ssl_upgrade_link(Host, Port, InitialMessage, SSLOptions) ->
-    http2_connection:start_ssl_upgrade_link(Host, Port, InitialMessage, SSLOptions).
+    http2_connection:start_ssl_upgrade_link(Host, Port, InitialMessage, SSLOptions, chatterbox:settings(client)).
 
 -spec stop(pid()) -> ok.
 stop(Pid) ->

@@ -2,7 +2,10 @@
 
 -include("http2.hrl").
 
--export([diff/2]).
+-export([
+         diff/2,
+         to_proplist/1
+        ]).
 
 -spec diff(settings(), settings()) -> settings_proplist().
 diff(OldSettings, NewSettings) ->

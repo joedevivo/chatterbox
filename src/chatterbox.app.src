@@ -13,16 +13,34 @@
                   hpack,
                   lager
                  ]},
-  {env, [
+  {env,
+   [
     {port, 80},
     {concurrent_acceptors, 20},
-    {header_table_size, 4096},
-    {enable_push, 1},
-    {max_concurrent_streams, unlimited},
-    {initial_window_size, 65535},
-    {max_frame_size, 16384},
-    {max_header_list_size, unlimited},
-    {content_handler, chatterbox_static_content_handler}
+    {content_handler, chatterbox_static_content_handler},
+
+    %% These are the defaults for ALL HTTP/2 clients. You can change
+    %% any of them that you want to, but these will be the ones used
+    %% by default if you don't.
+
+    %% I wanted them to be one proplist, but I realized that will be
+    %% annoying for people that only want to change one default
+    %% setting.
+    {client_header_table_size, 4096},
+    {client_enable_push, 1},
+    {client_max_concurrent_streams, unlimited},
+    {client_initial_window_size, 65535},
+    {client_max_frame_size, 16384},
+    {client_max_header_list_size, unlimited},
+
+    %% Same for server
+    {server_header_table_size, 4096},
+    {server_enable_push, 1},
+    {server_max_concurrent_streams, unlimited},
+    {server_initial_window_size, 65535},
+    {server_max_frame_size, 16384},
+    {server_max_header_list_size, unlimited}
+
   ]}
  ]}.
 %% vim: set filetype=erlang tabstop=2

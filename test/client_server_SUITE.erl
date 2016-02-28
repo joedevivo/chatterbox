@@ -24,6 +24,7 @@ end_per_suite(Config) ->
     ok.
 
 complex_request(_Config) ->
+    application:set_env(chatterbox, client_initial_window_size, 99999999),
     {ok, Client} = http2_client:start_link(),
     RequestHeaders =
         [

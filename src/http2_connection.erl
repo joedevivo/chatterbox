@@ -5,9 +5,9 @@
 -include("http2.hrl").
 -compile(export_all). %% for now
 -export([
-         start_client_link/4,
-         start_ssl_upgrade_link/4,
-         start_server_link/2,
+         start_client_link/5,
+         start_ssl_upgrade_link/5,
+         start_server_link/3,
          become/1,
          stop/1
         ]).
@@ -49,35 +49,47 @@
           listen_socket :: ssl:sslsocket() | inet:socket(),
           transport     :: gen_tcp | ssl,
           listen_ref    :: non_neg_integer(),
-          acceptor_callback = fun chatterbox_sup:start_socket/0 :: fun()
+          acceptor_callback = fun chatterbox_sup:start_socket/0 :: fun(),
+          server_settings = #settings{} :: settings()
          }).
 
 -spec start_client_link(gen_tcp | ssl,
                         inet:ip_address() | inet:hostname(),
                         inet:port_number(),
-                        [ssl:ssloption()]) ->
+                        [ssl:ssloption()],
+                        settings()
+                       ) ->
                                {ok, pid()} | ignore | {error, term()}.
-start_client_link(Transport, Host, Port, SSLOptions) ->
-    gen_fsm:start_link(?MODULE, {client, Transport, Host, Port, SSLOptions}, []).
+start_client_link(Transport, Host, Port, SSLOptions, Http2Settings) ->
+    gen_fsm:start_link(?MODULE, {client, Transport, Host, Port, SSLOptions, Http2Settings}, []).
 
 -spec start_ssl_upgrade_link(inet:ip_address() | inet:hostname(),
                              inet:port_number(),
                              binary(),
-                             [ssl:ssloption()]) ->
+                             [ssl:ssloption()],
+                             settings()
+                            ) ->
                                     {ok, pid()} | ignore | {error, term()}.
-start_ssl_upgrade_link(Host, Port, InitialMessage, SSLOptions) ->
-    gen_fsm:start_link(?MODULE, {client_ssl_upgrade, Host, Port, InitialMessage, SSLOptions}, []).
+start_ssl_upgrade_link(Host, Port, InitialMessage, SSLOptions, Http2Settings) ->
+    gen_fsm:start_link(?MODULE, {client_ssl_upgrade, Host, Port, InitialMessage, SSLOptions, Http2Settings}, []).
 
 -spec start_server_link(socket(),
-                        [ssl:ssloption()]) ->
+                        [ssl:ssloption()],
+                        #settings{}) ->
                                {ok, pid()} | ignore | {error, term()}.
-start_server_link({Transport, ListenSocket}, SSLOptions) ->
-    gen_fsm:start_link(?MODULE, {server, {Transport, ListenSocket}, SSLOptions}, []).
+start_server_link({Transport, ListenSocket}, SSLOptions, Http2Settings) ->
+    gen_fsm:start_link(?MODULE, {server, {Transport, ListenSocket}, SSLOptions, Http2Settings}, []).
 
 -spec become(socket()) -> no_return().
-become({Transport, Socket}) ->
+become(Socket) ->
+    become(Socket, chatterbox:settings(server)).
+
+-spec become(socket(), settings()) -> no_return().
+become({Transport, Socket}, Http2Settings) ->
     ok = Transport:setopts(Socket, [{packet, raw}, binary]),
-    {_, _, NewState} = start_http2_server(#connection_state{
+    lager:error("becoming with ~p", [Http2Settings]),
+    {_, _, NewState} = start_http2_server(Http2Settings,
+                                          #connection_state{
                                              socket = {Transport, Socket}
                                             }),
     gen_fsm:enter_loop(?MODULE,
@@ -86,7 +98,7 @@ become({Transport, Socket}) ->
                        NewState).
 
 %% Init callback
-init({client, Transport, Host, Port, SSLOptions}) ->
+init({client, Transport, Host, Port, SSLOptions, Http2Settings}) ->
     {ok, Socket} = Transport:connect(Host, Port, client_options(Transport, SSLOptions)),
     ok = Transport:setopts(Socket, [{packet, raw}, binary]),
     Transport:send(Socket, <<?PREFACE>>),
@@ -96,9 +108,9 @@ init({client, Transport, Host, Port, SSLOptions}) ->
                      },
     {ok,
      handshake,
-     send_settings(InitialState),
+     send_settings(Http2Settings, InitialState),
      4500};
-init({client_ssl_upgrade, Host, Port, InitialMessage, SSLOptions}) ->
+init({client_ssl_upgrade, Host, Port, InitialMessage, SSLOptions, Http2Settings}) ->
     {ok, TCP} = gen_tcp:connect(Host, Port, [{active, false}]),
     gen_tcp:send(TCP, InitialMessage),
     {ok, Socket} = ssl:connect(TCP, client_options(ssl, SSLOptions)),
@@ -112,9 +124,9 @@ init({client_ssl_upgrade, Host, Port, InitialMessage, SSLOptions}) ->
                      },
     {ok,
      handshake,
-     send_settings(InitialState),
+     send_settings(Http2Settings, InitialState),
      4500};
-init({server, {Transport, ListenSocket}, SSLOptions}) ->
+init({server, {Transport, ListenSocket}, SSLOptions, Http2Settings}) ->
     %% prim_inet:async_accept is dope. It says just hang out here and
     %% wait for a message that a client has connected. That message
     %% looks like:
@@ -126,7 +138,8 @@ init({server, {Transport, ListenSocket}, SSLOptions}) ->
         ssl_options = SSLOptions,
         listen_socket = ListenSocket,
         listen_ref = Ref,
-        transport = Transport
+        transport = Transport,
+        server_settings = Http2Settings
        }}. %% No timeout here, it's just a listener
 
 send_frame(Pid, Bin)
@@ -876,7 +889,8 @@ handle_info({inet_async, ListenSocket, Ref, {ok, ClientSocket}},
                listen_ref = Ref,
                transport = Transport,
                ssl_options = SSLOptions,
-               acceptor_callback = AcceptorCallback
+               acceptor_callback = AcceptorCallback,
+               server_settings = Http2Settings
               }) ->
 
     %If anything crashes in here, at least there's another acceptor ready
@@ -892,9 +906,11 @@ handle_info({inet_async, ListenSocket, Ref, {ok, ClientSocket}},
             {ok, <<"h2">>} = ssl:negotiated_protocol(AcceptSocket),
             AcceptSocket
     end,
-    start_http2_server(#connection_state{
-                          socket={Transport, Socket}
-                         });
+    start_http2_server(
+      Http2Settings,
+      #connection_state{
+         socket={Transport, Socket}
+        });
 
 
 %% Socket Messages
@@ -976,20 +992,32 @@ go_away(ErrorCode,
     gen_fsm:send_event(self(), io_lib:format("GO_AWAY: ErrorCode ~p", [ErrorCode])),
     {next_state, closing, State}.
 
+
+send_settings(SettingsToSend,
+              #connection_state{
+                 recv_settings=CurrentSettings,
+                 settings_sent=SS
+                }=State) ->
+    Ref = make_ref(),
+    Bin = http2_frame_settings:send(CurrentSettings, SettingsToSend),
+    socksend(State, Bin),
+    send_ack_timeout({Ref,SettingsToSend}),
+    State#connection_state{
+      settings_sent=queue:in({Ref, SettingsToSend}, SS)
+     }.
+
 -spec send_settings(connection_state()) -> connection_state().
 send_settings(State = #connection_state{
                          recv_settings=CurrentSettings,
                          settings_sent=SS
                         }) ->
-    %% Pull from config
-    NewSettings = chatterbox:settings(),
-    Ref = make_ref(),
 
-    Bin = http2_frame_settings:send(CurrentSettings, NewSettings),
+    Ref = make_ref(),
+    Bin = http2_frame_settings:send(CurrentSettings),
     socksend(State, Bin),
-    send_ack_timeout({Ref,NewSettings}),
+    send_ack_timeout({Ref,CurrentSettings}),
     State#connection_state{
-      settings_sent=queue:in({Ref, NewSettings}, SS)
+      settings_sent=queue:in({Ref, CurrentSettings}, SS)
      }.
 
 -spec send_ack_timeout({reference(), settings()}) -> pid().
@@ -1023,9 +1051,12 @@ client_options(Transport, SSLOptions) ->
             ClientSocketOptions
     end.
 
-start_http2_server(#connection_state{
-                     socket={Transport, Socket}
-                    }=State) ->
+start_http2_server(
+  Http2Settings,
+  #connection_state{
+     socket={Transport, Socket}
+    }=State) ->
+    lager:info("StartHTTP2 settings: ~p", [Http2Settings]),
     case Transport:recv(Socket, length(?PREFACE), 5000) of
         {ok, <<?PREFACE>>} ->
             ok = active_once({Transport, Socket}),
@@ -1034,7 +1065,7 @@ start_http2_server(#connection_state{
               },
             {next_state,
              handshake,
-             send_settings(NewState)
+             send_settings(Http2Settings, NewState)
             };
         BadPreface ->
             lager:debug("Bad Preface: ~p", [BadPreface]),
