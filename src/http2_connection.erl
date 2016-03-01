@@ -21,7 +21,8 @@
          send_promise/4,
          get_response/2,
          get_peer/1,
-         get_streams/1
+         get_streams/1,
+         send_window_update/2
 ]).
 
 %% gen_fsm callbacks
@@ -189,6 +190,10 @@ get_response(Pid, StreamId) ->
 -spec get_streams(pid()) -> [{stream_id(), pid()}].
 get_streams(Pid) ->
     gen_fsm:sync_send_all_state_event(Pid, streams).
+
+-spec send_window_update(pid(), non_neg_integer()) -> ok.
+send_window_update(Pid, Size) ->
+    gen_fsm:send_all_state_event(Pid, {send_window_update, Size}).
 
 -spec stop(pid()) -> ok.
 stop(Pid) ->
@@ -728,6 +733,18 @@ route_frame(Frame, State) ->
     lager:error("OOPS! ~p", [State]),
     go_away(?PROTOCOL_ERROR, State).
 
+handle_event({send_window_update, Size},
+             StateName,
+             #connection_state{
+                recv_window_size=CRWS,
+                socket=Socket
+                }=Connection) ->
+    http2_frame_window_update:send(Socket, Size, 0),
+    {next_state,
+     StateName,
+     Connection#connection_state{
+       recv_window_size=CRWS+Size
+      }};
 handle_event({send_headers, StreamId, Headers},
              StateName,
              #connection_state{

@@ -16,7 +16,9 @@
          stream_id/0,
          connection/0,
          get_response/1,
-         notify_pid/1
+         notify_pid/1,
+         send_window_update/1,
+         send_connection_window_update/1
         ]).
 
 %% gen_fsm callbacks
@@ -100,7 +102,7 @@
             CustomState :: any()) ->
     {ok, NewState :: any()}.
 
-%% Public AP
+%% Public API
 -spec start_link(stream_options()) ->
                         {ok, pid()} | ignore | {error, term()}.
 start_link(StreamOptions) ->
@@ -164,6 +166,16 @@ get_response(Pid) ->
                               | {error, term()}.
 notify_pid(Pid) ->
     gen_fsm:sync_send_all_state_event(Pid, notify_pid).
+
+-spec send_window_update(non_neg_integer()) -> ok.
+send_window_update(Size) ->
+    gen_fsm:send_all_state_event(self(), {send_window_update, Size}).
+
+-spec send_connection_window_update(non_neg_integer()) -> ok.
+send_connection_window_update(Size) ->
+    gen_fsm:send_all_state_event(self(), {send_connection_window_update, Size}).
+
+
 
 %% States
 %% - idle
@@ -467,7 +479,25 @@ closed(get_response,
        ) ->
     {reply, {ok, {H, B}}, closed, Stream}.
 
-
+handle_event({send_window_update, Size},
+             StateName,
+             #stream_state{
+                socket=Socket,
+                stream_id=StreamId,
+                recv_window_size=RWS
+               }=State) ->
+    http2_frame_window_update:send(Socket, Size, StreamId),
+    {next_state, StateName,
+     State#stream_state{
+       recv_window_size=RWS+Size
+       }};
+handle_event({send_connection_window_update, Size},
+             StateName,
+             #stream_state{
+                connection=ConnPid
+               }=State) ->
+    http2_connection:send_window_update(ConnPid, Size),
+    {next_state, StateName, State};
 handle_event({recv_wu,
               {#frame_header{
                   type=?WINDOW_UPDATE,

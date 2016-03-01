@@ -30,7 +30,10 @@ read_binary(_, _) ->
 send({Transport, Socket}, #window_update{window_size_increment=Payload}, StreamId) ->
     Transport:send(Socket, [
         <<4:24,?WINDOW_UPDATE:8,0:8,0:1,StreamId:31>>,
-        <<0:1,Payload:31>>]).
+                            <<0:1,Payload:31>>]);
+send({Transport, Socket}, Size, StreamId) ->
+    send({Transport, Socket}, #window_update{window_size_increment=Size}, StreamId).
+
 
 -spec to_binary(window_update()) -> iodata().
 to_binary(#window_update{

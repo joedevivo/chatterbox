@@ -81,7 +81,5 @@ basic_push(_Config) ->
 
     ct:pal("Response Headers: ~p", [ResponseHeaders]),
     ct:pal("Response Body: ~p", [ResponseBody]),
-
     13 = length(Streams),
-
     ok.

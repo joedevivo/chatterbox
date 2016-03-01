@@ -32,6 +32,9 @@ start(Config) ->
                   [{root_dir, WWWRoot}]}|PreDataSettings]
         end,
 
+    application:set_env(chatterbox, stream_callback_mod,
+                        proplists:get_value(stream_callback_mod, Config, chatterbox_static_stream)),
+
     application:set_env(chatterbox, server_header_table_size,
                         proplists:get_value(header_table_size, Config, 4096)),
     application:set_env(chatterbox, server_enable_push,
