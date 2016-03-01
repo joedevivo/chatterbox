@@ -29,7 +29,6 @@
          send_binary/2,
          send_frames/2,
          send_unaltered_frames/2,
-         send_request/3,
          get_frames/2,
          wait_for_n_frames/3
         ]).
@@ -40,7 +39,8 @@
 
 -record(http2c_state, {
           socket :: undefined | {gen_tcp, gen_tcp:socket()} | {ssl, ssl:sslsocket()},
-          connection = #connection_state{} :: connection_state(),
+          send_settings = #settings{} :: settings(),
+          encode_context = hpack:new_encode_context() :: hpack:encode_context(),
           next_available_stream_id = 1 :: pos_integer(),
           incoming_frames = [] :: [frame()],
           working_frame_header = undefined :: undefined | frame_header(),
@@ -87,28 +87,6 @@ send_frames(Pid, Frames) ->
 send_unaltered_frames(Pid, Frames) ->
     [ send_binary(Pid, http2_frame:to_binary(F)) || F <- Frames],
     ok.
-
-%% send_request takes a set of headers and a possible body. It's
-%% broken up into HEADERS, CONTINUATIONS, and DATA frames, and that
-%% list of frames is passed to send_frames. This one needs to be smart
-%% about creating a new frame id
--spec send_request(pid(), hpack:headers(), binary()) ->
-                          {hpack:headers(), binary()}.
-send_request(Pid, Headers, Body) ->
-    %% TODO: Turn Headers & Body into frames
-    %% That means creating a new stream id
-    %% Which means getting one from the gen_server state
-    NewStreamId = gen_server:call(Pid, new_stream_id),
-    EncodeContext = gen_server:call(Pid, encode_context),
-    SendSettings = gen_server:call(Pid, send_settings),
-    %% Use that to make frames
-    {HeaderFrame, NewEncodeContext} = http2_frame_headers:to_frame(NewStreamId, Headers, EncodeContext),
-    gen_server:cast(Pid, {encode_context, NewEncodeContext}),
-    DataFrames = http2_frame_data:to_frames(NewStreamId, Body, SendSettings),
-    send_frames(Pid, [HeaderFrame|DataFrames]),
-
-    %% Pull data off the wire. How? Right now we just do a separent call
-    {[],<<>>}.
 
 get_frames(Pid, StreamId) ->
     gen_server:call(Pid, {get_frames, StreamId}).
@@ -192,10 +170,11 @@ init([]) ->
     end,
     {ok, #http2c_state{
             socket = {Transport, Socket},
-            connection = #connection_state{
-                            recv_settings = ClientSettings,
-                            send_settings = http2_frame_settings:overlay(#settings{},  ServerSettings)
-                           }
+            send_settings = http2_frame_settings:overlay(#settings{},  ServerSettings)
+%            connection = #connection_state{
+%                            recv_settings = ClientSettings,
+
+%                           }
            }}.
 
 %% Handling call messages
@@ -208,13 +187,13 @@ init([]) ->
                          {stop, any(), #http2c_state{}}.
 handle_call(new_stream_id, _From, #http2c_state{next_available_stream_id=Next}=State) ->
     {reply, Next, State#http2c_state{next_available_stream_id=Next+2}};
-handle_call(encode_context, _From, #http2c_state{connection=#connection_state{encode_context=EC}}=State) ->
+handle_call(encode_context, _From, #http2c_state{encode_context=EC}=State) ->
     {reply, EC, State};
 handle_call({get_frames, StreamId}, _From, #http2c_state{incoming_frames=IF}=S) ->
     {ToReturn, ToPutBack} = lists:partition(fun({#frame_header{stream_id=SId},_}) -> StreamId =:= SId end, IF),
     {reply, ToReturn, S#http2c_state{incoming_frames=ToPutBack}};
-handle_call(send_settings, _From, #http2c_state{connection=C}) ->
-    {reply, C#connection_state.send_settings};
+handle_call(send_settings, _From, #http2c_state{send_settings=S}) ->
+    {reply, S};
 handle_call(Request, _From, State) ->
     {reply, {unknown_request, Request}, State}.
 
@@ -229,12 +208,8 @@ handle_cast({send_bin, Bin}, #http2c_state{socket={Transport, Socket}}=State) ->
     {noreply, State};
 handle_cast(recv, #http2c_state{
                      socket={Transport, Socket},
-                     incoming_frames = Frames,
-                     connection=#connection_state{}
+                     incoming_frames = Frames
         }=State) ->
-    lager:info("recv"),
-
-
     RawHeader = Transport:recv(Socket, 9),
     {FHeader, <<>>} = http2_frame:read_binary_frame_header(RawHeader),
     lager:info("http2c recv ~p", [FHeader]),
@@ -243,8 +218,8 @@ handle_cast(recv, #http2c_state{
     F = {FHeader, Payload},
     gen_server:cast(self(), recv),
     {noreply, State#http2c_state{incoming_frames = Frames ++ [F]}};
-handle_cast({encode_context, EC}, State=#http2c_state{connection=C}) ->
-    {noreply, State#http2c_state{connection=C#connection_state{encode_context=EC}}};
+handle_cast({encode_context, EC}, State=#http2c_state{}) ->
+    {noreply, State#http2c_state{encode_context=EC}};
 handle_cast(_Msg, State) ->
     {noreply, State}.
 

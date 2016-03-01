@@ -54,6 +54,35 @@
           server_settings = #settings{} :: settings()
          }).
 
+-record(continuation_state, {
+          stream_id = undefined :: stream_id() | undefined,
+          frames = undefined :: queue:queue(frame()),
+          type = undefined :: undefined | headers | push_promise,
+          end_stream = false :: boolean()
+}).
+
+-record(connection_state, {
+          type = undefined :: client | server | undefined,
+          ssl_options = [],
+          listen_ref :: non_neg_integer(),
+          socket = undefined :: sock:socket(),
+          send_settings = #settings{} :: settings(),
+          recv_settings = #settings{} :: settings(),
+          send_window_size = ?DEFAULT_INITIAL_WINDOW_SIZE :: integer(),
+          recv_window_size = ?DEFAULT_INITIAL_WINDOW_SIZE :: integer(),
+          decode_context = hpack:new_decode_context() :: hpack:decode_context(),
+          encode_context = hpack:new_encode_context() :: hpack:encode_context(),
+          settings_sent = queue:new() :: queue:queue(),
+          next_available_stream_id = 2 :: stream_id(),
+          streams = [] :: [{stream_id(), pid()}],
+          stream_callback_mod = application:get_env(chatterbox, stream_callback_mod, chatterbox_static_stream) :: module(),
+          content_handler = application:get_env(chatterbox, content_handler, chatterbox_static_content_handler) :: module(),
+          buffer = empty :: empty | {binary, binary()} | {frame, frame_header(), binary()},
+          continuation = undefined :: undefined | #continuation_state{}
+}).
+
+-type state() :: #connection_state{}.
+
 -spec start_client_link(gen_tcp | ssl,
                         inet:ip_address() | inet:hostname(),
                         inet:port_number(),
@@ -1049,7 +1078,7 @@ send_settings(SettingsToSend,
       settings_sent=queue:in({Ref, SettingsToSend}, SS)
      }.
 
--spec send_settings(connection_state()) -> connection_state().
+-spec send_settings(state()) -> state().
 send_settings(State = #connection_state{
                          recv_settings=CurrentSettings,
                          settings_sent=SS
