@@ -45,8 +45,7 @@
 
 
 -export([
-         recv_frame/3,
-         send_frame/3
+         process/3
         ]).
 
 
@@ -76,7 +75,41 @@
               stream_option/0,
               stream_options/0
              ]).
--export_type([stream_state/0]).
+
+-type stream_state_name() :: 'idle'
+                           | 'open'
+                           | 'closed'
+                           | 'reserved_local'
+                           | 'reserved_remote'
+                           | 'half_closed_local'
+                           | 'half_closed_remote'.
+
+-record(stream_state, {
+          stream_id = undefined :: stream_id(),
+          connection = undefined :: undefined | pid(),
+          socket = undefined :: sock:socket(),
+          state = idle :: stream_state_name(),
+          send_window_size = ?DEFAULT_INITIAL_WINDOW_SIZE :: integer(),
+          recv_window_size = ?DEFAULT_INITIAL_WINDOW_SIZE :: integer(),
+          queued_frames = queue:new() :: queue:queue(frame()),
+          incoming_frames = queue:new() :: queue:queue(frame()),
+          request_headers = [] :: hpack:headers(),
+          request_body :: iodata(),
+          request_end_stream = false :: boolean(),
+          request_end_headers = false :: boolean(),
+          response_headers = [] :: hpack:headers(),
+          response_body :: iodata(),
+          response_end_headers = false :: boolean(),
+          response_end_stream = false :: boolean(),
+          next_state = undefined :: undefined | stream_state_name(),
+          promised_stream = undefined :: undefined | state(),
+          notify_pid = undefined :: undefined | pid(),
+          custom_state = undefined :: any(),
+          callback_mod = undefined :: module()
+}).
+
+-type state() :: #stream_state{}.
+-export_type([state/0]).
 
 -callback init() -> {ok, any()}.
 
@@ -327,12 +360,17 @@ open({send_frame,
             {next_state, open, Stream}
     end;
 
-
-open({recv_frame, {H,_}},
-     Stream)
-  when H#frame_header.type == ?DATA,
-       H#frame_header.length > Stream#stream_state.recv_window_size ->
-    %%PROTOCOL_ERROR
+%% Open receive data frame that is larger than the stream's recv_window_size
+open({recv_frame,
+      {#frame_header{
+         length=L,
+         type=?DATA
+         },_}},
+     #stream_state{
+        recv_window_size=SRWS
+       }=Stream)
+  when SRWS < L ->
+    rst_stream(?FLOW_CONTROL_ERROR, Stream),
     {next_state,
      closed,
      Stream};
@@ -383,18 +421,8 @@ open({recv_frame,
        request_end_stream=true,
        custom_state=NewCustomState
       }};
-open({recv_frame,
-      {#frame_header{
-          flags=Flags,
-          type=?DATA
-         }, _}},
-     Stream)
-  when ?IS_FLAG(Flags, ?FLAG_END_STREAM) ->
-    lager:info("?IS_FLAG(Flags, ?FLAG_END_STREAM) = ~p", [?IS_FLAG(Flags, ?FLAG_END_STREAM)]),
-    {next_state, open, Stream};
-
-open(_, Stream) ->
-    %% Other?
+open(Msg, Stream) ->
+    lager:warning("Some unexpected message in open state. ~p, ~p", [Msg, Stream]),
     {next_state, open, Stream}.
 
 half_closed_remote(
@@ -575,8 +603,8 @@ terminate(_Reason, _StateName, _State) ->
 
 -spec process( send|recv,
               frame(),
-              {stream_state(), connection_state()}) ->
-                     {stream_state(), connection_state()}.
+              {state(), connection_state()}) ->
+                     {state(), connection_state()}.
 
 %% IMPORTANT: If we're in an idle state, we can only send/receive
 %% HEADERS frames. The diagram in the spec wants you believe that you
@@ -1259,8 +1287,8 @@ maybe_decode_request_body(#stream_state{
 maybe_decode_request_body(Stream, Connection) ->
     {Stream, Connection}.
 
--spec maybe_decode_response_headers(stream_state(), connection_state()) ->
-                                           {stream_state(), connection_state()}.
+-spec maybe_decode_response_headers(state(), connection_state()) ->
+                                           {state(), connection_state()}.
 maybe_decode_response_headers(
   #stream_state{
      incoming_frames=IFQ,
@@ -1310,75 +1338,18 @@ maybe_decode_response_body(
 maybe_decode_response_body(Stream, Connection) ->
     {Stream, Connection}.
 
--spec recv_frame(frame(), stream_state(), connection_state()) ->
-                        {stream_state(), connection_state()}.
-%% Errors first, since they're usually easier to detect.
-
-%% When 'open' and stream recv window too small
-recv_frame({_FH=#frame_header{
-                   length=L,
-                   type=?DATA
-                  }, _P},
-           S = #stream_state{
-                   stream_id=StreamId,
-                   recv_window_size=SRWS
-                },
-          ConnectionState)
-  when L > SRWS ->
-    rst_stream(?FLOW_CONTROL_ERROR, StreamId, ConnectionState),
-    {S#stream_state{
-      state=closed,
-      recv_window_size=0,
-      incoming_frames=queue:new()
-     }, ConnectionState};
-%% When 'open' and connection recv window too small
-recv_frame({_FH=#frame_header{
-                   length=L,
-                   type=?DATA
-                  }, _P},
-           S = #stream_state{
-                },
-            ConnectionState=#connection_state{
-              recv_window_size=CRWS
-             }
-           )
-  when L > CRWS ->
-    http2_connection:go_away(?FLOW_CONTROL_ERROR, ConnectionState),
-    {S#stream_state{
-      state=closed,
-      recv_window_size=0,
-      incoming_frames=queue:new()
-     }, ConnectionState};
-
-recv_frame(F, S, C) ->
-    process(recv, F, {S,C}).
-
--spec send_frame(frame(), stream_state(), connection_state())
-                -> {stream_state(), connection_state()}.
-
-send_frame({#frame_header{
-               length=L,
-               type=?DATA},_},
+-spec rst_stream(error_code(), state()) -> ok.
+rst_stream(ErrorCode,
            #stream_state{
-               stream_id=StreamId,
-               send_window_size=SSWS
-              } = Stream,
-            #connection_state{
-               send_window_size=CSWS
-              }=Connection)
-  when L > SSWS; L > CSWS ->
-    rst_stream(?FLOW_CONTROL_ERROR, StreamId, Connection),
-    {Stream, Connection};
-
-send_frame(F, S,C) ->
-    process(send, F,{S,C}).
-
-rst_stream(ErrorCode, StreamId, #connection_state{}) ->
+              socket=Socket,
+              stream_id=StreamId
+              }
+          ) ->
     RstStream = #rst_stream{error_code=ErrorCode},
     RstStreamBin = http2_frame:to_binary(
                      {#frame_header{
                          stream_id=StreamId
                         },
                       RstStream}),
-    http2_connection:send_frame(self(), RstStreamBin),
+    sock:send(Socket, RstStreamBin),
     ok.

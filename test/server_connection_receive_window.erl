@@ -20,17 +20,17 @@ init() ->
 
 on_receive_request_headers(Headers, State) ->
     http2_stream:send_window_update(65535),
-    lager:info("on_receive_request_headers(~p, ~p)", [Headers, State]),
+    ct:pal("on_receive_request_headers(~p, ~p)", [Headers, State]),
     {ok, State#cb_static{req_headers=Headers}}.
 
 on_send_push_promise(Headers, State) ->
-    lager:info("on_send_push_promise(~p, ~p)", [Headers, State]),
+    ct:pal("on_send_push_promise(~p, ~p)", [Headers, State]),
     {ok, State#cb_static{req_headers=Headers}}.
 
 on_receive_request_data(Bin, State)->
-    lager:info("on_receive_request_data(~p, ~p)", [Bin, State]),
+    ct:pal("on_receive_request_data(~p, ~p)", [Bin, State]),
     {ok, State}.
 
 on_request_end_stream(_StreamId, _ConnPid, State) ->
-    lager:info("on_request_end_stream(~p)", [State]),
+    ct:pal("on_request_end_stream(~p)", [State]),
     {ok, State}.

@@ -214,46 +214,11 @@
           encode_context = hpack:new_encode_context() :: hpack:encode_context(),
           settings_sent = queue:new() :: queue:queue(),
           next_available_stream_id = 2 :: stream_id(),
-          streams = [] :: [{stream_id(), stream_state()}],
+          streams = [] :: [{stream_id(), pid()}],
           stream_callback_mod = application:get_env(chatterbox, stream_callback_mod, chatterbox_static_stream) :: module(),
           content_handler = application:get_env(chatterbox, content_handler, chatterbox_static_content_handler) :: module(),
           buffer = empty :: empty | {binary, binary()} | {frame, frame_header(), binary()},
           continuation = undefined :: undefined | #continuation_state{}
 }).
 
-
 -type connection_state() :: #connection_state{}.
-
--type stream_state_name() :: 'idle'
-                           | 'open'
-                           | 'closed'
-                           | 'reserved_local'
-                           | 'reserved_remote'
-                           | 'half_closed_local'
-                           | 'half_closed_remote'.
-
--record(stream_state, {
-          stream_id = undefined :: stream_id(),
-          connection = undefined :: undefined | pid(),
-          socket = undefined :: sock:socket(),
-          state = idle :: stream_state_name(),
-          send_window_size = ?DEFAULT_INITIAL_WINDOW_SIZE :: integer(),
-          recv_window_size = ?DEFAULT_INITIAL_WINDOW_SIZE :: integer(),
-          queued_frames = queue:new() :: queue:queue(frame()),
-          incoming_frames = queue:new() :: queue:queue(frame()),
-          request_headers = [] :: hpack:headers(),
-          request_body :: iodata(),
-          request_end_stream = false :: boolean(),
-          request_end_headers = false :: boolean(),
-          response_headers = [] :: hpack:headers(),
-          response_body :: iodata(),
-          response_end_headers = false :: boolean(),
-          response_end_stream = false :: boolean(),
-          next_state = undefined :: undefined | stream_state_name(),
-          promised_stream = undefined :: undefined |  stream_state(),
-          notify_pid = undefined :: undefined | pid(),
-          custom_state = undefined :: any(),
-          callback_mod = undefined :: module()
-}).
-
--type stream_state() :: #stream_state{}.

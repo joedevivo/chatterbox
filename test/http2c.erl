@@ -125,7 +125,8 @@ wait_for_n_frames(_Pid, StreamId, N, Attempts, Acc)
         true ->
             Acc;
         _ ->
-            ?assertEqual(length(Acc), length([]))
+            ?assertEqual(length(Acc), length([])),
+            []
     end;
 wait_for_n_frames(Pid, StreamId, N, Attempts, Acc) ->
     Frames = Acc ++ get_frames(Pid, StreamId),

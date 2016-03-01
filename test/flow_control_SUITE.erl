@@ -52,7 +52,7 @@ exceed_server_connection_receive_window(_Config) ->
 
     1 = length(Resp),
 
-    [{_GoAwayH, GoAway}] = Resp,
+    [{#frame_header{type=?GOAWAY}, GoAway}] = Resp,
     ?FLOW_CONTROL_ERROR = GoAway#goaway.error_code,
 
     ok.
@@ -60,21 +60,20 @@ exceed_server_connection_receive_window(_Config) ->
 exceed_server_stream_receive_window(_Config) ->
     Client = send_65bytes(),
 
-
     %% First, pull off the window update frame we got on stream 0,
     [WindowUpdate] = http2c:wait_for_n_frames(Client, 0, 1),
-    ct:pal("Expected window update, but got ~p", [WindowUpdate]),
+    ct:pal("Expected window update, and got ~p", [WindowUpdate]),
     %% now challenge that
     {#frame_header{}, #window_update{}} = WindowUpdate,
 
-    %% Check for GO_AWAY
-    Resp = http2c:wait_for_n_frames(Client, 0, 1),
+    %% Check for RST_STREAM
+    Resp = http2c:wait_for_n_frames(Client, 3, 1),
     ct:pal("Resp: ~p", [Resp]),
 
     1 = length(Resp),
 
-    [{_GoAwayH, GoAway}] = Resp,
-    ?FLOW_CONTROL_ERROR = GoAway#goaway.error_code,
+    [{#frame_header{type=?RST_STREAM}, RstStream}] = Resp,
+    ?FLOW_CONTROL_ERROR = RstStream#rst_stream.error_code,
     ok.
 
 
@@ -125,3 +124,5 @@ send_65bytes() ->
     http2c:send_unaltered_frames(Client, [DataFrame]),
 
     Client.
+
+%% TODO: Tests for sending data when send_*_window is too small
