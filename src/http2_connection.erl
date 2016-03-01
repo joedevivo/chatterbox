@@ -756,6 +756,10 @@ handle_event({send_headers, StreamId, Headers},
     lager:debug("{send headers, ~p, ~p}", [StreamId, Headers]),
     StreamPid = proplists:get_value(StreamId, Streams),
 
+    %% TODO: This is set up in a way that assumes the header frame is
+    %% smaller than MAX_FRAME_SIZE. Will need to split that out into
+    %% continuation frames,but now will definitely be a
+    %% FRAME_SIZE_ERROR
     {HeaderFrame, NewContext} = http2_frame_headers:to_frame(StreamId, Headers, EncodeContext),
     sock:send(Socket, http2_frame:to_binary(HeaderFrame)),
     http2_stream:send_h(StreamPid, Headers),
@@ -772,16 +776,38 @@ handle_event({send_body, StreamId, Body},
                }=Connection
             ) ->
     StreamPid = proplists:get_value(StreamId, Streams),
-
     DataFrames = http2_frame_data:to_frames(StreamId, Body, SendSettings),
-
     [ begin
-          http2_stream:send_frame(StreamPid, Frame)
-          %ok = sock:send(Socket, http2_frame:to_binary(Frame))
+          gen_fsm:send_all_state_event(self(), {send_data_frame, Frame, StreamPid})
       end || Frame <- DataFrames],
 
     {next_state, StateName,
      Connection};
+handle_event({send_data_frame,
+              {#frame_header{
+                  length=L
+                 }, _}=_Frame, _Pid},
+             _StateName,
+             #connection_state{
+                send_window_size=CSWS
+               }=Connection)
+ when CSWS < L ->
+    go_away(?FLOW_CONTROL_ERROR, Connection);
+handle_event({send_data_frame,
+              {#frame_header{
+                  length=L
+                 }, _}=Frame,
+             StreamPid},
+             StateName,
+             #connection_state{
+                send_window_size=CSWS
+               }=Connection) ->
+    http2_stream:send_frame(StreamPid, Frame),
+    {next_state,
+     StateName,
+     Connection#connection_state{
+       send_window_size=CSWS-L
+      }};
 handle_event({send_promise, StreamId, NewStreamId, Headers},
              StateName,
              #connection_state{

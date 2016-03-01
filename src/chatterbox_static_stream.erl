@@ -139,7 +139,7 @@ on_request_end_stream(StreamId, ConnPid, State) ->
             %% increases.
 
             %% If it does, we still need to try and check stream level flow control.
-
+            %http2_stream:send_data(Data),
             http2_connection:send_body(ConnPid, StreamId, Data),
             ok;
         {false, false} ->
