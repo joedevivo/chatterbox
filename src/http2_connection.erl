@@ -388,6 +388,7 @@ route_frame(F={H=#frame_header{
     lager:debug("Received DATA Frame for Stream ~p", [StreamId]),
 
     {Stream, NewStreamsTail} = get_stream(StreamId, Streams),
+
     %% Decrement stream & connection recv_window L happens in http2_stream:recv_frame
     {FinalStream, NewConnectionState} = http2_stream:recv_frame(F, {Stream, S}),
 
@@ -493,10 +494,16 @@ route_frame({H, _Payload}, S = #connection_state{
     {next_state, connected, S};
 %% TODO: RST_STREAM support
 route_frame({H=#frame_header{stream_id=StreamId}, _Payload}, S = #connection_state{
+                                                                    streams=Streams,
                                                                     socket=_Socket})
     when H#frame_header.type == ?RST_STREAM ->
-    lager:error("Received RST_STREAM for Stream ~p, but did nothing with it", [StreamId]),
-    {next_state, connected, S};
+    case get_stream(StreamId, Streams) of
+        notfound ->
+            go_away(?PROTOCOL_ERROR, S);
+        _ ->
+            lager:error("Received RST_STREAM for Stream ~p, but did nothing with it", [StreamId]),
+            {next_state, connected, S}
+    end;
 %%    {next_state, connected, S#connection_state{settings_sent=SS-1}};
 route_frame({
               H=#frame_header{stream_id=StreamId}, _Payload}=F,
@@ -574,8 +581,7 @@ route_frame(F={H=#frame_header{stream_id=StreamId}, #window_update{}},
             NewStreams = [{StreamId, NStream}|NewStreamsTail],
             {next_state, connected, NConn#connection_state{streams=NewStreams}};
         _ ->
-            lager:error("Window update for a stream that we don't think exists!"),
-            {next_state, connected, S}
+            go_away(?PROTOCOL_ERROR, S)
     end;
 
 %route_frame({error, closed}, State) ->
