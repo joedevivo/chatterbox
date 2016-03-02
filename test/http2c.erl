@@ -27,7 +27,6 @@
 -export([
          start_link/0,
          send_binary/2,
-         send_frames/2,
          send_unaltered_frames/2,
          get_frames/2,
          wait_for_n_frames/3
@@ -56,27 +55,13 @@ start_link() ->
 %% Three API levels:
 %% 1: lowest: Send a frame or set of frames
 %% 2: middle: Here's some hastily constucted frames, do some setup of frame header flags.
-%% 3: highest: a semantic http request: here are
+%% 3: highest: a semantic http request: **NOT IMPLEMENTED HERE*
 
 %% send_binary/2 is the lowest level API. It just puts bits on the
 %% wire
 -spec send_binary(pid(), iodata()) -> ok.
 send_binary(Pid, Binary) ->
     gen_server:cast(Pid, {send_bin, Binary}).
-
-%% send_frames is the middle level. Converts a series of frames to
-%% binary and sends them over to send_binary. It will scrub the frame
-%% headers correctly, for example if you try to add a HEADERS frame
-%% and two CONTINUATION frames, no matter what flags are set in the
-%% frame headers, it will make sure that the HEADERS frame and the
-%% FIRST CONTINUATION frame have the END_HEADERS flag set to 0 and the
-%% SECOND CONTINUATION frame will have it set to 1.
--spec send_frames(pid(), [frame()]) -> ok.
-send_frames(Pid, Frames) ->
-    %% TODO Process Frames
-    MassagedFrames = Frames,
-    %% Then Send
-    send_unaltered_frames(Pid, MassagedFrames).
 
 %% send_unaltered_frames is the raw version of the middle level. You
 %% can put frames directly as constructed on the wire. This is
@@ -171,10 +156,6 @@ init([]) ->
     {ok, #http2c_state{
             socket = {Transport, Socket},
             send_settings = http2_frame_settings:overlay(#settings{},  ServerSettings)
-%            connection = #connection_state{
-%                            recv_settings = ClientSettings,
-
-%                           }
            }}.
 
 %% Handling call messages

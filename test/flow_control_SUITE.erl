@@ -45,7 +45,7 @@ end_per_testcase(_, Config) ->
     ok.
 
 exceed_server_connection_receive_window(_Config) ->
-    Client = send_65bytes(),
+    Client = send_n_bytes(?DEFAULT_INITIAL_WINDOW_SIZE + 1),
     %% Check for GO_AWAY
     Resp = http2c:wait_for_n_frames(Client, 0, 1),
     ct:pal("Resp: ~p", [Resp]),
@@ -58,7 +58,7 @@ exceed_server_connection_receive_window(_Config) ->
     ok.
 
 exceed_server_stream_receive_window(_Config) ->
-    Client = send_65bytes(),
+    Client = send_n_bytes(65),
 
     %% First, pull off the window update frame we got on stream 0,
     [WindowUpdate] = http2c:wait_for_n_frames(Client, 0, 1),
@@ -77,7 +77,7 @@ exceed_server_stream_receive_window(_Config) ->
     ok.
 
 
-send_65bytes() ->
+send_n_bytes(N) ->
     %% We're up and running with a ridiculously small connection
     %% window size of 64 bytes. The problem is that each stream will
     %% have a recv window size of 64 bytes also, so both conditions
@@ -108,20 +108,11 @@ send_65bytes() ->
     %% this headers frame should have increased the stream's recv
     %% window, but not the connections
 
-    %% So now, send 65 bytes and we should get a connection level flow
-    %% control error
-    DataFrame = {
-      #frame_header{
-         length=65,
-         type=?DATA,
-         flags=?FLAG_END_STREAM,
-         stream_id=3
-         },
-      #data{
-         data = crypto:rand_bytes(65)
-        }
-     },
-    http2c:send_unaltered_frames(Client, [DataFrame]),
+    %% So now, send N bytes and we should get some desired error.
+    Data = crypto:rand_bytes(N),
+    Frames = http2_frame_data:to_frames(3, Data, #settings{}),
+
+    http2c:send_unaltered_frames(Client, Frames),
 
     Client.
 

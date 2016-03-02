@@ -18,7 +18,9 @@
          get_response/1,
          notify_pid/1,
          send_window_update/1,
-         send_connection_window_update/1
+         send_connection_window_update/1,
+         modify_send_window_size/2,
+         modify_recv_window_size/2
         ]).
 
 %% gen_fsm callbacks
@@ -202,6 +204,14 @@ send_window_update(Size) ->
 send_connection_window_update(Size) ->
     gen_fsm:send_all_state_event(self(), {send_connection_window_update, Size}).
 
+-spec modify_send_window_size(pid(), integer()) -> ok.
+modify_send_window_size(Pid, Delta) ->
+    gen_fsm:send_all_state_event(Pid, {modify_send_window_size, Delta}).
+
+-spec modify_recv_window_size(pid(), integer()) -> ok.
+modify_recv_window_size(Pid, Delta) ->
+    gen_fsm:send_all_state_event(Pid, {modify_recv_window_size, Delta}).
+
 %% States
 %% - idle
 %% - reserved_local
@@ -219,7 +229,6 @@ init(StreamOptions) ->
     Socket = proplists:get_value(socket, StreamOptions),
 
     %% TODO: Check for CB implementing this behaviour
-    lager:info("Hi, I'm ~p, aka stream ~p", [self(), StreamId]),
     {ok, NewCustomState} = CB:init(),
 
     {ok, idle, #stream_state{
@@ -512,6 +521,26 @@ closed(get_response,
        ) ->
     {reply, {ok, {H, B}}, closed, Stream}.
 
+handle_event({modify_send_window_size, Delta},
+            StateName,
+             #stream_state{
+                send_window_size=SWS
+               }=Stream
+            ) ->
+    {next_state, StateName,
+     Stream#stream_state{
+       send_window_size=SWS - Delta
+      }};
+handle_event({modify_recv_window_size, Delta},
+            StateName,
+             #stream_state{
+                recv_window_size=RWS
+               }=Stream
+            ) ->
+    {next_state, StateName,
+     Stream#stream_state{
+       recv_window_size=RWS - Delta
+      }};
 handle_event({send_window_update, Size},
              StateName,
              #stream_state{

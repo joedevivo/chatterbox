@@ -11,7 +11,10 @@
 -export([
          send/2,
          recv/2,
-         recv/3
+         recv/3,
+         close/1,
+         peername/1,
+         setopts/2
         ]).
 
 -spec send(
@@ -49,3 +52,16 @@ recv({ssl, Socket}, Length, Timeout) ->
     ssl:recv(Socket, Length, Timeout);
 recv(_, _, _) ->
     {error, bad_socket}.
+
+close({Transport, Socket}) ->
+    Transport:close(Socket).
+
+peername({ssl, Socket}) ->
+    ssl:peername(Socket);
+peername({gen_tcp, Socket}) ->
+    inet:peername(Socket).
+
+setopts({ssl, Socket}, Opts) ->
+    ssl:setopts(Socket, Opts);
+setopts({gen_tcp, Socket}, Opts) ->
+    inet:setopts(Socket, Opts).
