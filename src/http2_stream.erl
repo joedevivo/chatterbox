@@ -684,6 +684,7 @@ process(send,
 %% TODO: ???
 process(Direction, Frame, {Stream, Connection}) ->
     lager:error("No process/3 for ~p, ~p, ~p", [Direction,Frame,Stream]),
+    http2_connection:go_away(?STREAM_CLOSED, Connection),
     {Stream, Connection}.
 
 
