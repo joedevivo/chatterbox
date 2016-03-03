@@ -82,7 +82,9 @@
           stream_callback_mod = application:get_env(chatterbox, stream_callback_mod, chatterbox_static_stream) :: module(),
           content_handler = application:get_env(chatterbox, content_handler, chatterbox_static_content_handler) :: module(),
           buffer = empty :: empty | {binary, binary()} | {frame, frame_header(), binary()},
-          continuation = undefined :: undefined | #continuation_state{}
+          continuation = undefined :: undefined | #continuation_state{},
+          queued_frames = queue:new() :: queue:queue(frame()),
+          flow_control = auto :: auto | manual
 }).
 
 -type connection() :: #connection{}.
@@ -140,7 +142,8 @@ init({client, Transport, Host, Port, SSLOptions, Http2Settings}) ->
         #connection{
            type = client,
            socket = {Transport, Socket},
-           next_available_stream_id=1
+           next_available_stream_id=1,
+           flow_control=application:get_env(chatterbox, client_flow_control, auto)
           },
     {ok,
      handshake,
@@ -158,7 +161,8 @@ init({client_ssl_upgrade, Host, Port, InitialMessage, SSLOptions, Http2Settings}
         #connection{
            type = client,
            socket = {ssl, Socket},
-           next_available_stream_id=1
+           next_available_stream_id=1,
+           flow_control=application:get_env(chatterbox, client_flow_control, auto)
           },
     {ok,
      handshake,
@@ -465,18 +469,26 @@ route_frame(F={H=#frame_header{
                     stream_id=StreamId}, _Payload},
             #connection{
                recv_window_size=CRWS,
-               streams=Streams,
-               socket=Socket
+               streams=Streams
               }=Conn)
     when H#frame_header.type == ?DATA ->
     lager:debug("[~p] Received DATA Frame for Stream ~p",
                 [Conn#connection.type, StreamId]),
 
-    %% YOLO Send window update
-    lager:info("[~p], Yolo", [Conn#connection.type]),
-    http2_frame_window_update:send(Socket, L, StreamId),
+    %% Make window size great again
+    lager:info("[~p] Stream ~p WindowUpdate ~p",
+               [Conn#connection.type, StreamId, L]),
 
     StreamPid = proplists:get_value(StreamId, Streams),
+
+    case Conn#connection.flow_control of
+        auto ->
+            send_window_update(self(), L),
+            gen_fsm:send_all_state_event(StreamPid, {send_window_update, L});
+        _ ->
+            ok
+    end,
+
     http2_stream:recv_frame(StreamPid, F),
 
     {next_state,
@@ -747,15 +759,27 @@ route_frame({H=#frame_header{stream_id=StreamId}, _Payload},
     lager:error("[~p] Chatterbox doesn't support streams. Throwing this GOAWAY away",
                [Conn#connection.type]),
     {next_state, connected, Conn};
-route_frame({H=#frame_header{stream_id=0}, #window_update{window_size_increment=WSI}},
+route_frame({H=#frame_header{stream_id=0},
+             #window_update{window_size_increment=WSI}},
             #connection{
-               send_window_size=SWS
+               send_window_size=SWS,
+               queued_frames=QF,
+               streams=Streams
               }=Conn)
     when H#frame_header.type == ?WINDOW_UPDATE ->
     lager:debug("[~p] Stream 0 Window Update: ~p",
                 [Conn#connection.type, WSI]),
+    lager:debug("Queued Frames: ~p", [queue:to_list(QF)]),
+    NewSendWindow = SWS+WSI,
+
+    {RemainingSendWindow, RemainingFrames} =
+        flow_control_catchup(NewSendWindow, QF, Streams),
+    lager:debug("Remaining Frames: ~p", [queue:to_list(RemainingFrames)]),
     {next_state, connected,
-     Conn#connection{send_window_size=SWS+WSI}};
+     Conn#connection{
+       send_window_size=RemainingSendWindow,
+       queued_frames=RemainingFrames
+      }};
 route_frame(F={H=#frame_header{stream_id=StreamId}, #window_update{}},
             #connection{
                streams=Streams
@@ -833,16 +857,7 @@ handle_event({send_body, StreamId, Body},
       end || Frame <- DataFrames],
 
     {next_state, StateName, Conn};
-handle_event({send_data_frame,
-              {#frame_header{
-                  length=L
-                 }, _}=_Frame, _Pid},
-             _StateName,
-             #connection{
-                send_window_size=CSWS
-               }=Conn)
-  when CSWS < L ->
-    go_away(?FLOW_CONTROL_ERROR, Conn);
+
 handle_event({send_data_frame,
               {#frame_header{
                   length=L
@@ -850,14 +865,26 @@ handle_event({send_data_frame,
              StreamPid},
              StateName,
              #connection{
-                send_window_size=CSWS
+                send_window_size=CSWS,
+                queued_frames=QF
                }=Conn) ->
-    http2_stream:send_frame(StreamPid, Frame),
-    {next_state,
-     StateName,
-     Conn#connection{
-       send_window_size=CSWS-L
-      }};
+%% Only send a frame if the window size works and the queue is empty
+    case {CSWS >= L, queue:is_empty(QF)} of
+        {true, true} ->
+            http2_stream:send_frame(StreamPid, Frame),
+            {next_state,
+             StateName,
+             Conn#connection{
+               send_window_size=CSWS-L
+              }};
+        _ ->
+            lager:debug("[~p] tried to send ~p bytes, with connection send window size ~p",
+                        [Conn#connection.type, L, CSWS]),
+            {next_state,
+             StateName,
+             Conn#connection{
+               queued_frames=queue:in(Frame, QF)}}
+    end;
 handle_event({send_promise, StreamId, NewStreamId, Headers},
              StateName,
              #connection{
@@ -1144,7 +1171,8 @@ start_http2_server(
             NewState =
                 Conn#connection{
                   type=server,
-                  next_available_stream_id=2
+                  next_available_stream_id=2,
+                  flow_control=application:get_env(chatterbox, server_flow_control, auto)
                  },
             {next_state,
              handshake,
@@ -1249,4 +1277,33 @@ socksend(#connection{
         {error, Reason} ->
             lager:debug("[~p] {error, ~p} sending, ~p", [T, Reason, Data]),
             {error, Reason}
+    end.
+
+-spec flow_control_catchup(
+        non_neg_integer(),
+        queue:queue(frame()),
+        [{stream_id(), pid()}]) ->
+                                  {non_neg_integer(),
+                                   queue:queue(frame())}.
+flow_control_catchup(SendWindow, Frames, Streams) ->
+    case queue:is_empty(Frames) of
+        true ->
+            {SendWindow, Frames};
+        _ ->
+            {{value,{#frame_header{
+                        length=L,
+                        type=?DATA,
+                        stream_id=StreamId
+                       },_}=Frame},
+             RemainingFrames} = queue:out(Frames),
+            case L > SendWindow of
+                true ->
+                    {SendWindow, Frames};
+                _ ->
+                    %% Send
+                    lager:debug("Sending queued frame ~p", [Frame]),
+                    StreamPid = proplists:get_value(StreamId, Streams),
+                    http2_stream:send_frame(StreamPid, Frame),
+                    flow_control_catchup(SendWindow-L, RemainingFrames, Streams)
+            end
     end.

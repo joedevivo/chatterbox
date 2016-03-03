@@ -271,7 +271,6 @@ idle({send_pp, Headers},
         callback_mod=CB,
         custom_state=CustomState
        }=Stream) ->
-    lager:info("send_pp ~p", [Stream#stream_state.stream_id]),
     {ok, NewCustomState} = CB:on_send_push_promise(Headers, CustomState),
     {next_state,
      reserved_local,
@@ -311,8 +310,6 @@ reserved_local(timeout,
                   custom_state=CustomState,
                   callback_mod=CB
                   }=Stream) ->
-    lager:info("timeout ~p", [Stream#stream_state.stream_id]),
-    lager:info("state ~p", [Stream]),
     {ok, NewCustom} = CB:on_request_end_stream(StreamId, Conn, CustomState),
     {next_state,
      reserved_local,
@@ -381,6 +378,7 @@ open({recv_frame,
        }=Stream)
   when SRWS < L ->
     rst_stream(?FLOW_CONTROL_ERROR, Stream),
+    lager:error("open -> closed ~p", [Stream#stream_state.stream_id]),
     {next_state,
      closed,
      Stream};
@@ -453,11 +451,11 @@ half_closed_remote(
   #stream_state{
      socket=Socket
     }=Stream) ->
-    %% lager:info("Hi! ~p, ~p", [Msg, Stream]),
     ok = sock:send(Socket, http2_frame:to_binary(F)),
 
     case ?IS_FLAG(Flags, ?FLAG_END_STREAM) of
         true ->
+            lager:error("half_closed remote -> closed ~p", [Stream#stream_state.stream_id]),
             {next_state, closed, Stream};
         _ ->
             {next_state, half_closed_remote, Stream}
@@ -478,15 +476,14 @@ half_closed_local(
 half_closed_local(
   {recv_frame,
    {#frame_header{
-       flags=Flags
+       flags=Flags,
+       type=?DATA
       },_}=F},
   #stream_state{
      stream_id=StreamId,
      incoming_frames=IFQ,
      notify_pid = NotifyPid
      } = Stream) ->
-
-    lager:info("client got ~p", [F]),
     NewQ = queue:in(F, IFQ),
 
     case ?IS_FLAG(Flags, ?FLAG_END_STREAM) of
@@ -496,9 +493,9 @@ half_closed_local(
                 undefined ->
                     ok;
                 _ ->
-                    lager:info("I should notify! ~p ~p", [NotifyPid, StreamId]),
                     NotifyPid ! {'END_STREAM', StreamId}
             end,
+            lager:error("half_closed_local -> closed ~p", [StreamId]),
             {next_state, closed,
              Stream#stream_state{
                incoming_frames=queue:new(),
@@ -597,8 +594,7 @@ handle_sync_event(stream_id, _F, StateName, State=#stream_state{stream_id=Stream
     {reply, StreamId, StateName, State};
 handle_sync_event(connection, _F, StateName, State=#stream_state{connection=Conn}) ->
     {reply, Conn, StateName, State};
-handle_sync_event(E, _F, StateName, State) ->
-    lager:info("Wat ~p", [E]),
+handle_sync_event(_E, _F, StateName, State) ->
     {reply, wat, StateName, State}.
 
 handle_info(M, _StateName, State) ->

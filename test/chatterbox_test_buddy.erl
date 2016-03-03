@@ -52,6 +52,9 @@ start(Config) ->
     application:set_env(chatterbox, server_max_header_list_size,
                         proplists:get_value(max_header_list_size, Config, unlimited)),
 
+    application:set_env(chatterbox, server_flow_control,
+                        proplists:get_value(flow_control, Config, auto)),
+
     ct:pal("Settings ~p", [Settings]),
     [ok = application:set_env(chatterbox, Key, Value) || {Key, Value} <- Settings ],
     {ok, List} = application:ensure_all_started(chatterbox),

@@ -27,8 +27,8 @@ on_send_push_promise(Headers, State) ->
     ct:pal("on_send_push_promise(~p, ~p)", [Headers, State]),
     {ok, State#cb_static{req_headers=Headers}}.
 
-on_receive_request_data(Bin, State)->
-    ct:pal("on_receive_request_data(~p, ~p)", [Bin, State]),
+on_receive_request_data(_Bin, State)->
+    ct:pal("on_receive_request_data(Bin!, ~p)", [State]),
     {ok, State}.
 
 on_request_end_stream(_StreamId, _ConnPid, State) ->

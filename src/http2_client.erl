@@ -116,7 +116,6 @@ stop(Pid) ->
     http2_connection:stop(Pid).
 
 sync_request(CliPid, Headers, Body) ->
-    lager:info("Sync ~p", [self()]),
     StreamId = http2_connection:new_stream(CliPid),
     http2_connection:send_headers(CliPid, StreamId, Headers),
     http2_connection:send_body(CliPid,StreamId,Body),

@@ -33,13 +33,17 @@
     {client_max_frame_size, 16384},
     {client_max_header_list_size, unlimited},
 
+    {client_flow_control, auto},
+
     %% Same for server
     {server_header_table_size, 4096},
     {server_enable_push, 1},
     {server_max_concurrent_streams, unlimited},
     {server_initial_window_size, 65535},
     {server_max_frame_size, 16384},
-    {server_max_header_list_size, unlimited}
+    {server_max_header_list_size, unlimited},
+
+    {server_flow_control, auto}
 
   ]}
  ]}.

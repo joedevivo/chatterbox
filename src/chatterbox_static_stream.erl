@@ -63,7 +63,7 @@ on_request_end_stream(StreamId, ConnPid, State) ->
     %% TODO: Logic about "/" vs "index.html", "index.htm", etc...
     %% Directory browsing?
     File = RootDir ++ Path4,
-    lager:debug("[chatterbox_static_stream] serving ~p on stream ~p", [File, StreamId]),
+    lager:debug("[chatterbox_static_stream] ~p serving ~p on stream ~p", [self(), File, StreamId]),
     %%lager:info("Request Headers: ~p", [Headers]),
 
     case {filelib:is_file(File), filelib:is_dir(File)} of
