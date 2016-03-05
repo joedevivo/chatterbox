@@ -475,14 +475,13 @@ route_frame(F={H=#frame_header{
     lager:debug("[~p] Received DATA Frame for Stream ~p",
                 [Conn#connection.type, StreamId]),
 
-    %% Make window size great again
-    lager:info("[~p] Stream ~p WindowUpdate ~p",
-               [Conn#connection.type, StreamId, L]),
-
     StreamPid = proplists:get_value(StreamId, Streams),
 
     case Conn#connection.flow_control of
         auto ->
+            %% Make window size great again
+            lager:info("[~p] Stream ~p WindowUpdate ~p",
+                       [Conn#connection.type, StreamId, L]),
             send_window_update(self(), L),
             gen_fsm:send_all_state_event(StreamPid, {send_window_update, L});
         _ ->
@@ -769,12 +768,12 @@ route_frame({H=#frame_header{stream_id=0},
     when H#frame_header.type == ?WINDOW_UPDATE ->
     lager:debug("[~p] Stream 0 Window Update: ~p",
                 [Conn#connection.type, WSI]),
-    lager:debug("Queued Frames: ~p", [queue:to_list(QF)]),
     NewSendWindow = SWS+WSI,
+    {RemainingFrames, RemainingSendWindow} =
+        http2_frame_queue:ketchup(QF, NewSendWindow, Streams),
+    lager:debug("[~p] and Connection Send Window now: ~p",
+                [Conn#connection.type, RemainingSendWindow]),
 
-    {RemainingSendWindow, RemainingFrames} =
-        flow_control_catchup(NewSendWindow, QF, Streams),
-    lager:debug("Remaining Frames: ~p", [queue:to_list(RemainingFrames)]),
     {next_state, connected,
      Conn#connection{
        send_window_size=RemainingSendWindow,
@@ -782,7 +781,9 @@ route_frame({H=#frame_header{stream_id=0},
       }};
 route_frame(F={H=#frame_header{stream_id=StreamId}, #window_update{}},
             #connection{
-               streams=Streams
+               streams=Streams,
+               queued_frames=QF,
+               send_window_size=SWS
               }=Conn)
     when H#frame_header.type == ?WINDOW_UPDATE ->
     lager:debug("[~p] Received WINDOW_UPDATE Frame for Stream ~p",
@@ -792,12 +793,19 @@ route_frame(F={H=#frame_header{stream_id=StreamId}, #window_update{}},
     case StreamPid of
         undefined ->
             lager:error("[~p] Window update for a stream that we don't think exists!",
-                       [Conn#connection.type]);
+                       [Conn#connection.type]),
+            {next_state, connected, Conn};
         _ ->
-            http2_stream:recv_wu(StreamPid, F)
+            http2_stream:recv_wu(StreamPid, F),
+            {RemainingFrames, RemainingSendWindow} =
+                http2_frame_queue:ketchup(StreamId, QF, SWS, Streams),
+            {next_state, connected,
+             Conn#connection{
+               send_window_size=RemainingSendWindow,
+               queued_frames=RemainingFrames
+              }}
 
-    end,
-    {next_state, connected, Conn};
+    end;
 
 route_frame(Frame, #connection{}=Conn) ->
     lager:error("[~p] Frame condition not covered by pattern match",
@@ -850,6 +858,8 @@ handle_event({send_body, StreamId, Body},
                 send_settings=SendSettings
                }=Conn
             ) ->
+    lager:debug("[~p] Send Body Stream ~p",
+                [Conn#connection.type, StreamId]),
     StreamPid = proplists:get_value(StreamId, Streams),
     DataFrames = http2_frame_data:to_frames(StreamId, Body, SendSettings),
     [ begin
@@ -1277,33 +1287,4 @@ socksend(#connection{
         {error, Reason} ->
             lager:debug("[~p] {error, ~p} sending, ~p", [T, Reason, Data]),
             {error, Reason}
-    end.
-
--spec flow_control_catchup(
-        non_neg_integer(),
-        queue:queue(frame()),
-        [{stream_id(), pid()}]) ->
-                                  {non_neg_integer(),
-                                   queue:queue(frame())}.
-flow_control_catchup(SendWindow, Frames, Streams) ->
-    case queue:is_empty(Frames) of
-        true ->
-            {SendWindow, Frames};
-        _ ->
-            {{value,{#frame_header{
-                        length=L,
-                        type=?DATA,
-                        stream_id=StreamId
-                       },_}=Frame},
-             RemainingFrames} = queue:out(Frames),
-            case L > SendWindow of
-                true ->
-                    {SendWindow, Frames};
-                _ ->
-                    %% Send
-                    lager:debug("Sending queued frame ~p", [Frame]),
-                    StreamPid = proplists:get_value(StreamId, Streams),
-                    http2_stream:send_frame(StreamPid, Frame),
-                    flow_control_catchup(SendWindow-L, RemainingFrames, Streams)
-            end
     end.

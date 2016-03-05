@@ -40,8 +40,10 @@
          reserved_local/2,
          reserved_remote/2,
          open/2,
+         open/3,
          half_closed_local/2,
          half_closed_remote/2,
+         half_closed_remote/3,
          closed/3
         ]).
 
@@ -172,9 +174,9 @@ recv_frame(Pid, Frame) ->
     gen_fsm:send_event(Pid, {recv_frame, Frame}).
 
 -spec send_frame(pid(), frame()) ->
-                        ok.
+                        ok | flow_control.
 send_frame(Pid, Frame) ->
-    gen_fsm:send_event(Pid, {send_frame, Frame}).
+    gen_fsm:sync_send_event(Pid, {send_frame, Frame}).
 
 -spec stream_id() -> stream_id().
 stream_id() ->
@@ -348,25 +350,6 @@ open(recv_es,
        custom_state=NewCustom
       }};
 
-open({send_frame,
-      {#frame_header{
-          type=?DATA,
-          flags=Flags
-         }, _}=F},
-     #stream_state{
-        socket=Socket
-       }=Stream) ->
-    sock:send(Socket, http2_frame:to_binary(F)),
-
-    case ?IS_FLAG(Flags, ?FLAG_END_STREAM) of
-        true ->
-            {next_state,
-             half_closed_local,
-             Stream};
-        _ ->
-            {next_state, open, Stream}
-    end;
-
 %% Open receive data frame that is larger than the stream's recv_window_size
 open({recv_frame,
       {#frame_header{
@@ -433,6 +416,28 @@ open(Msg, Stream) ->
     lager:warning("Some unexpected message in open state. ~p, ~p", [Msg, Stream]),
     {next_state, open, Stream}.
 
+%% TODO: Abstract sending data into one function that does flow
+%% control math and replies either 'ok' or 'flow_control'
+open({send_frame,
+      {#frame_header{
+          type=?DATA,
+          flags=Flags
+         }, _}=F},
+     _From,
+     #stream_state{
+        socket=Socket
+       }=Stream) ->
+    sock:send(Socket, http2_frame:to_binary(F)),
+
+    NextState =
+        case ?IS_FLAG(Flags, ?FLAG_END_STREAM) of
+            true ->
+             half_closed_local;
+        _ ->
+                open
+        end,
+    {reply, ok, NextState, Stream}.
+
 half_closed_remote(
   {send_h, Headers},
   #stream_state{}=Stream) ->
@@ -440,7 +445,8 @@ half_closed_remote(
      half_closed_remote,
      Stream#stream_state{
        response_headers=Headers
-      }};
+      }}.
+
 half_closed_remote(
                   {send_frame,
                    {
@@ -448,18 +454,22 @@ half_closed_remote(
                         flags=Flags
                        },_
                    }=F}=_Msg,
+  _From,
   #stream_state{
      socket=Socket
     }=Stream) ->
     ok = sock:send(Socket, http2_frame:to_binary(F)),
 
-    case ?IS_FLAG(Flags, ?FLAG_END_STREAM) of
-        true ->
-            lager:error("half_closed remote -> closed ~p", [Stream#stream_state.stream_id]),
-            {next_state, closed, Stream};
+    NextState =
+        case ?IS_FLAG(Flags, ?FLAG_END_STREAM) of
+            true ->
+                lager:error("half_closed remote -> closed ~p", [Stream#stream_state.stream_id]),
+                closed;
         _ ->
-            {next_state, half_closed_remote, Stream}
-    end.
+                half_closed_remote
+        end,
+
+    {reply, ok, NextState, Stream}.
 
 %% PUSH_PROMISES can only be received by streams in the open or
 %% half_closed_local, but will create a new stream in the idle state,
