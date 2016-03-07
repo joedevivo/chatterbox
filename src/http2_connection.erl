@@ -770,7 +770,7 @@ route_frame({H=#frame_header{stream_id=0},
                 [Conn#connection.type, WSI]),
     NewSendWindow = SWS+WSI,
     {RemainingFrames, RemainingSendWindow} =
-        http2_frame_queue:ketchup(QF, NewSendWindow, Streams),
+        http2_frame_queue:connection_ketchup(QF, NewSendWindow, Streams),
     lager:debug("[~p] and Connection Send Window now: ~p",
                 [Conn#connection.type, RemainingSendWindow]),
 
@@ -798,7 +798,7 @@ route_frame(F={H=#frame_header{stream_id=StreamId}, #window_update{}},
         _ ->
             http2_stream:recv_wu(StreamPid, F),
             {RemainingFrames, RemainingSendWindow} =
-                http2_frame_queue:ketchup(StreamId, QF, SWS, Streams),
+                http2_frame_queue:stream_ketchup(StreamId, QF, SWS, Streams),
             {next_state, connected,
              Conn#connection{
                send_window_size=RemainingSendWindow,
