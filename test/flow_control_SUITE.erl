@@ -51,10 +51,10 @@ exceed_server_connection_receive_window(_Config) ->
     Resp = http2c:wait_for_n_frames(Client, 0, 1),
     ct:pal("Resp: ~p", [Resp]),
 
-    1 = length(Resp),
+    ?assertEqual(1 , length(Resp)),
 
     [{#frame_header{type=?GOAWAY}, GoAway}] = Resp,
-    ?FLOW_CONTROL_ERROR = GoAway#goaway.error_code,
+    ?assertEqual(?FLOW_CONTROL_ERROR, GoAway#goaway.error_code),
 
     ok.
 
@@ -71,12 +71,11 @@ exceed_server_stream_receive_window(_Config) ->
     Resp = http2c:wait_for_n_frames(Client, 3, 1),
     ct:pal("Resp: ~p", [Resp]),
 
-    1 = length(Resp),
+    ?assertEqual(1, length(Resp)),
 
     [{#frame_header{type=?RST_STREAM}, RstStream}] = Resp,
-    ?FLOW_CONTROL_ERROR = RstStream#rst_stream.error_code,
+    ?assertEqual(?FLOW_CONTROL_ERROR, RstStream#rst_stream.error_code),
     ok.
-
 
 send_n_bytes(N) ->
     %% We're up and running with a ridiculously small connection
