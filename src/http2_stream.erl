@@ -102,7 +102,7 @@
           next_state = undefined :: undefined | stream_state_name(),
           promised_stream = undefined :: undefined | state(),
           notify_pid = undefined :: undefined | pid(),
-          custom_state = undefined :: any(),
+          callback_state = undefined :: any(),
           callback_mod = undefined :: module()
          }).
 
@@ -113,24 +113,24 @@
 
 -callback on_receive_request_headers(
             Headers :: hpack:headers(),
-            CustomState :: any()) ->
+            CallbackState :: any()) ->
     {ok, NewState :: any()}.
 
 -callback on_send_push_promise(
             Headers :: hpack:headers(),
-            CustomState :: any()) ->
+            CallbackState :: any()) ->
 
     {ok, NewState :: any()}.
 
 -callback on_receive_request_data(
             iodata(),
-            CustomState :: any())->
+            CallbackState :: any())->
     {ok, NewState :: any()}.
 
 -callback on_request_end_stream(
             StreamId :: stream_id(),
             Conn :: pid(),
-            CustomState :: any()) ->
+            CallbackState :: any()) ->
     {ok, NewState :: any()}.
 
 %% Public API
@@ -231,7 +231,7 @@ init(StreamOptions) ->
     Socket = proplists:get_value(socket, StreamOptions),
 
     %% TODO: Check for CB implementing this behaviour
-    {ok, NewCustomState} = CB:init(),
+    {ok, CallbackState} = CB:init(),
 
     {ok, idle, #stream_state{
                   callback_mod=CB,
@@ -240,7 +240,7 @@ init(StreamOptions) ->
                   connection=ConnectionPid,
                   send_window_size=SendWindowSize,
                   recv_window_size=RecvWindowSize,
-                  custom_state=NewCustomState,
+                  callback_state=CallbackState,
                   notify_pid=NotifyPid
                  }}.
 
@@ -258,27 +258,27 @@ init(StreamOptions) ->
 idle({recv_h, Headers},
      #stream_state{
         callback_mod=CB,
-        custom_state=CustomState
+        callback_state=CallbackState
        }=Stream) ->
-    {ok, NewCustomState} = CB:on_receive_request_headers(Headers, CustomState),
+    {ok, NewCBState} = CB:on_receive_request_headers(Headers, CallbackState),
     {next_state,
      open,
      Stream#stream_state{
        request_headers=Headers,
-       custom_state=NewCustomState
+       callback_state=NewCBState
       }};
 %% Server 'SEND PP'
 idle({send_pp, Headers},
      #stream_state{
         callback_mod=CB,
-        custom_state=CustomState
+        callback_state=CallbackState
        }=Stream) ->
-    {ok, NewCustomState} = CB:on_send_push_promise(Headers, CustomState),
+    {ok, NewCBState} = CB:on_send_push_promise(Headers, CallbackState),
     {next_state,
      reserved_local,
      Stream#stream_state{
        request_headers=Headers,
-       custom_state=NewCustomState
+       callback_state=NewCBState
        }, 0};
        %% zero timeout lets us start dealing with reserved local,
        %% because there is no END_STREAM event
@@ -309,14 +309,14 @@ reserved_local(timeout,
                #stream_state{
                   stream_id=StreamId,
                   connection=Conn,
-                  custom_state=CustomState,
+                  callback_state=CallbackState,
                   callback_mod=CB
                   }=Stream) ->
-    {ok, NewCustom} = CB:on_request_end_stream(StreamId, Conn, CustomState),
+    {ok, NewCBState} = CB:on_request_end_stream(StreamId, Conn, CallbackState),
     {next_state,
      reserved_local,
      Stream#stream_state{
-       custom_state=NewCustom
+       callback_state=NewCBState
       }};
 reserved_local({send_h, Headers},
               #stream_state{
@@ -341,13 +341,13 @@ open(recv_es,
         stream_id=StreamId,
         connection=Conn,
         callback_mod=CB,
-        custom_state=CustomState
+        callback_state=CallbackState
        }=Stream) ->
-    {ok, NewCustom} = CB:on_request_end_stream(StreamId, Conn, CustomState),
+    {ok, NewCBState} = CB:on_request_end_stream(StreamId, Conn, CallbackState),
     {next_state,
      half_closed_remote,
      Stream#stream_state{
-       custom_state=NewCustom
+       callback_state=NewCBState
       }};
 
 %% Open receive data frame that is larger than the stream's recv_window_size
@@ -357,11 +357,10 @@ open({recv_frame,
          type=?DATA
          },_}},
      #stream_state{
-        recv_window_size=SRWS
+        recv_window_size=RWS
        }=Stream)
-  when SRWS < L ->
+  when RWS < L ->
     rst_stream(?FLOW_CONTROL_ERROR, Stream),
-    lager:error("open -> closed ~p", [Stream#stream_state.stream_id]),
     {next_state,
      closed,
      Stream};
@@ -376,16 +375,18 @@ open({recv_frame,
         incoming_frames=IFQ,
         recv_window_size=SRWS,
         callback_mod=CB,
-        custom_state=CustomState
+        callback_state=CallbackState
        }=Stream)
   when ?NOT_FLAG(Flags, ?FLAG_END_STREAM) ->
-    {ok, NewCustomState} = CB:on_receive_request_data(F, CustomState),
+    {ok, NewCBState} = CB:on_receive_request_data(F, CallbackState),
     {next_state,
      open,
      Stream#stream_state{
+       %% TODO: We're storing everything in the state. It's fine for
+       %% some cases, but the decision should be left to the user
        incoming_frames=queue:in(F, IFQ),
        recv_window_size=SRWS-L,
-       custom_state=NewCustomState
+       callback_state=NewCBState
       }};
 open({recv_frame,
       {#frame_header{
@@ -397,20 +398,20 @@ open({recv_frame,
         incoming_frames=IFQ,
         recv_window_size=SRWS,
         callback_mod=CB,
-        custom_state=CustomState,
+        callback_state=CallbackState,
         connection=ConnPid,
         stream_id=StreamId
        }=Stream)
   when ?IS_FLAG(Flags, ?FLAG_END_STREAM) ->
-    {ok, CustomState1} = CB:on_receive_request_data(F, CustomState),
-    {ok, NewCustomState} = CB:on_request_end_stream(StreamId, ConnPid, CustomState1),
+    {ok, CallbackState1} = CB:on_receive_request_data(F, CallbackState),
+    {ok, NewCBState} = CB:on_request_end_stream(StreamId, ConnPid, CallbackState1),
     {next_state,
      half_closed_remote,
      Stream#stream_state{
        incoming_frames=queue:in(F, IFQ),
        recv_window_size=SRWS-L,
        request_end_stream=true,
-       custom_state=NewCustomState
+       callback_state=NewCBState
       }};
 open(Msg, Stream) ->
     lager:warning("Some unexpected message in open state. ~p, ~p", [Msg, Stream]),
@@ -432,8 +433,8 @@ open({send_frame,
     NextState =
         case ?IS_FLAG(Flags, ?FLAG_END_STREAM) of
             true ->
-             half_closed_local;
-        _ ->
+                half_closed_local;
+            _ ->
                 open
         end,
     {reply, ok, NextState, Stream}.
@@ -463,7 +464,8 @@ half_closed_remote(
     NextState =
         case ?IS_FLAG(Flags, ?FLAG_END_STREAM) of
             true ->
-                lager:error("half_closed remote -> closed ~p", [Stream#stream_state.stream_id]),
+                lager:error("half_closed remote -> closed ~p",
+                            [Stream#stream_state.stream_id]),
                 closed;
         _ ->
                 half_closed_remote
@@ -505,7 +507,6 @@ half_closed_local(
                 _ ->
                     NotifyPid ! {'END_STREAM', StreamId}
             end,
-            lager:error("half_closed_local -> closed ~p", [StreamId]),
             {next_state, closed,
              Stream#stream_state{
                incoming_frames=queue:new(),

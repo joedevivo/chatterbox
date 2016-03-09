@@ -25,8 +25,8 @@ init_per_testcase(
          {initial_window_size, 64},
          {flow_control, manual}
         |Config],
-    PostChatter = chatterbox_test_buddy:start(PreChatterConfig),
-    PostChatter;
+    chatterbox_test_buddy:start(PreChatterConfig);
+
 init_per_testcase(
   exceed_server_stream_receive_window,
   Config) ->
@@ -37,8 +37,7 @@ init_per_testcase(
          {initial_window_size, 64},
          {flow_control, manual}
         |Config],
-    PostChatter = chatterbox_test_buddy:start(PreChatterConfig),
-    PostChatter;
+    chatterbox_test_buddy:start(PreChatterConfig);
 init_per_testcase(_, Config) ->
     Config.
 

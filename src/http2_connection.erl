@@ -881,12 +881,21 @@ handle_event({send_data_frame,
 %% Only send a frame if the window size works and the queue is empty
     case {CSWS >= L, queue:is_empty(QF)} of
         {true, true} ->
-            http2_stream:send_frame(StreamPid, Frame),
-            {next_state,
-             StateName,
-             Conn#connection{
-               send_window_size=CSWS-L
-              }};
+            Sent = http2_stream:send_frame(StreamPid, Frame),
+            case Sent of
+                ok ->
+                    {next_state,
+                     StateName,
+                     Conn#connection{
+                       send_window_size=CSWS-L
+                      }};
+                flow_control ->
+                    {next_state,
+                     StateName,
+                     Conn#connection{
+                       queued_frames=queue:in(Frame, QF)
+                      }}
+            end;
         _ ->
             lager:debug("[~p] tried to send ~p bytes, with connection send window size ~p",
                         [Conn#connection.type, L, CSWS]),
