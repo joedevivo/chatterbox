@@ -14,11 +14,11 @@
 
 -spec format(data()) -> iodata().
 format(Payload) ->
-    BinToShow = case size(Payload) > 31 of
+    BinToShow = case size(Payload) > 7 of
         false ->
             Payload#data.data;
         true ->
-            <<Start:32/binary,_/binary>> = Payload#data.data,
+            <<Start:8/binary,_/binary>> = Payload#data.data,
             Start
     end,
     io_lib:format("[Data: {data: ~p ...}]", [BinToShow]).

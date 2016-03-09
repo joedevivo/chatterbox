@@ -27,10 +27,14 @@ read_binary(Bin, #frame_header{length=4}) ->
 read_binary(_, _) ->
     {error, frame_size_error}.
 
-send({Transport, Socket}, #window_update{window_size_increment=Payload}, StreamId) ->
-    Transport:send(Socket, [
-        <<4:24,?WINDOW_UPDATE:8,0:8,0:1,StreamId:31>>,
-        <<0:1,Payload:31>>]).
+-spec send(sock:socket(),
+           non_neg_integer(),
+           stream_id()) ->
+                  ok.
+send(Socket, WindowSizeIncrement, StreamId) ->
+    sock:send(Socket, [
+                       <<4:24,?WINDOW_UPDATE:8,0:8,0:1,StreamId:31>>,
+                       <<0:1,WindowSizeIncrement:31>>]).
 
 -spec to_binary(window_update()) -> iodata().
 to_binary(#window_update{

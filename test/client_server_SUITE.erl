@@ -7,12 +7,13 @@
 all() ->
     [
      complex_request,
-     upgrade_tcp_connection
+     upgrade_tcp_connection,
+     basic_push
     ].
 
 init_per_suite(Config) ->
     %% We'll start up a chatterbox server once, with this data_dir.
-    NewConfig = [{www_root, data_dir}|Config],
+    NewConfig = [{www_root, data_dir},{initial_window_size,99999999}|Config],
     chatterbox_test_buddy:start(NewConfig).
 
 init_per_testcase(_, Config) ->
@@ -23,6 +24,7 @@ end_per_suite(Config) ->
     ok.
 
 complex_request(_Config) ->
+    application:set_env(chatterbox, client_initial_window_size, 99999999),
     {ok, Client} = http2_client:start_link(),
     RequestHeaders =
         [
@@ -36,8 +38,8 @@ complex_request(_Config) ->
         ],
     {ok, {ResponseHeaders, ResponseBody}} = http2_client:sync_request(Client, RequestHeaders, <<>>),
 
-    cthr:pal("Response Headers: ~p", [ResponseHeaders]),
-    cthr:pal("Response Body: ~p", [ResponseBody]),
+    ct:pal("Response Headers: ~p", [ResponseHeaders]),
+    ct:pal("Response Body: ~p", [ResponseBody]),
 
     ok.
 
@@ -55,6 +57,29 @@ upgrade_tcp_connection(_Config) ->
          {<<"user-agent">>, <<"chattercli/0.0.1 :D">>}
         ],
     {ok, {ResponseHeaders, ResponseBody}} = http2_client:sync_request(Client, RequestHeaders, <<>>),
-    cthr:pal("Response Headers: ~p", [ResponseHeaders]),
-    cthr:pal("Response Body: ~p", [ResponseBody]),
+    ct:pal("Response Headers: ~p", [ResponseHeaders]),
+    ct:pal("Response Body: ~p", [ResponseBody]),
+    ok.
+
+
+basic_push(_Config) ->
+    {ok, Client} = http2_client:start_link(),
+    RequestHeaders =
+        [
+         {<<":method">>, <<"GET">>},
+         {<<":path">>, <<"/index.html">>},
+         {<<":scheme">>, <<"https">>},
+         {<<":authority">>, <<"localhost:8080">>},
+         {<<"accept">>, <<"*/*">>},
+         {<<"accept-encoding">>, <<"gzip, deflate">>},
+         {<<"user-agent">>, <<"chattercli/0.0.1 :D">>}
+        ],
+    {ok, {ResponseHeaders, ResponseBody}} = http2_client:sync_request(Client, RequestHeaders, <<>>),
+
+    Streams = http2_connection:get_streams(Client),
+    ct:pal("Streams ~p", [Streams]),
+
+    ct:pal("Response Headers: ~p", [ResponseHeaders]),
+    ct:pal("Response Body: ~p", [ResponseBody]),
+    13 = length(Streams),
     ok.

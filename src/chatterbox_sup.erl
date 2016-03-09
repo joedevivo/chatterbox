@@ -29,11 +29,13 @@ init([]) ->
             {gen_tcp, []}
     end,
 
+    Http2Settings = chatterbox:settings(server),
+
     spawn_link(fun empty_listeners/0),
     {ok, ListenSocket} = gen_tcp:listen(Port, Options),
     Restart = {simple_one_for_one, 60, 3600},
     Children = [{socket,
-                {http2_connection, start_server_link, [{Transport, ListenSocket}, SSLOptions]}, % pass the socket!
+                {http2_connection, start_server_link, [{Transport, ListenSocket}, SSLOptions, Http2Settings]},
                 temporary, 1000, worker, [http2_socket]}],
     {ok, {Restart, Children}}.
 
