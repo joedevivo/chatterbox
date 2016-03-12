@@ -36,7 +36,6 @@ read_binary(Bin, H=#frame_header{length=L}) ->
 to_frames(StreamId, IOList, Settings)
   when is_list(IOList) ->
     to_frames(StreamId, iolist_to_binary(IOList), Settings);
-
 to_frames(StreamId, Data, S=#settings{max_frame_size=MFS}) ->
     L = byte_size(Data),
     case L >= MFS of

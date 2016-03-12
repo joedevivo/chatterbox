@@ -27,11 +27,11 @@ read_binary(Bin, H=#frame_header{length=L}) ->
                 },
     {ok, Payload, Rem}.
 
--spec to_frame(pos_integer(), pos_integer(), hpack:headers(), hpack:encode_context()) ->
-                      {{frame_header(), push_promise()}, hpack:encode_context()}.
+-spec to_frame(pos_integer(), pos_integer(), hpack:headers(), hpack:context()) ->
+                      {{frame_header(), push_promise()}, hpack:context()}.
 %% Maybe break this up into continuations like the data frame
 to_frame(StreamId, PStreamId, Headers, EncodeContext) ->
-    {HeadersToSend, NewContext} = hpack:encode(Headers, EncodeContext),
+    {ok, {HeadersToSend, NewContext}} = hpack:encode(Headers, EncodeContext),
     L = byte_size(HeadersToSend),
     {{#frame_header{
          length=L,

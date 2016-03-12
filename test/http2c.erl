@@ -39,7 +39,7 @@
 -record(http2c_state, {
           socket :: undefined | {gen_tcp, gen_tcp:socket()} | {ssl, ssl:sslsocket()},
           send_settings = #settings{} :: settings(),
-          encode_context = hpack:new_encode_context() :: hpack:encode_context(),
+          encode_context = hpack:new_context() :: hpack:context(),
           next_available_stream_id = 1 :: pos_integer(),
           incoming_frames = [] :: [frame()],
           working_frame_header = undefined :: undefined | frame_header(),

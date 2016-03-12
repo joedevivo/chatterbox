@@ -93,7 +93,7 @@ send_n_bytes(N) ->
          {<<":path">>, <<"/">>},
          {<<":method">>, <<"POST">>}
         ],
-    {HeadersBin, _EncodeContext} = hpack:encode(Headers, hpack:new_encode_context()),
+    {ok, {HeadersBin, _EncodeContext}} = hpack:encode(Headers, hpack:new_context()),
 
     HeaderFrame = {#frame_header{
                       length=byte_size(HeadersBin),

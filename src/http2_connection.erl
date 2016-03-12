@@ -74,8 +74,8 @@
           recv_settings = #settings{} :: settings(),
           send_window_size = ?DEFAULT_INITIAL_WINDOW_SIZE :: integer(),
           recv_window_size = ?DEFAULT_INITIAL_WINDOW_SIZE :: integer(),
-          decode_context = hpack:new_decode_context() :: hpack:decode_context(),
-          encode_context = hpack:new_encode_context() :: hpack:encode_context(),
+          decode_context = hpack:new_context() :: hpack:context(),
+          encode_context = hpack:new_context() :: hpack:context(),
           settings_sent = queue:new() :: queue:queue(),
           next_available_stream_id = 2 :: stream_id(),
           streams = [] :: [{stream_id(), pid()}],
@@ -379,9 +379,11 @@ route_frame({#frame_header{
 route_frame({H, Payload},
             #connection{
                send_settings=SS=#settings{
-                                   initial_window_size=OldIWS
+                                   initial_window_size=OldIWS,
+                                   header_table_size=HTS
                                   },
-               streams = Streams
+               streams = Streams,
+               encode_context=EncodeContext
               }=Conn)
     when H#frame_header.type == ?SETTINGS,
          ?NOT_FLAG(H#frame_header.flags, ?FLAG_ACK) ->
@@ -406,14 +408,17 @@ route_frame({H, Payload},
     %% everywhere. It's up to them if they need to do anything.
     [ http2_stream:modify_send_window_size(Pid, Delta) || {_, Pid} <- Streams],
 
+    NewEncodeContext = hpack:new_max_table_size(HTS, EncodeContext),
+
     socksend(Conn, http2_frame_settings:ack()),
     lager:debug("[~p] Sent Settings ACK",
                [Conn#connection.type]),
     {next_state, connected, Conn#connection{
-                              send_settings=NewSendSettings
+                              send_settings=NewSendSettings,
     %% Why aren't we updating send_window_size here? Section 6.9.2 of
     %% the spec says: "The connection flow-control window can only be
-    %% changed using WINDOW_UPDATE frames."
+    %% changed using WINDOW_UPDATE frames.",
+                              encode_context=NewEncodeContext
                              }};
 %% This is the case where we got an ACK, so dequeue settings we're
 %% waiting to apply
@@ -563,19 +568,23 @@ route_frame({#frame_header{
     case ?IS_FLAG(Flags, ?FLAG_END_HEADERS) of
         true ->
             HeadersBin = http2_frame_headers:from_frames([Frame]),
-            {Headers, NewDecodeContext} = hpack:decode(HeadersBin, DecodeContext),
-            http2_stream:recv_h(StreamPid, Headers),
-            case EndStream of
-                true ->
-                    http2_stream:recv_es(StreamPid);
-                false ->
-                    ok
-            end,
-            {next_state, connected,
-             Conn#connection{
-               streams = NewStreams,
-               decode_context=NewDecodeContext
-              }};
+            case hpack:decode(HeadersBin, DecodeContext) of
+                {ok, {Headers, NewDecodeContext}} ->
+                    http2_stream:recv_h(StreamPid, Headers),
+                    case EndStream of
+                        true ->
+                            http2_stream:recv_es(StreamPid);
+                        false ->
+                            ok
+                    end,
+                    {next_state, connected,
+                     Conn#connection{
+                       streams = NewStreams,
+                       decode_context=NewDecodeContext
+                      }};
+                {error, compression_error} ->
+                    go_away(?COMPRESSION_ERROR, Conn)
+            end;
         false ->
             {next_state, continuation,
              Conn#connection{
@@ -585,7 +594,7 @@ route_frame({#frame_header{
                                  frames = queue:from_list([Frame]),
                                  end_stream = EndStream,
                                  type=headers
-                                 }
+                                }
               }}
     end;
 route_frame(F={H=#frame_header{
@@ -611,24 +620,30 @@ route_frame(F={H=#frame_header{
     case ?IS_FLAG(H#frame_header.flags, ?FLAG_END_HEADERS) of
         true ->
             HeadersBin = http2_frame_headers:from_frames(queue:to_list(Queue)),
-            {Headers, NewDecodeContext} = hpack:decode(HeadersBin, DecodeContext),
-            case ContType of
-                headers ->
-                    http2_stream:recv_h(StreamPid, Headers);
-                push_promise ->
-                    http2_stream:recv_pp(StreamPid, Headers)
-            end,
-            case EndStream of
-                true ->
-                    http2_stream:recv_es(StreamPid);
-                false ->
-                    ok
-            end,
-            {next_state, connected,
-             Conn#connection{
-               decode_context=NewDecodeContext,
-               continuation=undefined
-              }};
+
+            case hpack:decode(HeadersBin, DecodeContext) of
+                {ok, {Headers, NewDecodeContext}} ->
+
+                    case ContType of
+                        headers ->
+                            http2_stream:recv_h(StreamPid, Headers);
+                        push_promise ->
+                            http2_stream:recv_pp(StreamPid, Headers)
+                    end,
+                    case EndStream of
+                        true ->
+                            http2_stream:recv_es(StreamPid);
+                        false ->
+                            ok
+                    end,
+                    {next_state, connected,
+                     Conn#connection{
+                       decode_context=NewDecodeContext,
+                       continuation=undefined
+                      }};
+                {error, compression_error} ->
+                    go_away(?COMPRESSION_ERROR, Conn)
+            end;
         false ->
             {next_state, continuation,
              Conn#connection{
@@ -694,13 +709,18 @@ route_frame({H=#frame_header{
     case ?IS_FLAG(Flags, ?FLAG_END_HEADERS) of
         true ->
             HeadersBin = http2_frame_headers:from_frames([Frame]),
-            {Headers, NewDecodeContext} = hpack:decode(HeadersBin, DecodeContext),
-            http2_stream:recv_pp(NewStreamPid, Headers),
+            case hpack:decode(HeadersBin, DecodeContext) of
+                {ok, {Headers, NewDecodeContext}} ->
 
-            {next_state, connected,
-             Conn#connection{
-               decode_context=NewDecodeContext,
-               streams=[{PSID, NewStreamPid}|Streams]}};
+                    http2_stream:recv_pp(NewStreamPid, Headers),
+
+                    {next_state, connected,
+                     Conn#connection{
+                       decode_context=NewDecodeContext,
+                       streams=[{PSID, NewStreamPid}|Streams]}};
+                {error, compression_error} ->
+                    go_away(?COMPRESSION_ERROR, Conn)
+            end;
         false ->
             {next_state, continuation,
              Conn#connection{
@@ -1116,9 +1136,11 @@ code_change(_OldVsn, StateName, Conn, _Extra) ->
 
 terminate(normal, _StateName, _Conn) ->
     ok;
-terminate(Reason, _StateName, Conn) ->
+terminate(Reason, _StateName, Conn=#connection{}) ->
     lager:debug("[~p] terminate reason: ~p~n",
-                [Conn#connection.type, Reason]).
+                [Conn#connection.type, Reason]);
+terminate(Reason, StateName, State) ->
+    lager:debug("Crashed ~p ~p, ~p", [Reason, StateName, State]).
 
 -spec go_away(error_code(), connection()) -> {next_state, closing, connection()}.
 go_away(ErrorCode,
