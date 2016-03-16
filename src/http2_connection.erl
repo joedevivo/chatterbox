@@ -1206,8 +1206,9 @@ start_http2_server(
     }=Conn) ->
     lager:info("[server] StartHTTP2 settings: ~p",
                [Http2Settings]),
-    case sock:recv(Socket, length(?PREFACE), 5000) of
-        {ok, <<?PREFACE>>} ->
+
+    case accept_preface(Socket) of
+        ok ->
             ok = active_once(Socket),
             NewState =
                 Conn#connection{
@@ -1219,9 +1220,25 @@ start_http2_server(
              handshake,
              send_settings(Http2Settings, NewState)
             };
-        BadPreface ->
-            lager:debug("[server] Bad Preface: ~p", [BadPreface]),
-            go_away(?PROTOCOL_ERROR, Conn)
+        {error, invalid_preface} ->
+            lager:debug("[server] Invalid Preface"),
+            {next_state, closing, Conn}
+    end.
+
+%% We're going to iterate through the preface string until we're done
+%% or hit a mismatch
+accept_preface(Socket) ->
+    accept_preface(Socket, <<?PREFACE>>).
+
+accept_preface(_Socket, <<>>) ->
+    ok;
+accept_preface(Socket, <<Char:8,Rem/binary>>) ->
+    case sock:recv(Socket, 1, 5000) of
+        {ok, <<Char>>} ->
+            accept_preface(Socket, Rem);
+        _E ->
+            sock:close(Socket),
+            {error, invalid_preface}
     end.
 
 %% Incoming data is a series of frames. With a passive socket we can just:
