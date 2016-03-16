@@ -34,7 +34,7 @@ basic_continuation(_Config) ->
                {<<"user-agent">>, <<"nghttp2/0.7.7">>}
               ],
 
-    {HeadersBin, _NewContext} = hpack:encode(Headers, hpack:new_encode_context()),
+    {ok, {HeadersBin, _NewContext}} = hpack:encode(Headers, hpack:new_context()),
 
     <<H1:8/binary,H2:8/binary,H3/binary>> = HeadersBin,
 
@@ -66,7 +66,7 @@ basic_continuation_end_stream_first(_Config) ->
                {<<"user-agent">>, <<"nghttp2/0.7.7">>}
               ],
 
-    {HeadersBin, _NewContext} = hpack:encode(Headers, hpack:new_encode_context()),
+    {ok, {HeadersBin, _NewContext}} = hpack:encode(Headers, hpack:new_context()),
 
     <<H1:8/binary,H2:8/binary,H3/binary>> = HeadersBin,
 
@@ -97,7 +97,7 @@ bad_frame_wrong_type_between_continuations(_Config) ->
                {<<"user-agent">>, <<"nghttp2/0.7.7">>}
               ],
 
-    {HeadersBin, _NewContext} = hpack:encode(Headers, hpack:new_encode_context()),
+    {ok, {HeadersBin, _NewContext}} = hpack:encode(Headers, hpack:new_context()),
 
     <<H1:8/binary,H2:8/binary,H3/binary>> = HeadersBin,
 
@@ -133,7 +133,7 @@ bad_frame_wrong_stream_between_continuations(_Config) ->
                {<<"user-agent">>, <<"nghttp2/0.7.7">>}
               ],
 
-    {HeadersBin, _NewContext} = hpack:encode(Headers, hpack:new_encode_context()),
+    {ok, {HeadersBin, _NewContext}} = hpack:encode(Headers, hpack:new_context()),
 
     <<H1:8/binary,H2:8/binary,H3/binary>> = HeadersBin,
 

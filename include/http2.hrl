@@ -92,7 +92,7 @@
 -type frame_header() :: #frame_header{}.
 
 -record(data, {
-    data :: binary()
+    data :: iodata()
   }).
 -type data() :: #data{}.
 

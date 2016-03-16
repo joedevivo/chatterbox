@@ -69,22 +69,22 @@ euc(_Config) ->
                {<<"user-agent">>, <<"my cool browser">>},
                {<<"x-custom-header">>, <<"some custom value">>}
               ],
-    HeaderContext1 = hpack:new_encode_context(),
-    {HeadersBin1, HeaderContext2} = hpack:encode(Headers1, HeaderContext1),
+    HeaderContext1 = hpack:new_context(),
+    {ok, {HeadersBin1, HeaderContext2}} = hpack:encode(Headers1, HeaderContext1),
 
     Headers2 = [
                {<<":path">>, <<"/some_file.html">>},
                {<<"user-agent">>, <<"my cool browser">>},
                {<<"x-custom-header">>, <<"some custom value">>}
               ],
-    {HeadersBin2, HeaderContext3} = hpack:encode(Headers2, HeaderContext2),
+    {ok, {HeadersBin2, HeaderContext3}} = hpack:encode(Headers2, HeaderContext2),
 
     Headers3 = [
                {<<":path">>, <<"/some_file.html">>},
                {<<"user-agent">>, <<"my cool browser">>},
                {<<"x-custom-header">>, <<"new value">>}
               ],
-    {HeadersBin3, _HeaderContext4} = hpack:encode(Headers3, HeaderContext3),
+    {ok, {HeadersBin3, _HeaderContext4}} = hpack:encode(Headers3, HeaderContext3),
 
     Frames = [
               {#frame_header{length=byte_size(HeadersBin1),type=?HEADERS,flags=?FLAG_END_HEADERS,stream_id=3},#headers{block_fragment=HeadersBin1}},
