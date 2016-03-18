@@ -1038,8 +1038,8 @@ handle_sync_event(get_peer, _F, StateName,
             lager:warning("failed to fetch peer for ~p socket",
                           [Transport]),
             {reply, Error, StateName, Conn};
-        {ok, AddrPort} ->
-            {reply, AddrPort, StateName, Conn}
+        {ok, _AddrPort}=OK ->
+            {reply, OK, StateName, Conn}
     end;
 handle_sync_event(_E, _F, StateName,
                   #connection{}=Conn) ->
