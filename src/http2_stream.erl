@@ -107,31 +107,32 @@
          }).
 
 -type state() :: #stream_state{}.
--export_type([state/0]).
+-type callback_state() :: any().
+-export_type([state/0, callback_state/0]).
 
--callback init() -> {ok, any()}.
+-callback init(
+            Conn :: pid(),
+            StreamId :: stream_id()) ->
+  {ok, callback_state()}.
 
 -callback on_receive_request_headers(
             Headers :: hpack:headers(),
-            CallbackState :: any()) ->
-    {ok, NewState :: any()}.
+            CallbackState :: callback_state()) ->
+    {ok, NewState :: callback_state()}.
 
 -callback on_send_push_promise(
             Headers :: hpack:headers(),
-            CallbackState :: any()) ->
-
-    {ok, NewState :: any()}.
+            CallbackState :: callback_state()) ->
+    {ok, NewState :: callback_state()}.
 
 -callback on_receive_request_data(
             iodata(),
-            CallbackState :: any())->
-    {ok, NewState :: any()}.
+            CallbackState :: callback_state())->
+    {ok, NewState :: callback_state()}.
 
 -callback on_request_end_stream(
-            StreamId :: stream_id(),
-            Conn :: pid(),
-            CallbackState :: any()) ->
-    {ok, NewState :: any()}.
+            CallbackState :: callback_state()) ->
+    {ok, NewState :: callback_state()}.
 
 %% Public API
 -spec start_link(stream_options()) ->
@@ -231,7 +232,7 @@ init(StreamOptions) ->
     Socket = proplists:get_value(socket, StreamOptions),
 
     %% TODO: Check for CB implementing this behaviour
-    {ok, CallbackState} = CB:init(),
+    {ok, CallbackState} = CB:init(ConnectionPid, StreamId),
 
     {ok, idle, #stream_state{
                   callback_mod=CB,
@@ -307,12 +308,10 @@ idle(Message, State) ->
 
 reserved_local(timeout,
                #stream_state{
-                  stream_id=StreamId,
-                  connection=Conn,
                   callback_state=CallbackState,
                   callback_mod=CB
                   }=Stream) ->
-    {ok, NewCBState} = CB:on_request_end_stream(StreamId, Conn, CallbackState),
+    {ok, NewCBState} = CB:on_request_end_stream(CallbackState),
     {next_state,
      reserved_local,
      Stream#stream_state{
@@ -338,12 +337,10 @@ reserved_remote({recv_h, Headers},
 
 open(recv_es,
      #stream_state{
-        stream_id=StreamId,
-        connection=Conn,
         callback_mod=CB,
         callback_state=CallbackState
        }=Stream) ->
-    {ok, NewCBState} = CB:on_request_end_stream(StreamId, Conn, CallbackState),
+    {ok, NewCBState} = CB:on_request_end_stream(CallbackState),
     {next_state,
      half_closed_remote,
      Stream#stream_state{
@@ -398,13 +395,11 @@ open({recv_frame,
         incoming_frames=IFQ,
         recv_window_size=SRWS,
         callback_mod=CB,
-        callback_state=CallbackState,
-        connection=ConnPid,
-        stream_id=StreamId
+        callback_state=CallbackState
        }=Stream)
   when ?IS_FLAG(Flags, ?FLAG_END_STREAM) ->
     {ok, CallbackState1} = CB:on_receive_request_data(F, CallbackState),
-    {ok, NewCBState} = CB:on_request_end_stream(StreamId, ConnPid, CallbackState1),
+    {ok, NewCBState} = CB:on_request_end_stream(CallbackState1),
     {next_state,
      half_closed_remote,
      Stream#stream_state{

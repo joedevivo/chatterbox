@@ -1,22 +1,27 @@
 -module(chatterbox_static_stream).
 
+-include("http2.hrl").
+
 -behaviour(http2_stream).
 
 -export([
-         init/0,
+         init/2,
          on_receive_request_headers/2,
          on_send_push_promise/2,
          on_receive_request_data/2,
-         on_request_end_stream/3
+         on_request_end_stream/1
         ]).
 
 -record(cb_static, {
-        req_headers=[]
+        req_headers=[],
+        connection_pid :: pid(),
+        stream_id :: stream_id()
           }).
 
-init() ->
+init(ConnPid, StreamId) ->
     %% You need to pull settings here from application:env or something
-    {ok, #cb_static{}}.
+    {ok, #cb_static{connection_pid=ConnPid,
+                    stream_id=StreamId}}.
 
 on_receive_request_headers(Headers, State) ->
     lager:info("on_receive_request_headers(~p, ~p)", [Headers, State]),
@@ -30,7 +35,8 @@ on_receive_request_data(Bin, State)->
     lager:info("on_receive_request_data(~p, ~p)", [Bin, State]),
     {ok, State}.
 
-on_request_end_stream(StreamId, ConnPid, State) ->
+on_request_end_stream(State=#cb_static{connection_pid=ConnPid,
+                                       stream_id=StreamId}) ->
     lager:info("on_request_end_stream(~p)", [State]),
     %StreamId = http2_stream:stream_id(),
     %ConnPid = http2_stream:connection(),
