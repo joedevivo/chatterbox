@@ -369,6 +369,24 @@ route_frame({#frame_header{
                 [Conn#connection.type, ?FT(Type)]),
     go_away(?PROTOCOL_ERROR, Conn);
 
+route_frame({#frame_header{
+                type=?WINDOW_UPDATE,
+                stream_id=StreamId
+               },
+             #window_update{
+                window_size_increment=WSI
+                }},
+            #connection{} = Conn)
+  when WSI < 1 ->
+    case StreamId of
+        0 ->
+            go_away(?PROTOCOL_ERROR, Conn);
+        _ ->
+            Stream = proplists:get_value(StreamId, Conn#connection.streams),
+            http2_stream:rst_stream(Stream, ?PROTOCOL_ERROR)
+    end;
+
+
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Connection Level Frames
 %%
@@ -491,8 +509,8 @@ route_frame(F={H=#frame_header{
 
     StreamPid = proplists:get_value(StreamId, Streams),
 
-    case Conn#connection.flow_control of
-        auto ->
+    case {Conn#connection.flow_control, L > 0} of
+        {auto, true} ->
             %% Make window size great again
             lager:info("[~p] Stream ~p WindowUpdate ~p",
                        [Conn#connection.type, StreamId, L]),

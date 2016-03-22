@@ -20,7 +20,8 @@
          send_window_update/1,
          send_connection_window_update/1,
          modify_send_window_size/2,
-         modify_recv_window_size/2
+         modify_recv_window_size/2,
+         rst_stream/2
         ]).
 
 %% gen_fsm callbacks
@@ -215,6 +216,9 @@ modify_send_window_size(Pid, Delta) ->
 modify_recv_window_size(Pid, Delta) ->
     gen_fsm:send_all_state_event(Pid, {modify_recv_window_size, Delta}).
 
+rst_stream(Pid, Code) ->
+    gen_fsm:sync_send_all_state_event(Pid, {rst_stream, Code}).
+
 %% States
 %% - idle
 %% - reserved_local
@@ -357,7 +361,7 @@ open({recv_frame,
         recv_window_size=RWS
        }=Stream)
   when RWS < L ->
-    rst_stream(?FLOW_CONTROL_ERROR, Stream),
+    rst_stream_(?FLOW_CONTROL_ERROR, Stream),
     {next_state,
      closed,
      Stream};
@@ -594,6 +598,8 @@ handle_event({recv_wu,
 handle_event(_E, StateName, State) ->
     {next_state, StateName, State}.
 
+handle_sync_event({rst_stream, ErrorCode}, _F, StateName, State=#stream_state{}) ->
+    {reply, {ok, rst_stream_(ErrorCode, State)}, StateName, State};
 handle_sync_event(notify_pid, _F, StateName, State=#stream_state{notify_pid=NP}) ->
     {reply, {ok,NP}, StateName, State};
 handle_sync_event(stream_id, _F, StateName, State=#stream_state{stream_id=StreamId}) ->
@@ -615,8 +621,8 @@ terminate(normal, _StateName, _State) ->
 terminate(_Reason, _StateName, _State) ->
     lager:debug("terminate reason: ~p~n", [_Reason]).
 
--spec rst_stream(error_code(), state()) -> ok.
-rst_stream(ErrorCode,
+-spec rst_stream_(error_code(), state()) -> ok.
+rst_stream_(ErrorCode,
            #stream_state{
               socket=Socket,
               stream_id=StreamId
