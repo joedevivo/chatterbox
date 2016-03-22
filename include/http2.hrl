@@ -19,7 +19,8 @@
                     | ?PING
                     | ?GOAWAY
                     | ?WINDOW_UPDATE
-                    | ?CONTINUATION.
+                    | ?CONTINUATION
+                    | integer(). %% boo!
 
 -define(FT, fun(?DATA) -> "DATA";
                (?HEADERS) -> "HEADERS";
@@ -30,7 +31,8 @@
                (?PING) -> "PING";
                (?GOAWAY) -> "GOAWAY";
                (?WINDOW_UPDATE) -> "WINDOW_UPDATE";
-               (?CONTINUATION) -> "CONTINUATION" end
+               (?CONTINUATION) -> "CONTINUATION";
+               (_) -> "UNSUPPORTED EXPANSION type" end
   ).
 
 %% ERROR CODES
@@ -181,7 +183,8 @@
                  | ping()
                  | goaway()
                  | window_update()
-                 | continuation().
+                 | continuation()
+                 | binary().
 
 -type frame() :: {frame_header(), payload()}.
 

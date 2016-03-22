@@ -130,24 +130,34 @@ read_payload({Transport, Socket}, Header=#frame_header{length=L}, Timeout) ->
     {ok, payload(), binary()} | {error, term()}.
 read_binary_payload(Bin, Header = #frame_header{type=?DATA}) ->
     http2_frame_data:read_binary(Bin, Header);
-read_binary_payload(Socket, Header = #frame_header{type=?HEADERS}) ->
-    http2_frame_headers:read_binary(Socket, Header);
-read_binary_payload(Socket, Header = #frame_header{type=?PRIORITY}) ->
-    http2_frame_priority:read_binary(Socket, Header);
-read_binary_payload(Socket, Header = #frame_header{type=?RST_STREAM}) ->
-    http2_frame_rst_stream:read_binary(Socket, Header);
-read_binary_payload(Socket, Header = #frame_header{type=?SETTINGS}) ->
-    http2_frame_settings:read_binary(Socket, Header);
-read_binary_payload(Socket, Header = #frame_header{type=?PUSH_PROMISE}) ->
-    http2_frame_push_promise:read_binary(Socket, Header);
-read_binary_payload(Socket, Header = #frame_header{type=?PING}) ->
-    http2_frame_ping:read_binary(Socket, Header);
-read_binary_payload(Socket, Header = #frame_header{type=?GOAWAY}) ->
-    http2_frame_goaway:read_binary(Socket, Header);
-read_binary_payload(Socket, Header = #frame_header{type=?WINDOW_UPDATE}) ->
-    http2_frame_window_update:read_binary(Socket, Header);
-read_binary_payload(Socket, Header = #frame_header{type=?CONTINUATION}) ->
-    http2_frame_continuation:read_binary(Socket, Header).
+read_binary_payload(Bin, Header = #frame_header{type=?HEADERS}) ->
+    http2_frame_headers:read_binary(Bin, Header);
+read_binary_payload(Bin, Header = #frame_header{type=?PRIORITY}) ->
+    http2_frame_priority:read_binary(Bin, Header);
+read_binary_payload(Bin, Header = #frame_header{type=?RST_STREAM}) ->
+    http2_frame_rst_stream:read_binary(Bin, Header);
+read_binary_payload(Bin, Header = #frame_header{type=?SETTINGS}) ->
+    http2_frame_settings:read_binary(Bin, Header);
+read_binary_payload(Bin, Header = #frame_header{type=?PUSH_PROMISE}) ->
+    http2_frame_push_promise:read_binary(Bin, Header);
+read_binary_payload(Bin, Header = #frame_header{type=?PING}) ->
+    http2_frame_ping:read_binary(Bin, Header);
+read_binary_payload(Bin, Header = #frame_header{type=?GOAWAY}) ->
+    http2_frame_goaway:read_binary(Bin, Header);
+read_binary_payload(Bin, Header = #frame_header{type=?WINDOW_UPDATE}) ->
+    http2_frame_window_update:read_binary(Bin, Header);
+read_binary_payload(Bin, Header = #frame_header{type=?CONTINUATION}) ->
+    http2_frame_continuation:read_binary(Bin, Header);
+read_binary_payload(Bin, Header) ->
+    read_unsupported_frame_binary(Bin, Header).
+
+read_unsupported_frame_binary(Bin,
+                              #frame_header{length=0}) ->
+    {ok, <<>>, Bin};
+read_unsupported_frame_binary(Bin,
+                              #frame_header{length=L}) ->
+    <<PayloadBin:L/binary,Rem/bits>> = Bin,
+    {ok, PayloadBin, Rem}.
 
 -spec format_payload(frame()) -> iodata().
 format_payload({#frame_header{type=?DATA}, P}) ->
@@ -169,7 +179,11 @@ format_payload({#frame_header{type=?GOAWAY}, P}) ->
 format_payload({#frame_header{type=?WINDOW_UPDATE}, P}) ->
     http2_frame_window_update:format(P);
 format_payload({#frame_header{type=?CONTINUATION}, P}) ->
-    http2_frame_continuation:format(P).
+    http2_frame_continuation:format(P);
+format_payload({_, _P}) ->
+    "Unsupported Frame".
+
+
 
 -spec format(frame()) -> iodata().
 format(error) -> "error";
