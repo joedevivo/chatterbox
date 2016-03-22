@@ -835,7 +835,10 @@ route_frame(F={H=#frame_header{stream_id=StreamId}, #window_update{}},
               }}
 
     end;
-
+route_frame({#frame_header{type=T}, _}, Conn)
+  when T > ?CONTINUATION ->
+    lager:debug("Ignoring Unsupported Expansion Frame"),
+    {next_state, connected, Conn};
 route_frame(Frame, #connection{}=Conn) ->
     lager:error("[~p] Frame condition not covered by pattern match",
                [Conn#connection.type]),
