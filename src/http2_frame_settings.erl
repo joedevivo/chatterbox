@@ -12,7 +12,8 @@
          ack/0,
          ack/1,
          to_binary/1,
-         overlay/2
+         overlay/2,
+         validate/1
         ]).
 
 -spec format(settings()|binary()|{settings, [proplists:property()]}) -> iodata().
@@ -161,6 +162,21 @@ to_binary(?SETTINGS_MAX_HEADER_LIST_SIZE, #settings{max_header_list_size=undefin
 to_binary(?SETTINGS_MAX_HEADER_LIST_SIZE, #settings{max_header_list_size=MHLS}) ->
     <<16#6:16,MHLS:32>>.
 
+
+-spec validate({settings, [proplists:property()]}) -> ok | {error, integer()}.
+validate({settings, PList}) ->
+    validate_(PList).
+
+validate_([]) ->
+    ok;
+validate_([{?SETTINGS_ENABLE_PUSH, Push}|_T])
+  when Push > 1; Push < 0 ->
+    {error, ?PROTOCOL_ERROR};
+validate_([_H|T]) ->
+    validate_(T).
+
+
+
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
 
@@ -173,6 +189,14 @@ make_payload_test() ->
     <<MCSIndex>> = ?SETTINGS_MAX_CONCURRENT_STREAMS,
     <<MFSIndex>> = ?SETTINGS_MAX_FRAME_SIZE,
     ?assertEqual(<<MCSIndex:16,2:32,MFSIndex:16,2048:32>>, Bin),
+    ok.
+
+validate_test() ->
+    ?assertEqual(ok, validate_([])),
+    ?assertEqual(ok, validate_([{?SETTINGS_ENABLE_PUSH, 0}])),
+    ?assertEqual(ok, validate_([{?SETTINGS_ENABLE_PUSH, 1}])),
+    ?assertEqual({error, ?PROTOCOL_ERROR}, validate_([{?SETTINGS_ENABLE_PUSH, 2}])),
+    ?assertEqual({error, ?PROTOCOL_ERROR}, validate_([{?SETTINGS_ENABLE_PUSH, -1}])),
     ok.
 
 -endif.
