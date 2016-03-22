@@ -816,16 +816,21 @@ route_frame({H=#frame_header{stream_id=0},
     lager:debug("[~p] Stream 0 Window Update: ~p",
                 [Conn#connection.type, WSI]),
     NewSendWindow = SWS+WSI,
-    {RemainingFrames, RemainingSendWindow} =
-        http2_frame_queue:connection_ketchup(QF, NewSendWindow, Streams),
-    lager:debug("[~p] and Connection Send Window now: ~p",
-                [Conn#connection.type, RemainingSendWindow]),
+    case NewSendWindow > 2147483647 of
+        true ->
+            go_away(?FLOW_CONTROL_ERROR, Conn);
+        false ->
+            {RemainingFrames, RemainingSendWindow} =
+                http2_frame_queue:connection_ketchup(QF, NewSendWindow, Streams),
+            lager:debug("[~p] and Connection Send Window now: ~p",
+                        [Conn#connection.type, RemainingSendWindow]),
 
-    {next_state, connected,
-     Conn#connection{
-       send_window_size=RemainingSendWindow,
-       queued_frames=RemainingFrames
-      }};
+            {next_state, connected,
+             Conn#connection{
+               send_window_size=RemainingSendWindow,
+               queued_frames=RemainingFrames
+              }}
+    end;
 route_frame(F={H=#frame_header{stream_id=StreamId}, #window_update{}},
             #connection{
                streams=Streams,
@@ -843,14 +848,22 @@ route_frame(F={H=#frame_header{stream_id=StreamId}, #window_update{}},
                        [Conn#connection.type]),
             {next_state, connected, Conn};
         _ ->
-            http2_stream:recv_wu(StreamPid, F),
-            {RemainingFrames, RemainingSendWindow} =
-                http2_frame_queue:stream_ketchup(StreamId, QF, SWS, Streams),
-            {next_state, connected,
-             Conn#connection{
-               send_window_size=RemainingSendWindow,
-               queued_frames=RemainingFrames
-              }}
+            case http2_stream:recv_wu(StreamPid, F) of
+                ok ->
+                    {RemainingFrames, RemainingSendWindow} =
+                        http2_frame_queue:stream_ketchup(StreamId, QF, SWS, Streams),
+                    {next_state, connected,
+                     Conn#connection{
+                       send_window_size=RemainingSendWindow,
+                       queued_frames=RemainingFrames
+                      }};
+                _ ->
+                    {next_state, connected,
+                     Conn#connection{
+                       queued_frames=http2_frame_queue:remove(StreamId, QF),
+                       streams = proplists:delete(StreamId, Streams)
+                      }}
+            end
 
     end;
 route_frame({#frame_header{type=T}, _}, Conn)

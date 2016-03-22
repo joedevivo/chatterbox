@@ -4,7 +4,8 @@
 
 -export([
          connection_ketchup/3,
-         stream_ketchup/4
+         stream_ketchup/4,
+         remove/2
         ]).
 
 
@@ -151,4 +152,19 @@ ketchup(#accumulator{
                        },
                       Tail)
             end
+    end.
+
+remove(StreamId, QF) ->
+    remove(StreamId, queue:new(), QF).
+
+remove(StreamId, Acc, QF) ->
+    case queue:out(QF) of
+        {empty, _} ->
+            Acc;
+        {{value, {#frame_header{
+                     stream_id=StreamId
+                    },_}}, Remaining} ->
+            remove(StreamId, Acc, Remaining);
+        {{value, F}, Remaining} ->
+            remove(StreamId, queue:in(F, Acc), Remaining)
     end.

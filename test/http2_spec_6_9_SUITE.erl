@@ -8,7 +8,9 @@
 all() ->
     [
      send_window_update_with_zero,
-     send_window_update_with_zero_on_stream
+     send_window_update_with_zero_on_stream,
+     send_window_updates_greater_than_max,
+     send_window_updates_greater_than_max_on_stream
     ].
 
 init_per_suite(Config) ->
@@ -73,4 +75,56 @@ send_window_update_with_zero_on_stream(_Config) ->
     ?assertEqual(1, length(Resp)),
     [{_H, RstStream}] = Resp,
     ?PROTOCOL_ERROR = RstStream#rst_stream.error_code,
+    ok.
+
+send_window_updates_greater_than_max(_Config) ->
+    {ok, Client} = http2c:start_link(),
+
+    F = {#frame_header{
+            type=?WINDOW_UPDATE,
+            length=24,
+            stream_id=0
+           },
+         #window_update{window_size_increment=2147483647}},
+
+    http2c:send_unaltered_frames(Client, [ F, F ]),
+
+    Resp = http2c:wait_for_n_frames(Client, 0, 1),
+    ct:pal("Resp: ~p", [Resp]),
+    ?assertEqual(1, length(Resp)),
+    [{_GoAwayH, GoAway}] = Resp,
+    ?FLOW_CONTROL_ERROR = GoAway#goaway.error_code,
+    ok.
+
+send_window_updates_greater_than_max_on_stream(_Config) ->
+    {ok, Client} = http2c:start_link(),
+
+    RequestHeaders =
+        [
+         {<<":method">>, <<"GET">>},
+         {<<":path">>, <<"/index.html">>},
+         {<<":scheme">>, <<"https">>},
+         {<<":authority">>, <<"localhost:8080">>},
+         {<<"accept">>, <<"*/*">>},
+         {<<"accept-encoding">>, <<"gzip, deflate">>},
+         {<<"user-agent">>, <<"chattercli/0.0.1 :D">>}
+        ],
+
+    {F1, _} = http2_frame_headers:to_frame(1, RequestHeaders, hpack:new_context()),
+    F2 = {#frame_header{
+            type=?WINDOW_UPDATE,
+            length=24,
+            stream_id=1
+           },
+         #window_update{window_size_increment=2147483647}},
+
+    http2c:send_unaltered_frames(
+      Client,
+      [F1, F2, F2]),
+
+    Resp = http2c:wait_for_n_frames(Client, 1, 1),
+    ct:pal("Resp: ~p", [Resp]),
+    ?assertEqual(1, length(Resp)),
+    [{_H, RstStream}] = Resp,
+    ?FLOW_CONTROL_ERROR = RstStream#rst_stream.error_code,
     ok.

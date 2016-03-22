@@ -168,7 +168,7 @@ recv_es(Pid) ->
 -spec recv_wu(pid(), {frame_header(), window_update()}) ->
                      ok.
 recv_wu(Pid, Frame) ->
-    gen_fsm:send_all_state_event(Pid, {recv_wu, Frame}).
+    gen_fsm:sync_send_all_state_event(Pid, {recv_wu, Frame}).
 
 -spec recv_frame(pid(), frame()) ->
                         ok.
@@ -567,7 +567,10 @@ handle_event({send_connection_window_update, Size},
                }=State) ->
     http2_connection:send_window_update(ConnPid, Size),
     {next_state, StateName, State};
-handle_event({recv_wu,
+handle_event(_E, StateName, State) ->
+    {next_state, StateName, State}.
+
+handle_sync_event({recv_wu,
               {#frame_header{
                   type=?WINDOW_UPDATE,
                   stream_id=StreamId
@@ -576,7 +579,8 @@ handle_event({recv_wu,
                   window_size_increment=WSI
                  }
               }},
-              StateName,
+                  _F,
+                  StateName,
               #stream_state{
                  stream_id=StreamId,
                  send_window_size=SWS,
@@ -584,19 +588,24 @@ handle_event({recv_wu,
                 }=Stream)
              ->
     NewSendWindow = WSI + SWS,
-    NewStream = Stream#stream_state{
-                 send_window_size=NewSendWindow,
-                 queued_frames=queue:new()
-                },
-    lager:debug("Stream ~p send window now: ~p", [StreamId, NewSendWindow]),
-    %% TODO: This fold is the previous version of window update
-    lists:foldl(
-      fun(Frame, S) -> send_frame(Frame, S) end,
-      NewStream,
-      queue:to_list(QF)),
-    {next_state, StateName, Stream};
-handle_event(_E, StateName, State) ->
-    {next_state, StateName, State}.
+    case NewSendWindow > 2147483647 of
+        true ->
+            rst_stream_(?FLOW_CONTROL_ERROR, Stream),
+            {next_state, {error, flow_control}, closed, Stream};
+        false ->
+            NewStream = Stream#stream_state{
+                          send_window_size=NewSendWindow,
+                          queued_frames=queue:new()
+                         },
+            lager:debug("Stream ~p send window now: ~p", [StreamId, NewSendWindow]),
+            %% TODO: This fold is the previous version of window update
+            lists:foldl(
+              fun(Frame, S) -> send_frame(Frame, S) end,
+              NewStream,
+              queue:to_list(QF)),
+            {next_state, ok, StateName, Stream}
+    end;
+
 
 handle_sync_event({rst_stream, ErrorCode}, _F, StateName, State=#stream_state{}) ->
     {reply, {ok, rst_stream_(ErrorCode, State)}, StateName, State};
