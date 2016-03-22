@@ -391,35 +391,44 @@ route_frame({H, Payload},
                [Conn#connection.type]),
     %% Need a way of processing settings so I know which ones came in
     %% on this one payload.
-    {settings, PList} = Payload,
-    Delta = case proplists:get_value(?SETTINGS_INITIAL_WINDOW_SIZE, PList) of
-        undefined ->
-            0;
-        NewIWS ->
-            OldIWS - NewIWS
-    end,
-    NewSendSettings = http2_frame_settings:overlay(SS, Payload),
-    %% We've just got connection settings from a peer. He have a
-    %% couple of jobs to do here w.r.t. flow control
+    case http2_frame_settings:validate(Payload) of
+        ok ->
+            {settings, PList} = Payload,
 
-    %% If Delta != 0, we need to change the connection's
-    %% send_window_size and every stream's send_window_size in the
-    %% state open or half_closed_remote. We'll just send the message
-    %% everywhere. It's up to them if they need to do anything.
-    [ http2_stream:modify_send_window_size(Pid, Delta) || {_, Pid} <- Streams],
+            Delta =
+                case proplists:get_value(?SETTINGS_INITIAL_WINDOW_SIZE, PList) of
+                    undefined ->
+                        0;
+                    NewIWS ->
+                        OldIWS - NewIWS
+                end,
+            NewSendSettings = http2_frame_settings:overlay(SS, Payload),
+            %% We've just got connection settings from a peer. He have a
+            %% couple of jobs to do here w.r.t. flow control
 
-    NewEncodeContext = hpack:new_max_table_size(HTS, EncodeContext),
+            %% If Delta != 0, we need to change the connection's
+            %% send_window_size and every stream's send_window_size in the
+            %% state open or half_closed_remote. We'll just send the message
+            %% everywhere. It's up to them if they need to do anything.
+            [ http2_stream:modify_send_window_size(Pid, Delta) || {_, Pid} <- Streams],
 
-    socksend(Conn, http2_frame_settings:ack()),
-    lager:debug("[~p] Sent Settings ACK",
-               [Conn#connection.type]),
-    {next_state, connected, Conn#connection{
-                              send_settings=NewSendSettings,
-    %% Why aren't we updating send_window_size here? Section 6.9.2 of
-    %% the spec says: "The connection flow-control window can only be
-    %% changed using WINDOW_UPDATE frames.",
-                              encode_context=NewEncodeContext
-                             }};
+            NewEncodeContext = hpack:new_max_table_size(HTS, EncodeContext),
+
+            socksend(Conn, http2_frame_settings:ack()),
+            lager:debug("[~p] Sent Settings ACK",
+                        [Conn#connection.type]),
+            {next_state, connected, Conn#connection{
+                                      send_settings=NewSendSettings,
+                                      %% Why aren't we updating send_window_size here? Section 6.9.2 of
+                                      %% the spec says: "The connection flow-control window can only be
+                                      %% changed using WINDOW_UPDATE frames.",
+                                      encode_context=NewEncodeContext
+                                     }};
+        {error, Code} ->
+            go_away(Code, Conn)
+
+    end;
+
 %% This is the case where we got an ACK, so dequeue settings we're
 %% waiting to apply
 route_frame({H, _Payload},
