@@ -514,9 +514,10 @@ route_frame(F={H=#frame_header{
             %% Make window size great again
             lager:info("[~p] Stream ~p WindowUpdate ~p",
                        [Conn#connection.type, StreamId, L]),
-            send_window_update(self(), L),
-            gen_fsm:send_all_state_event(StreamPid, {send_window_update, L});
-        _ ->
+
+            gen_fsm:send_all_state_event(StreamPid, {send_window_update, L}),
+            send_window_update(self(), L);
+        _Tried ->
             ok
     end,
 
@@ -690,11 +691,11 @@ route_frame({H, _Payload},
                [Conn#connection.type]),
     {next_state, connected, Conn};
 %% TODO: RST_STREAM support
-route_frame({H=#frame_header{stream_id=StreamId}, _Payload},
+route_frame({H=#frame_header{stream_id=StreamId}, #rst_stream{error_code=EC}},
             #connection{}=Conn)
     when H#frame_header.type == ?RST_STREAM ->
-    lager:error("[~p] Received RST_STREAM for Stream ~p, but did nothing with it",
-                [Conn#connection.type, StreamId]),
+    lager:error("[~p] Received RST_STREAM (~p) for Stream ~p, but did nothing with it",
+                [Conn#connection.type, EC, StreamId]),
     {next_state, connected, Conn};
 route_frame({H=#frame_header{
                   stream_id=StreamId,
@@ -797,22 +798,18 @@ route_frame({H=#frame_header{stream_id=0}, _Payload},
     lager:debug("[~p] Received GOAWAY Frame for Stream 0",
                [Conn#connection.type]),
     go_away(?NO_ERROR, Conn);
-route_frame({H=#frame_header{stream_id=StreamId}, _Payload},
-            #connection{}=Conn)
-    when H#frame_header.type == ?GOAWAY ->
-    lager:debug("[~p] Received GOAWAY Frame for Stream ~p",
-                [Conn#connection.type, StreamId]),
-    lager:error("[~p] Chatterbox doesn't support streams. Throwing this GOAWAY away",
-               [Conn#connection.type]),
-    {next_state, connected, Conn};
-route_frame({H=#frame_header{stream_id=0},
-             #window_update{window_size_increment=WSI}},
-            #connection{
-               send_window_size=SWS,
-               queued_frames=QF,
-               streams=Streams
-              }=Conn)
-    when H#frame_header.type == ?WINDOW_UPDATE ->
+route_frame(
+  {#frame_header{
+      stream_id=0,
+      type=?WINDOW_UPDATE
+     },
+   #window_update{window_size_increment=WSI}},
+  #connection{
+     send_window_size=SWS,
+     queued_frames=QF,
+     streams=Streams
+    }=Conn) ->
+
     lager:debug("[~p] Stream 0 Window Update: ~p",
                 [Conn#connection.type, WSI]),
     NewSendWindow = SWS+WSI,
@@ -878,13 +875,16 @@ route_frame(Frame, #connection{}=Conn) ->
     lager:error("OOPS! ~p", [Conn]),
     go_away(?PROTOCOL_ERROR, Conn).
 
+handle_event({send_window_update, 0},
+             StateName, Conn) ->
+    {next_state, StateName, Conn};
 handle_event({send_window_update, Size},
              StateName,
              #connection{
                 recv_window_size=CRWS,
                 socket=Socket
                 }=Conn) ->
-    http2_frame_window_update:send(Socket, Size, 0),
+    ok = http2_frame_window_update:send(Socket, Size, 0),
     {next_state,
      StateName,
      Conn#connection{
