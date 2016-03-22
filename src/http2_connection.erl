@@ -370,14 +370,22 @@ route_frame({#frame_header{
     go_away(?PROTOCOL_ERROR, Conn);
 
 route_frame({#frame_header{
-                type=?WINDOW_UPDATE
+                type=?WINDOW_UPDATE,
+                stream_id=StreamId
                },
              #window_update{
                 window_size_increment=WSI
                 }},
             #connection{} = Conn)
   when WSI < 1 ->
-    go_away(?PROTOCOL_ERROR, Conn);
+    case StreamId of
+        0 ->
+            go_away(?PROTOCOL_ERROR, Conn);
+        _ ->
+            Stream = proplists:get_value(StreamId, Conn#connection.streams),
+            http2_stream:rst_stream(Stream, ?PROTOCOL_ERROR)
+    end;
+
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Connection Level Frames
