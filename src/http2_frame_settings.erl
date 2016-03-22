@@ -172,6 +172,9 @@ validate_([]) ->
 validate_([{?SETTINGS_ENABLE_PUSH, Push}|_T])
   when Push > 1; Push < 0 ->
     {error, ?PROTOCOL_ERROR};
+validate_([{?SETTINGS_INITIAL_WINDOW_SIZE, Size}|_T])
+  when Size >=2147483648 ->
+    {error, ?FLOW_CONTROL_ERROR};
 validate_([_H|T]) ->
     validate_(T).
 
@@ -197,6 +200,9 @@ validate_test() ->
     ?assertEqual(ok, validate_([{?SETTINGS_ENABLE_PUSH, 1}])),
     ?assertEqual({error, ?PROTOCOL_ERROR}, validate_([{?SETTINGS_ENABLE_PUSH, 2}])),
     ?assertEqual({error, ?PROTOCOL_ERROR}, validate_([{?SETTINGS_ENABLE_PUSH, -1}])),
+    ?assertEqual({error, ?FLOW_CONTROL_ERROR}, validate_([{?SETTINGS_INITIAL_WINDOW_SIZE, 2147483648}])),
+    ?assertEqual(ok, validate_([{?SETTINGS_INITIAL_WINDOW_SIZE, 2147483647}])),
+
     ok.
 
 -endif.
