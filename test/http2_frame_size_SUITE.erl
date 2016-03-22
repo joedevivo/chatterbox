@@ -47,7 +47,13 @@ send_wrong_size(Type, _Config) ->
 frame_too_big(_Config) ->
     {ok, Client} = http2c:start_link(),
     Frames = [
-        {#frame_header{length=16392,type=?HEADERS,flags=?FLAG_END_HEADERS,stream_id=3}, #headers{block_fragment = <<1:131136>>}}
+        {
+          #frame_header{
+             length=16392,
+             type=?HEADERS,
+             flags=?FLAG_END_HEADERS,
+             stream_id=3},
+          #headers{block_fragment = <<1:131136>>}}
     ],
     http2c:send_unaltered_frames(Client, Frames),
 
