@@ -7,7 +7,8 @@
 
 all() ->
     [
-     sends_header_with_invalid_pad_length
+     sends_header_with_invalid_pad_length,
+     sends_go_example
     ].
 
 init_per_suite(Config) ->
@@ -46,8 +47,6 @@ sends_header_with_invalid_pad_length(_Config) ->
          block_fragment=PaddedBin
         }
      },
-
-
     http2c:send_unaltered_frames(Client, [F]),
 
     Resp = http2c:wait_for_n_frames(Client, 0, 1),
@@ -55,4 +54,36 @@ sends_header_with_invalid_pad_length(_Config) ->
     ?assertEqual(1, length(Resp)),
     [{_Header, Payload}] = Resp,
     ?PROTOCOL_ERROR = Payload#goaway.error_code,
+    ok.
+
+sends_go_example(_Config) ->
+
+    RequestHeaders =
+        [
+         {<<":method">>, <<"GET">>},
+         {<<":path">>, <<"/index.html">>},
+         {<<":scheme">>, <<"https">>},
+         {<<":authority">>, <<"localhost:8080">>},
+         {<<"accept">>, <<"*/*">>},
+         {<<"accept-encoding">>, <<"gzip, deflate">>},
+         {<<"user-agent">>, <<"chattercli/0.0.1 :D">>}
+        ],
+
+    {ok, {HeadersBin, _}} = hpack:encode(RequestHeaders, hpack:new_context()),
+    L = byte_size(HeadersBin)+1,
+    %_PaddedBin = <<L,HeadersBin/binary>>,
+
+
+    {ok, Client} = http2c:start_link(),
+    http2c:send_binary(Client, <<L:24,16#01,16#0d,16#00,16#00,16#00,16#01>>),
+    %% Sending one byte is really bad!
+    http2c:send_binary(Client, <<L>>),
+    http2c:send_binary(Client, HeadersBin),
+
+    Resp = http2c:wait_for_n_frames(Client, 0, 1),
+    ct:pal("Resp: ~p", [Resp]),
+    ?assertEqual(1, length(Resp)),
+    [{_Header, Payload}] = Resp,
+    ?PROTOCOL_ERROR = Payload#goaway.error_code,
+
     ok.
