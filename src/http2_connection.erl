@@ -534,6 +534,21 @@ route_frame({#frame_header{type=?HEADERS}=FH, _Payload},
   when Conn#connection.type == server,
        FH#frame_header.stream_id rem 2 == 0 ->
     go_away(?PROTOCOL_ERROR, Conn);
+route_frame({#frame_header{stream_id=StreamId, type=?HEADERS}=FH, #headers{priority=P}},
+            #connection{}=Conn)
+  when ?IS_FLAG(FH#frame_header.flags, ?FLAG_PRIORITY),
+       P#priority.stream_id == FH#frame_header.stream_id ->
+    %% The only difference here is that if the stream isn't in the
+    %% proplist of streams, it means it's never been started. It seems
+    %% like a waste to start one just to kill it, so we skip that
+    %% process and just send the rst_stream frame
+    case proplists:get_value(StreamId,
+                             Conn#connection.streams) of
+        undefined ->
+            rst_stream(StreamId, ?PROTOCOL_ERROR, Conn);
+        StreamPid ->
+            http2_stream:rst_stream(StreamPid, ?PROTOCOL_ERROR)
+    end;
 
 route_frame({#frame_header{type=?HEADERS}=FH, _Payload}=Frame,
             #connection{}=Conn) ->
@@ -1202,6 +1217,18 @@ go_away(ErrorCode,
     socksend(Conn, GoAwayBin),
     gen_fsm:send_event(self(), io_lib:format("GO_AWAY: ErrorCode ~p", [ErrorCode])),
     {next_state, closing, Conn}.
+
+-spec rst_stream(stream_id(), error_code(), connection()) ->
+                        {next_state, connected, connection()}.
+rst_stream(StreamId, ErrorCode, Conn) ->
+    RstStream = #rst_stream{error_code=ErrorCode},
+    RstStreamBin = http2_frame:to_binary(
+                     {#frame_header{
+                         stream_id=StreamId
+                        },
+                      RstStream}),
+    sock:send(Conn#connection.socket, RstStreamBin),
+    {next_state, connected, Conn}.
 
 -spec send_settings(settings(), connection()) -> connection().
 send_settings(SettingsToSend,
