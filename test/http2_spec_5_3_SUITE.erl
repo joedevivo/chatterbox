@@ -7,7 +7,9 @@
 
 all() ->
     [
-     sends_header_frame_that_depends_on_itself
+     sends_header_frame_that_depends_on_itself,
+     sends_priority_frame_that_depends_on_itself,
+     sends_priority_frame_that_depends_on_itself_later
     ].
 
 init_per_suite(Config) ->
@@ -59,4 +61,75 @@ sends_header_frame_that_depends_on_itself(_Config) ->
     ?assertEqual(1, length(Resp)),
     [{_Header, Payload}] = Resp,
     ?PROTOCOL_ERROR = Payload#rst_stream.error_code,
+    ok.
+
+sends_priority_frame_that_depends_on_itself(_Config) ->
+    {ok, Client} = http2c:start_link(),
+
+    PriorityFrame =
+        {#frame_header{
+            stream_id=1,
+            type=?PRIORITY,
+            length=5
+            },
+         #priority{
+            stream_id=1
+           }
+         },
+
+    http2c:send_unaltered_frames(Client, [PriorityFrame]),
+
+    Resp = http2c:wait_for_n_frames(Client, 1, 1),
+    ct:pal("Resp: ~p", [Resp]),
+    ?assertEqual(1, length(Resp)),
+    [{_Header, Payload}] = Resp,
+    ?PROTOCOL_ERROR = Payload#rst_stream.error_code,
+    ok.
+
+sends_priority_frame_that_depends_on_itself_later(_Config) ->
+    {ok, Client} = http2c:start_link(),
+    RequestHeaders =
+        [
+         {<<":method">>, <<"GET">>},
+         {<<":path">>, <<"/index.html">>},
+         {<<":scheme">>, <<"https">>},
+         {<<":authority">>, <<"localhost:8080">>},
+         {<<"accept">>, <<"*/*">>},
+         {<<"accept-encoding">>, <<"gzip, deflate">>},
+         {<<"user-agent">>, <<"chattercli/0.0.1 :D">>}
+        ],
+
+    {ok, {HeadersBin, _}} = hpack:encode(RequestHeaders, hpack:new_context()),
+    L = byte_size(HeadersBin),
+    F = {
+      #frame_header{
+         stream_id=1,
+         length=L,
+         flags=?FLAG_END_HEADERS,% bor ?FLAG_END_STREAM,
+         type=?HEADERS
+        },
+      #headers{
+         block_fragment=HeadersBin
+        }
+     },
+
+    PriorityFrame =
+        {#frame_header{
+            stream_id=1,
+            type=?PRIORITY,
+            length=5
+            },
+         #priority{
+            stream_id=1
+           }
+         },
+
+    http2c:send_unaltered_frames(Client, [F, PriorityFrame]),
+
+    Resp = http2c:wait_for_n_frames(Client, 1, 1),
+    ct:pal("Resp: ~p", [Resp]),
+    ?assertEqual(1, length(Resp)),
+    [{_Header, Payload}] = Resp,
+    ?PROTOCOL_ERROR = Payload#rst_stream.error_code,
+
     ok.
