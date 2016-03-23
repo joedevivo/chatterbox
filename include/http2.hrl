@@ -105,9 +105,9 @@
 -type headers() :: #headers{}.
 
 -record(priority, {
-    exclusive :: 0 | 1,
-    stream_id :: stream_id(),
-    weight :: pos_integer()
+    exclusive = 0 :: 0 | 1,
+    stream_id = 0 :: stream_id(),
+    weight = 0 :: non_neg_integer()
   }).
 -type priority() :: #priority{}.
 
