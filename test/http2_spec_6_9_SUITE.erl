@@ -10,7 +10,8 @@ all() ->
      send_window_update_with_zero,
      send_window_update_with_zero_on_stream,
      send_window_updates_greater_than_max,
-     send_window_updates_greater_than_max_on_stream
+     send_window_updates_greater_than_max_on_stream,
+     send_settings_initial_window_size_greater_than_max
     ].
 
 init_per_suite(Config) ->
@@ -127,4 +128,16 @@ send_window_updates_greater_than_max_on_stream(_Config) ->
     ?assertEqual(1, length(Resp)),
     [{_H, RstStream}] = Resp,
     ?FLOW_CONTROL_ERROR = RstStream#rst_stream.error_code,
+    ok.
+
+send_settings_initial_window_size_greater_than_max(_Config) ->
+    {ok, Client} = http2c:start_link(),
+    Bin = <<16#00,16#00,16#06,16#04,16#00,16#00,16#00,16#00,16#00,
+            16#00,16#04,16#80,16#00,16#00,16#00>>,
+    http2c:send_binary(Client, Bin),
+    Resp = http2c:wait_for_n_frames(Client, 0, 1),
+    ct:pal("Resp: ~p", [Resp]),
+    ?assertEqual(1, length(Resp)),
+    [{_GoAwayH, GoAway}] = Resp,
+    ?FLOW_CONTROL_ERROR = GoAway#goaway.error_code,
     ok.
