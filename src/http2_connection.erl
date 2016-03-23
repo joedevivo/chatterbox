@@ -529,36 +529,20 @@ route_frame(F={H=#frame_header{
        recv_window_size=CRWS-L
       }};
 
-%%%%%%%%%
-%% Begin Refactor of headers/continuation into http2_stream
+route_frame({#frame_header{type=?HEADERS}=FH, _Payload},
+            #connection{}=Conn)
+  when Conn#connection.type == server,
+       FH#frame_header.stream_id rem 2 == 0 ->
+    go_away(?PROTOCOL_ERROR, Conn);
 
-%% Since we don't create idle streams and just assume they exist, we
-%% actually need to create a new stream state in two cases (as a
-%% server)
+route_frame({#frame_header{type=?HEADERS}=FH, _Payload}=Frame,
+            #connection{}=Conn) ->
+    StreamId = FH#frame_header.stream_id,
+    Streams = Conn#connection.streams,
 
-%% 1) We have received a HEADERS frame
-%% 2) We have sent a PUSH_PROMISE frame
-
-%% First let's worry about HEADERS
-
-%% The only thing we need to know about in this gen_fsm is wether or
-%% not we are going to remain in the connected state or transition
-%% into the continuation state
-route_frame({#frame_header{
-                type=?HEADERS,
-                stream_id=StreamId,
-                flags=Flags
-               }, _Payload} = Frame,
-            #connection{
-               recv_settings=#settings{initial_window_size=RecvWindowSize},
-               send_settings=#settings{initial_window_size=SendWindowSize},
-               streams = Streams,
-               decode_context = DecodeContext,
-               stream_callback_mod=CB,
-               socket=Socket
-              }=Conn) ->
     lager:debug("[~p] Received HEADERS Frame for Stream ~p",
                 [Conn#connection.type, StreamId]),
+
     %% Three things could be happening here.
 
     %% 1. We're a server, and these are Request Headers.
@@ -580,23 +564,25 @@ route_frame({#frame_header{
                               [
                                {stream_id, StreamId},
                                {connection, self()},
-                               {initial_send_window_size, SendWindowSize},
-                               {initial_recv_window_size, RecvWindowSize},
-                               {callback_module, CB},
-                               {socket, Socket}
+                               {initial_send_window_size, Conn#connection.send_settings#settings.initial_window_size},
+                               {initial_recv_window_size, Conn#connection.recv_settings#settings.initial_window_size},
+                               {callback_module, Conn#connection.stream_callback_mod},
+                               {socket, Conn#connection.socket}
                              ]),
                 {Pid, [{StreamId, Pid}|Streams]};
             SPid ->
                 {SPid, Streams}
         end,
+
     % Is ths all to the stream?
+    Flags = FH#frame_header.flags,
     EndStream = ?IS_FLAG(Flags, ?FLAG_END_STREAM),
 
     %% We spawned an idle stream if it didn't exist.
     case ?IS_FLAG(Flags, ?FLAG_END_HEADERS) of
         true ->
             HeadersBin = http2_frame_headers:from_frames([Frame]),
-            case hpack:decode(HeadersBin, DecodeContext) of
+            case hpack:decode(HeadersBin, Conn#connection.decode_context) of
                 {ok, {Headers, NewDecodeContext}} ->
                     http2_stream:recv_h(StreamPid, Headers),
                     case EndStream of
@@ -842,9 +828,6 @@ route_frame(
                queued_frames=RemainingFrames
               }}
     end;
-%% Trying something different here. Going to pattern match only on
-%% things that make this clause special, where usually I'm binding
-%% everything I need in the pattern match
 route_frame(
   {#frame_header{type=?WINDOW_UPDATE}=FH, #window_update{}}=F,
   #connection{}=Conn
