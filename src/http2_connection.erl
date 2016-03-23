@@ -842,13 +842,16 @@ route_frame(
                queued_frames=RemainingFrames
               }}
     end;
-route_frame(F={H=#frame_header{stream_id=StreamId}, #window_update{}},
-            #connection{
-               streams=Streams,
-               queued_frames=QF,
-               send_window_size=SWS
-              }=Conn)
-    when H#frame_header.type == ?WINDOW_UPDATE ->
+%% Trying something different here. Going to pattern match only on
+%% things that make this clause special, where usually I'm binding
+%% everything I need in the pattern match
+route_frame(
+  {#frame_header{type=?WINDOW_UPDATE}=FH, #window_update{}}=F,
+  #connection{}=Conn
+ ) ->
+    StreamId = FH#frame_header.stream_id,
+    Streams = Conn#connection.streams,
+
     lager:debug("[~p] Received WINDOW_UPDATE Frame for Stream ~p",
                 [Conn#connection.type, StreamId]),
     StreamPid = proplists:get_value(StreamId, Streams),
@@ -859,6 +862,8 @@ route_frame(F={H=#frame_header{stream_id=StreamId}, #window_update{}},
                        [Conn#connection.type, StreamId]),
             go_away(?PROTOCOL_ERROR, Conn);
         _ ->
+            QF = Conn#connection.queued_frames,
+            SWS = Conn#connection.send_window_size,
             case http2_stream:recv_wu(StreamPid, F) of
                 ok ->
                     {RemainingFrames, RemainingSendWindow} =
