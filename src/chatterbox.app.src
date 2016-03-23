@@ -17,7 +17,6 @@
    [
     {port, 80},
     {concurrent_acceptors, 20},
-    {content_handler, chatterbox_static_content_handler},
 
     %% These are the defaults for ALL HTTP/2 clients. You can change
     %% any of them that you want to, but these will be the ones used
