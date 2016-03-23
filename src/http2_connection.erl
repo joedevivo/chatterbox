@@ -539,7 +539,6 @@ route_frame({#frame_header{stream_id=StreamId, type=?HEADERS}=FH, #headers{prior
   when ?IS_FLAG(FH#frame_header.flags, ?FLAG_PRIORITY),
        P#priority.stream_id == FH#frame_header.stream_id ->
     rst_stream(StreamId, ?PROTOCOL_ERROR, Conn);
-
 route_frame({#frame_header{type=?HEADERS}=FH, _Payload}=Frame,
             #connection{}=Conn) ->
     StreamId = FH#frame_header.stream_id,
@@ -1388,7 +1387,9 @@ handle_socket_data(Data,
             {next_state, StateName, NewConn#connection{buffer={binary, Bin}}};
         %% Not enough bytes to make a payload
         {error, not_enough_payload, Header, Bin} ->
-            {next_state, StateName, NewConn#connection{buffer={frame, Header, Bin}}}
+            {next_state, StateName, NewConn#connection{buffer={frame, Header, Bin}}};
+        {error, Code} ->
+            go_away(Code, Conn)
     end.
 
 handle_socket_passive(StateName, Conn) ->

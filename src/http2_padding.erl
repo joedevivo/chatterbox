@@ -15,7 +15,7 @@ is_padded(_) ->
     false.
 
 -spec read_possibly_padded_payload(binary(), frame_header())
-                                  -> binary().
+                                  -> binary() | {error, error_code()}.
 read_possibly_padded_payload(Bin, H=#frame_header{flags=F})
   when ?IS_FLAG(F, ?FLAG_PADDED) ->
     read_padded_payload(Bin, H);
@@ -23,12 +23,18 @@ read_possibly_padded_payload(Bin, Header) ->
     read_unpadded_payload(Bin, Header).
 
 -spec read_padded_payload(binary(), frame_header())
-                         -> binary().
+                         -> binary() | {error, error_code()}.
 read_padded_payload(<<Padding:8,Bytes/bits>>,
                     #frame_header{length=Length}) ->
     L = Length - Padding,
-    <<Data:L/binary,_:Padding/binary>> = Bytes,
-    Data.
+    case L > 0 of
+        true ->
+            lager:debug("~p = ~p - ~p", [L, Length, Padding]),
+            <<Data:L/binary,_:Padding/binary>> = Bytes,
+            Data;
+        false ->
+            {error, ?PROTOCOL_ERROR}
+    end.
 
 -spec read_unpadded_payload(binary(), frame_header())
                            -> binary().
