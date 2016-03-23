@@ -690,13 +690,27 @@ route_frame({H, _Payload},
     lager:debug("[~p] Received PRIORITY Frame, but it's only a suggestion anyway...",
                [Conn#connection.type]),
     {next_state, connected, Conn};
-%% TODO: RST_STREAM support
-route_frame({H=#frame_header{stream_id=StreamId}, #rst_stream{error_code=EC}},
-            #connection{}=Conn)
-    when H#frame_header.type == ?RST_STREAM ->
-    lager:error("[~p] Received RST_STREAM (~p) for Stream ~p, but did nothing with it",
+
+route_frame(
+  {#frame_header{
+      stream_id=StreamId,
+      type=?RST_STREAM
+      },
+   #rst_stream{
+      error_code=EC
+      }},
+  #connection{
+     streams=Streams
+    } = Conn) ->
+    lager:debug("[~p] Received RST_STREAM (~p) for Stream ~p",
                 [Conn#connection.type, EC, StreamId]),
-    {next_state, connected, Conn};
+    case proplists:get_value(StreamId, Streams) of
+        undefined ->
+            go_away(?PROTOCOL_ERROR, Conn);
+        _StreamPid ->
+            %% TODO: RST_STREAM support
+            {next_state, connected, Conn}
+    end;
 route_frame({H=#frame_header{
                   stream_id=StreamId,
                   flags=Flags
