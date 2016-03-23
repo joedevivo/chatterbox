@@ -1360,6 +1360,8 @@ handle_socket_data(Data,
             _ ->
                 <<>>
     end,
+    %% We need this set to active_once ASAP, otherwise we might miss a message
+    active_once(Socket),
 
     %% What is buffer?
     %% empty - nothing, yay

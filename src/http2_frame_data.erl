@@ -29,8 +29,12 @@ read_binary(Bin, _H=#frame_header{length=0}) ->
 read_binary(Bin, H=#frame_header{length=L}) ->
     lager:debug("read_binary L: ~p, actually: ~p", [L, byte_size(Bin)]),
     <<PayloadBin:L/binary,Rem/bits>> = Bin,
-    Data = http2_padding:read_possibly_padded_payload(PayloadBin, H),
-    {ok, #data{data=Data}, Rem}.
+    case http2_padding:read_possibly_padded_payload(PayloadBin, H) of
+        {error, Code} ->
+            {error, Code};
+        Data ->
+            {ok, #data{data=Data}, Rem}
+    end.
 
 -spec to_frames(stream_id(), iodata(), settings()) -> [frame()].
 to_frames(StreamId, IOList, Settings)
