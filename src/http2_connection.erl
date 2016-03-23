@@ -261,6 +261,11 @@ handshake({frame, {FH, _Payload}=Frame}, State) ->
             go_away(?PROTOCOL_ERROR, State)
     end.
 
+connected({frame, {#frame_header{stream_id=StreamId}, _}},
+          S = #connection_state{}
+         ) when StreamId > 1, StreamId rem 2 =:= 0 ->
+    %% But only if from the client or something?
+    go_away(?PROTOCOL_ERROR, S);
 connected({frame, Frame},
           #connection{}=Conn
          ) ->
