@@ -855,9 +855,9 @@ route_frame(F={H=#frame_header{stream_id=StreamId}, #window_update{}},
 
     case StreamPid of
         undefined ->
-            lager:error("[~p] Window update for a stream that we don't think exists!",
-                       [Conn#connection.type]),
-            {next_state, connected, Conn};
+            lager:error("[~p] Window update for an idle stream (~p)",
+                       [Conn#connection.type, StreamId]),
+            go_away(?PROTOCOL_ERROR, Conn);
         _ ->
             case http2_stream:recv_wu(StreamPid, F) of
                 ok ->
