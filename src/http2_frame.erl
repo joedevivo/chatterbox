@@ -40,7 +40,8 @@
            {frame_header(), binary()}) ->
                   {ok, frame(), binary()}
                 | {error, not_enoguh_header, binary()}
-                | {error, not_enough_payload, frame_header(), binary()}.
+                | {error, not_enough_payload, frame_header(), binary()}
+                | {error, error_code()}.
 recv(Bin)
   when is_binary(Bin), byte_size(Bin) < 9 ->
     {error, not_enough_header, Bin};
@@ -52,8 +53,12 @@ recv({Header, PayloadBin})
   when byte_size(PayloadBin) < Header#frame_header.length ->
     {error, not_enough_payload, Header, PayloadBin};
 recv({Header, PayloadBin}) ->
-    {ok, Payload, Rem} = read_binary_payload(PayloadBin, Header),
-    {ok, {Header, Payload}, Rem}.
+    case read_binary_payload(PayloadBin, Header) of
+        {ok, Payload, Rem} ->
+            {ok, {Header, Payload}, Rem};
+        {error, Code} ->
+            {error, Code}
+    end.
 
 -spec read(socket()) -> {frame_header(), payload()}.
 read(Socket) ->
@@ -127,7 +132,7 @@ read_payload({Transport, Socket}, Header=#frame_header{length=L}, Timeout) ->
     end.
 
 -spec read_binary_payload(binary(), frame_header()) ->
-    {ok, payload(), binary()} | {error, term()}.
+    {ok, payload(), binary()} | {error, error_code()}.
 read_binary_payload(Bin, Header = #frame_header{type=?DATA}) ->
     http2_frame_data:read_binary(Bin, Header);
 read_binary_payload(Bin, Header = #frame_header{type=?HEADERS}) ->
