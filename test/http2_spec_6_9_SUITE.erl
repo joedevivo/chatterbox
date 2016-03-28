@@ -7,6 +7,7 @@
 
 all() ->
     [
+     send_window_update,
      send_window_update_with_zero,
      send_window_update_with_zero_on_stream,
      send_window_updates_greater_than_max,
@@ -21,6 +22,58 @@ init_per_suite(Config) ->
 end_per_suite(Config) ->
     chatterbox_test_buddy:stop(Config),
     ok.
+
+send_window_update(_Config) ->
+    {ok, Client} = http2c:start_link(),
+
+    %% Send settings initial window size = 1
+    http2c:send_binary(
+      Client,
+      <<0,0,6,?SETTINGS,0,0,0,0,0,0,?SETTINGS_INITIAL_WINDOW_SIZE/binary,0,0,0,1>>
+     ),
+
+    RequestHeaders =
+        [
+         {<<":method">>, <<"GET">>},
+         {<<":path">>, <<"/index.html">>},
+         {<<":scheme">>, <<"https">>},
+         {<<":authority">>, <<"localhost:8080">>},
+         {<<"accept">>, <<"*/*">>},
+         {<<"accept-encoding">>, <<"gzip, deflate">>},
+         {<<"user-agent">>, <<"chattercli/0.0.1 :D">>}
+        ],
+
+    {F, _} = http2_frame_headers:to_frame(1, RequestHeaders, hpack:new_context()),
+
+    http2c:send_unaltered_frames(Client, [F]),
+
+    Resp0 = http2c:wait_for_n_frames(Client, 1, 1),
+    ct:pal("Resp9: ~p", [Resp0]),
+    ?assertEqual(1, length(Resp0)), % Should get one byte:
+
+    [{Frame1H, _}] = Resp0,
+    ?assertEqual(1, Frame1H#frame_header.length),
+
+    http2c:send_unaltered_frames(
+      Client,
+      [
+       {#frame_header{
+           stream_id=1
+          },
+        #window_update{
+           window_size_increment=1}}
+      ]
+     ),
+
+    Resp1 = http2c:wait_for_n_frames(Client, 1, 1),
+    ct:pal("Resp1: ~p", [Resp1]),
+    ?assertEqual(1, length(Resp1)),
+
+    [{Frame2H, _}] = Resp1,
+    ?assertEqual(1, Frame2H#frame_header.length),
+
+    ok.
+
 
 send_window_update_with_zero(_Config) ->
     {ok, Client} = http2c:start_link(),
@@ -39,8 +92,9 @@ send_window_update_with_zero(_Config) ->
     Resp = http2c:wait_for_n_frames(Client, 0, 1),
     ct:pal("Resp: ~p", [Resp]),
     ?assertEqual(1, length(Resp)),
-    [{_GoAwayH, GoAway}] = Resp,
+    [{_H, GoAway}] = Resp,
     ?PROTOCOL_ERROR = GoAway#goaway.error_code,
+
     ok.
 
 send_window_update_with_zero_on_stream(_Config) ->
