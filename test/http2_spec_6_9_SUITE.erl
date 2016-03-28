@@ -175,7 +175,7 @@ send_window_updates_greater_than_max_on_stream(_Config) ->
 
     http2c:send_unaltered_frames(
       Client,
-      [F1, F2, F2]),
+      [F1, F2]),
 
     Resp = http2c:wait_for_n_frames(Client, 1, 1),
     ct:pal("Resp: ~p", [Resp]),

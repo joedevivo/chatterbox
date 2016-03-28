@@ -93,7 +93,6 @@
           content_handler = application:get_env(chatterbox, content_handler, chatterbox_static_content_handler) :: module(),
           buffer = empty :: empty | {binary, binary()} | {frame, frame_header(), binary()},
           continuation = undefined :: undefined | #continuation_state{},
-          queued_frames = queue:new() :: queue:queue(frame()),
           flow_control = auto :: auto | manual
 }).
 
@@ -440,12 +439,9 @@ route_frame({H, Payload},
             %% everywhere. It's up to them if they need to do
             %% anything.
             UpdatedStreams =
-                [ begin
-                      http2_stream:modify_send_window_size(S#stream.pid, Delta),
-                      S#stream{
-                        send_window_size=S#stream.send_window_size+Delta
-                       }
-                  end || S <- Streams],
+                [ S#stream{
+                    send_window_size=S#stream.send_window_size+Delta
+                   } || S <- Streams],
 
             NewEncodeContext = hpack:new_max_table_size(HTS, EncodeContext),
 
@@ -488,12 +484,9 @@ route_frame({H, _Payload},
                         ok;
                     NewIWS ->
                         Delta = OldIWS - NewIWS,
-                        [ begin
-                              http2_stream:modify_recv_window_size(S#stream.pid, Delta),
-                              S#stream{
-                                send_window_size=S#stream.send_window_size+Delta
-                               }
-                          end || S <- Streams]
+                        [ S#stream{
+                            send_window_size=S#stream.send_window_size+Delta
+                           } || S <- Streams]
                 end,
 
             {next_state,
@@ -532,12 +525,21 @@ route_frame(F={H=#frame_header{
                 [Conn#connection.type, StreamId]),
     Stream = get_stream(StreamId, Streams),
 
-    case {Conn#connection.flow_control, L > 0} of
-        {auto, true} ->
+    case {
+      Stream#stream.recv_window_size =< L,
+      Conn#connection.flow_control,
+      L > 0
+         } of
+        {true, _, _} ->
+            lager:error("Data frame too big for stream ~p", [Stream]),
+            http2_stream:rst_stream(Stream#stream.pid,
+                                    ?FLOW_CONTROL_ERROR);
+        {false, auto, true} ->
             %% Make window size great again
             lager:info("[~p] Stream ~p WindowUpdate ~p",
                        [Conn#connection.type, StreamId, L]),
-
+            http2_frame_window_update:send(Conn#connection.socket,
+                                           L, StreamId),
             gen_fsm:send_all_state_event(Stream#stream.pid, {send_window_update, L}),
             send_window_update(self(), L);
         _Tried ->
@@ -595,7 +597,6 @@ route_frame({#frame_header{type=?HEADERS}=FH, _Payload}=Frame,
                               [
                                {stream_id, StreamId},
                                {connection, self()},
-                               {initial_send_window_size, Conn#connection.send_settings#settings.initial_window_size},
                                {initial_recv_window_size, Conn#connection.recv_settings#settings.initial_window_size},
                                {callback_module, Conn#connection.stream_callback_mod},
                                {socket, Conn#connection.socket}
@@ -766,7 +767,6 @@ route_frame({H=#frame_header{
                            [
                             {stream_id, PSID},
                             {connection, self()},
-                            {initial_send_window_size, SendWindowSize},
                             {initial_recv_window_size, RecvWindowSize},
                             {callback_module, CB},
                             {notify_pid, NotifyPid},
@@ -883,7 +883,7 @@ route_frame(
     end;
 route_frame(
   {#frame_header{type=?WINDOW_UPDATE}=FH,
-   #window_update{window_size_increment=WSI}}=F,
+   #window_update{window_size_increment=WSI}},
   #connection{}=Conn
  ) ->
     StreamId = FH#frame_header.stream_id,
@@ -899,26 +899,30 @@ route_frame(
             go_away(?PROTOCOL_ERROR, Conn);
         S ->
             SWS = Conn#connection.send_window_size,
-            case http2_stream:recv_wu(S#stream.pid, F) of
-                ok ->
+            NewSSWS = S#stream.send_window_size+WSI,
+
+            case NewSSWS > 2147483647 of
+                true ->
+                    lager:error("Sending ~p FLOWCONTROL ERROR because NSW = ~p", [StreamId, NewSSWS]),
+                    http2_stream:rst_stream(S#stream.pid, ?FLOW_CONTROL_ERROR),
+                    {next_state, connected,
+                     Conn#connection{
+                       %streams = delete_stream(S, Streams)
+                      }};
+                false ->
+                    lager:debug("Stream ~p send window now: ~p", [StreamId, NewSSWS]),
                     {RemainingSendWindow, NewS}
                         = s_send_what_we_can(
                             SWS,
                             Conn#connection.send_settings#settings.max_frame_size,
-                            S#stream{send_window_size=S#stream.send_window_size+WSI}
+                            S#stream{send_window_size=NewSSWS}
                            ),
                     {next_state, connected,
                      Conn#connection{
                        send_window_size=RemainingSendWindow,
                        streams=replace_stream(NewS, Streams)
-                      }};
-                _ ->
-                    {next_state, connected,
-                     Conn#connection{
-                       streams = delete_stream(S, Streams)
                       }}
             end
-
     end;
 route_frame({#frame_header{type=T}, _}, Conn)
   when T > ?CONTINUATION ->
@@ -1100,49 +1104,6 @@ handle_event({send_body, StreamId, Body},
        streams=replace_stream(NewS, Conn#connection.streams)
       }};
 
-%    DataFrames = http2_frame_data:to_frames(StreamId, Body, SendSettings),
-%    [ begin
-%          gen_fsm:send_all_state_event(self(), {send_data_frame, Frame, StreamPid})
-%      end || Frame <- DataFrames],
-
-%    {next_state, StateName, Conn};
-
-handle_event({send_data_frame,
-              {#frame_header{
-                  length=L
-                 }, _}=Frame,
-             StreamPid},
-             StateName,
-             #connection{
-                send_window_size=CSWS,
-                queued_frames=QF
-               }=Conn) ->
-%% Only send a frame if the window size works and the queue is empty
-    case {CSWS >= L, queue:is_empty(QF)} of
-        {true, true} ->
-            Sent = http2_stream:send_frame(StreamPid, Frame),
-            case Sent of
-                ok ->
-                    {next_state,
-                     StateName,
-                     Conn#connection{
-                       send_window_size=CSWS-L
-                      }};
-                flow_control ->
-                    {next_state,
-                     StateName,
-                     Conn#connection{
-                       queued_frames=queue:in(Frame, QF)
-                      }}
-            end;
-        _ ->
-            lager:debug("[~p] tried to send ~p bytes, with connection send window size ~p",
-                        [Conn#connection.type, L, CSWS]),
-            {next_state,
-             StateName,
-             Conn#connection{
-               queued_frames=queue:in(Frame, QF)}}
-    end;
 handle_event({send_promise, StreamId, NewStreamId, Headers},
              StateName,
              #connection{
@@ -1224,7 +1185,6 @@ handle_sync_event({new_stream, NotifyPid}, _F, StateName,
                            [
                             {stream_id, NextId},
                             {connection, self()},
-                            {initial_send_window_size, SendWindowSize},
                             {initial_recv_window_size, RecvWindowSize},
                             {callback_module, CB},
                             {notify_pid, NotifyPid},
@@ -1603,6 +1563,6 @@ replace_stream(Stream, Streams) ->
 sort_streams(Streams) ->
     lists:keysort(2, Streams).
 
--spec delete_stream(stream(), [stream()]) -> [stream()].
-delete_stream(S, Streams) ->
-    lists:keydelete(S#stream.id, 2, Streams).
+%-spec delete_stream(stream(), [stream()]) -> [stream()].
+%delete_stream(S, Streams) ->
+%    lists:keydelete(S#stream.id, 2, Streams).
