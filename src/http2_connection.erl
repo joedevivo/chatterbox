@@ -65,6 +65,16 @@
           end_stream = false :: boolean()
 }).
 
+
+-record(stream, {
+          id :: stream_id(),
+          pid :: pid(),
+          send_window_size :: non_neg_integer(),
+          recv_window_size :: non_neg_integer(),
+          queued_data :: binary()
+         }).
+-type stream() :: #stream{}.
+
 -record(connection, {
           type = undefined :: client | server | undefined,
           ssl_options = [],
@@ -78,7 +88,8 @@
           encode_context = hpack:new_context() :: hpack:context(),
           settings_sent = queue:new() :: queue:queue(),
           next_available_stream_id = 2 :: stream_id(),
-          streams = [] :: [{stream_id(), pid()}],
+          %%streams = [] :: [{stream_id(), pid()}],
+          streams = [] :: [stream()],
           stream_callback_mod = application:get_env(chatterbox, stream_callback_mod, chatterbox_static_stream) :: module(),
           content_handler = application:get_env(chatterbox, content_handler, chatterbox_static_content_handler) :: module(),
           buffer = empty :: empty | {binary, binary()} | {frame, frame_header(), binary()},
@@ -382,8 +393,8 @@ route_frame({#frame_header{
         0 ->
             go_away(?PROTOCOL_ERROR, Conn);
         _ ->
-            Stream = proplists:get_value(StreamId, Conn#connection.streams),
-            http2_stream:rst_stream(Stream, ?PROTOCOL_ERROR)
+            Stream = get_stream(StreamId, Conn#connection.streams),
+            http2_stream:rst_stream(Stream#stream.pid, ?PROTOCOL_ERROR)
     end;
 
 
@@ -400,7 +411,7 @@ route_frame({H, Payload},
                                    initial_window_size=OldIWS,
                                    header_table_size=HTS
                                   },
-               streams = Streams,
+               streams=Streams,
                encode_context=EncodeContext
               }=Conn)
     when H#frame_header.type == ?SETTINGS,
@@ -424,11 +435,18 @@ route_frame({H, Payload},
             %% We've just got connection settings from a peer. He have a
             %% couple of jobs to do here w.r.t. flow control
 
-            %% If Delta != 0, we need to change the connection's
-            %% send_window_size and every stream's send_window_size in the
-            %% state open or half_closed_remote. We'll just send the message
-            %% everywhere. It's up to them if they need to do anything.
-            [ http2_stream:modify_send_window_size(Pid, Delta) || {_, Pid} <- Streams],
+            %% If Delta != 0, we need to change every stream's
+            %% send_window_size in the state open or
+            %% half_closed_remote. We'll just send the message
+            %% everywhere. It's up to them if they need to do
+            %% anything.
+            UpdatedStreams =
+                [ begin
+                      http2_stream:modify_send_window_size(S#stream.pid, Delta),
+                      S#stream{
+                        send_window_size=S#stream.send_window_size+Delta
+                       }
+                  end || S <- Streams],
 
             NewEncodeContext = hpack:new_max_table_size(HTS, EncodeContext),
 
@@ -440,7 +458,8 @@ route_frame({H, Payload},
                                       %% Why aren't we updating send_window_size here? Section 6.9.2 of
                                       %% the spec says: "The connection flow-control window can only be
                                       %% changed using WINDOW_UPDATE frames.",
-                                      encode_context=NewEncodeContext
+                                      encode_context=NewEncodeContext,
+                                      streams=UpdatedStreams
                                      }};
         {error, Code} ->
             go_away(Code, Conn)
@@ -464,18 +483,24 @@ route_frame({H, _Payload},
     case queue:out(SS) of
         {{value, {_Ref, NewSettings}}, NewSS} ->
 
-            case NewSettings#settings.initial_window_size of
-                undefined ->
-                    ok;
-                NewIWS ->
-                    Delta = OldIWS - NewIWS,
-                    [ http2_stream:modify_recv_window_size(Pid, Delta)
-                      || {_, Pid} <- Streams]
-            end,
+            UpdatedStreams =
+                case NewSettings#settings.initial_window_size of
+                    undefined ->
+                        ok;
+                    NewIWS ->
+                        Delta = OldIWS - NewIWS,
+                        [ begin
+                              http2_stream:modify_recv_window_size(S#stream.pid, Delta),
+                              S#stream{
+                                send_window_size=S#stream.send_window_size+Delta
+                               }
+                          end || S <- Streams]
+                end,
 
             {next_state,
              connected,
              Conn#connection{
+               streams=UpdatedStreams,
                settings_sent=NewSS,
                recv_settings=NewSettings
                %% Same thing here, section 6.9.2
@@ -506,8 +531,7 @@ route_frame(F={H=#frame_header{
     when H#frame_header.type == ?DATA ->
     lager:debug("[~p] Received DATA Frame for Stream ~p",
                 [Conn#connection.type, StreamId]),
-
-    StreamPid = proplists:get_value(StreamId, Streams),
+    Stream = get_stream(StreamId, Streams),
 
     case {Conn#connection.flow_control, L > 0} of
         {auto, true} ->
@@ -515,18 +539,22 @@ route_frame(F={H=#frame_header{
             lager:info("[~p] Stream ~p WindowUpdate ~p",
                        [Conn#connection.type, StreamId, L]),
 
-            gen_fsm:send_all_state_event(StreamPid, {send_window_update, L}),
+            gen_fsm:send_all_state_event(Stream#stream.pid, {send_window_update, L}),
             send_window_update(self(), L);
         _Tried ->
             ok
     end,
 
-    http2_stream:recv_frame(StreamPid, F),
+    http2_stream:recv_frame(Stream#stream.pid, F),
 
     {next_state,
      connected,
      Conn#connection{
-       recv_window_size=CRWS-L
+       recv_window_size=CRWS-L,
+       streams=replace_stream(
+                 Stream#stream{
+                   recv_window_size=Stream#stream.recv_window_size-L
+                  }, Streams)
       }};
 
 route_frame({#frame_header{type=?HEADERS}=FH, _Payload},
@@ -561,8 +589,8 @@ route_frame({#frame_header{type=?HEADERS}=FH, _Payload}=Frame,
     %% exist if this is a PP or Response
 
     {StreamPid, NewStreams} =
-        case proplists:get_value(StreamId, Streams, undefined) of
-            undefined ->
+        case get_stream(StreamId, Streams) of
+            false ->
                 lager:debug("Spawning new pid for stream ~p", [StreamId]),
                 {ok, Pid} = http2_stream:start_link(
                               [
@@ -573,9 +601,15 @@ route_frame({#frame_header{type=?HEADERS}=FH, _Payload}=Frame,
                                {callback_module, Conn#connection.stream_callback_mod},
                                {socket, Conn#connection.socket}
                              ]),
-                {Pid, [{StreamId, Pid}|Streams]};
-            SPid ->
-                {SPid, Streams}
+                NewStream = #stream{
+                               id = StreamId,
+                               pid = Pid,
+                               send_window_size=Conn#connection.send_settings#settings.initial_window_size,
+                               recv_window_size=Conn#connection.recv_settings#settings.initial_window_size
+                               },
+                {Pid, [NewStream|Streams]};
+            Stream ->
+                {Stream#stream.pid, Streams}
         end,
 
     % Is ths all to the stream?
@@ -620,37 +654,37 @@ route_frame(F={H=#frame_header{
                     type=?CONTINUATION
                    }, _Payload},
             #connection{
-               streams = Streams,
                continuation = #continuation_state{
                                  frames = CFQ,
                                  stream_id = StreamId,
                                  end_stream = EndStream,
                                  type=ContType
-                                } = Cont,
-               decode_context = DecodeContext
+                                } = Cont
               }=Conn) ->
     lager:debug("[~p] Received CONTINUATION Frame for Stream ~p",
                 [Conn#connection.type, StreamId]),
-    StreamPid = proplists:get_value(StreamId, Streams),
+
+    Streams=Conn#connection.streams,
+    Stream = get_stream(StreamId, Streams),
 
     Queue = queue:in(F, CFQ),
 
     case ?IS_FLAG(H#frame_header.flags, ?FLAG_END_HEADERS) of
         true ->
             HeadersBin = http2_frame_headers:from_frames(queue:to_list(Queue)),
-
+            DecodeContext = Conn#connection.decode_context,
             case hpack:decode(HeadersBin, DecodeContext) of
                 {ok, {Headers, NewDecodeContext}} ->
 
                     case ContType of
                         headers ->
-                            http2_stream:recv_h(StreamPid, Headers);
+                            http2_stream:recv_h(Stream#stream.pid, Headers);
                         push_promise ->
-                            http2_stream:recv_pp(StreamPid, Headers)
+                            http2_stream:recv_pp(Stream#stream.pid, Headers)
                     end,
                     case EndStream of
                         true ->
-                            http2_stream:recv_es(StreamPid);
+                            http2_stream:recv_es(Stream#stream.pid);
                         false ->
                             ok
                     end,
@@ -693,15 +727,14 @@ route_frame(
    #rst_stream{
       error_code=EC
       }},
-  #connection{
-     streams=Streams
-    } = Conn) ->
+  #connection{} = Conn) ->
     lager:debug("[~p] Received RST_STREAM (~p) for Stream ~p",
                 [Conn#connection.type, EC, StreamId]),
-    case proplists:get_value(StreamId, Streams) of
-        undefined ->
+    Streams = Conn#connection.streams,
+    case get_stream(StreamId, Streams) of
+        false ->
             go_away(?PROTOCOL_ERROR, Conn);
-        _StreamPid ->
+        _Stream ->
             %% TODO: RST_STREAM support
             {next_state, connected, Conn}
     end;
@@ -714,7 +747,6 @@ route_frame({H=#frame_header{
                 }}=Frame,
             #connection{
                decode_context=DecodeContext,
-               streams=Streams,
                socket=Socket,
                recv_settings=#settings{initial_window_size=RecvWindowSize},
                send_settings=#settings{initial_window_size=SendWindowSize},
@@ -727,8 +759,9 @@ route_frame({H=#frame_header{
     lager:debug("[~p] Received PUSH_PROMISE Frame on Stream ~p for Stream ~p",
                 [Conn#connection.type, StreamId, PSID]),
 
-    OldStreamPid = proplists:get_value(StreamId, Streams),
-    {ok, NotifyPid} = http2_stream:notify_pid(OldStreamPid),
+    Streams = Conn#connection.streams,
+    Old = get_stream(StreamId, Streams),
+    {ok, NotifyPid} = http2_stream:notify_pid(Old#stream.pid),
     {ok, NewStreamPid} = http2_stream:start_link(
                            [
                             {stream_id, PSID},
@@ -739,6 +772,13 @@ route_frame({H=#frame_header{
                             {notify_pid, NotifyPid},
                             {socket, Socket}
                            ]),
+
+    New = #stream{
+             id = PSID,
+             pid = NewStreamPid,
+             send_window_size =  SendWindowSize,
+             recv_window_size = RecvWindowSize
+            },
 
     lager:debug("[~p] recv(~p, {~p, ~p})",
                 [Conn#connection.type, Frame, StreamId, Conn]),
@@ -753,7 +793,7 @@ route_frame({H=#frame_header{
                     {next_state, connected,
                      Conn#connection{
                        decode_context=NewDecodeContext,
-                       streams=[{PSID, NewStreamPid}|Streams]}};
+                       streams=[New|Streams]}};
                 {error, compression_error} ->
                     go_away(?COMPRESSION_ERROR, Conn)
             end;
@@ -765,7 +805,7 @@ route_frame({H=#frame_header{
                                  frames = queue:from_list([Frame]),
                                  type = push_promise
                                  },
-               streams=[{PSID, NewStreamPid}|Streams]
+               streams=[New|Streams]
               }}
     end;
 
@@ -813,9 +853,7 @@ route_frame(
      },
    #window_update{window_size_increment=WSI}},
   #connection{
-     send_window_size=SWS,
-     queued_frames=QF,
-     streams=Streams
+     send_window_size=SWS
     }=Conn) ->
 
     lager:debug("[~p] Stream 0 Window Update: ~p",
@@ -825,15 +863,23 @@ route_frame(
         true ->
             go_away(?FLOW_CONTROL_ERROR, Conn);
         false ->
-            {RemainingFrames, RemainingSendWindow} =
-                http2_frame_queue:connection_ketchup(QF, NewSendWindow, Streams),
+
+            %% TODO: Priority Sort! Right now, it's just sorting on
+            %% lowest stream_id first
+            Streams = sort_streams(Conn#connection.streams),
+
+            {RemainingSendWindow, UpdatedStreams} =
+                c_send_what_we_can(NewSendWindow, Conn#connection.send_settings#settings.max_frame_size, Streams),
+
+            %{RemainingFrames, RemainingSendWindow} =
+            %    http2_frame_queue:connection_ketchup(QF, NewSendWindow, Streams),
             lager:debug("[~p] and Connection Send Window now: ~p",
                         [Conn#connection.type, RemainingSendWindow]),
 
             {next_state, connected,
              Conn#connection{
                send_window_size=RemainingSendWindow,
-               queued_frames=RemainingFrames
+               streams=UpdatedStreams
               }}
     end;
 route_frame(
@@ -845,30 +891,32 @@ route_frame(
 
     lager:debug("[~p] Received WINDOW_UPDATE Frame for Stream ~p",
                 [Conn#connection.type, StreamId]),
-    StreamPid = proplists:get_value(StreamId, Streams),
 
-    case StreamPid of
-        undefined ->
+    case get_stream(StreamId, Streams) of
+        false ->
             lager:error("[~p] Window update for an idle stream (~p)",
                        [Conn#connection.type, StreamId]),
             go_away(?PROTOCOL_ERROR, Conn);
-        _ ->
-            QF = Conn#connection.queued_frames,
+        S ->
+            %QF = Conn#connection.queued_frames,
             SWS = Conn#connection.send_window_size,
-            case http2_stream:recv_wu(StreamPid, F) of
+            case http2_stream:recv_wu(S#stream.pid, F) of
                 ok ->
-                    {RemainingFrames, RemainingSendWindow} =
-                        http2_frame_queue:stream_ketchup(StreamId, QF, SWS, Streams),
+                    {RemainingSendWindow, NewS}
+                        = s_send_what_we_can(SWS, Conn#connection.send_settings#settings.max_frame_size, S),
+
+%                    {RemainingFrames, RemainingSendWindow} =
+%                        http2_frame_queue:stream_ketchup(StreamId, QF, SWS, Streams),
                     {next_state, connected,
                      Conn#connection{
                        send_window_size=RemainingSendWindow,
-                       queued_frames=RemainingFrames
+ %                      queued_frames=RemainingFrames
+                       streams=replace_stream(NewS, Streams)
                       }};
                 _ ->
                     {next_state, connected,
                      Conn#connection{
-                       queued_frames=http2_frame_queue:remove(StreamId, QF),
-                       streams = proplists:delete(StreamId, Streams)
+                       streams = delete_stream(S, Streams)
                       }}
             end
 
@@ -884,6 +932,111 @@ route_frame(Frame, #connection{}=Conn) ->
     lager:error("OOPS! " ++ http2_frame:format(Frame)),
     lager:error("OOPS! ~p", [Conn]),
     go_away(?PROTOCOL_ERROR, Conn).
+
+-spec c_send_what_we_can(non_neg_integer(),
+                         non_neg_integer(),
+                         [stream()]) ->
+                                {non_neg_integer, [stream()]}.
+c_send_what_we_can(SWS, MaxFrameSize, Streams) ->
+    c_send_what_we_can(SWS, MaxFrameSize, Streams, []).
+%% If we hit 0, done
+c_send_what_we_can(0, _MFS, Streams, Acc) ->
+    {0, lists:reverse(Acc) ++ Streams};
+%% If we hit end of streams list, done
+c_send_what_we_can(SWS, _MFS, [], Acc) ->
+    {SWS, lists:reverse(Acc)};
+%% Otherwise, try sending on the working stream
+c_send_what_we_can(SWS, MFS, [S|Streams], Acc) ->
+    {NewSWS, NewS} = s_send_what_we_can(SWS, MFS, S),
+    c_send_what_we_can(NewSWS, MFS, Streams, [NewS|Acc]).
+
+s_send_what_we_can(SWS, _, #stream{queued_data=Data}=S)
+  when is_atom(Data) ->
+    {SWS, S};
+s_send_what_we_can(SWS, MFS, Stream) ->
+    %% We're coming in here with three numbers we need to look at:
+    %% * Connection send window size
+    %% * Stream send window size
+    %% * Maximimum frame size
+
+    %% If none of them are zero, we have to send something, so we're
+    %% going to figure out what's the biggest number we can send. If
+    %% that's more than we have to send, we'll send everything and put
+    %% an END_STREAM flag on it. Otherwise, we'll send as much as we
+    %% can. Then, based on which number was the limiting factor, we'll
+    %% make another decision
+
+    %% If it was MAX_FRAME_SIZE, then we recurse into this same
+    %% function, because we're able to send another frame of some
+    %% length.
+
+    %% If it was connection send window size, we're blocked at the
+    %% connection level and we should break out of this recursion
+
+    %% If it was stream send_window size, we're blocked on this
+    %% stream, but other streams can still go, so we'll break out of
+    %% this recursion, but not the connection level
+
+    SSWS = Stream#stream.send_window_size,
+
+    QueueSize = byte_size(Stream#stream.queued_data),
+
+    {MaxToSend, ExitStrategy} =
+        case {MFS =< SWS andalso MFS =< SSWS, SWS < SSWS} of
+            %% If MAX_FRAME_SIZE is the smallest, send one and recurse
+            {true, _} ->
+                {MFS, max_frame_size};
+            {false, true} ->
+                {SWS, connection};
+            _ ->
+                {SSWS, stream}
+        end,
+    lager:debug("s_send: ~p, ~p, ~p", [SWS, SSWS, ExitStrategy]),
+
+    {Frame, SentBytes, NewS} =
+        case MaxToSend > QueueSize of
+            true ->
+                %% We have the power to send everything
+                {{#frame_header{
+                     stream_id=Stream#stream.id,
+                     flags=?FLAG_END_STREAM,
+                     type=?DATA,
+                     length=QueueSize
+                    },
+                  #data{
+                     data=Stream#stream.queued_data %% Full Body
+                    }},
+                 QueueSize,
+                 Stream#stream{
+                   queued_data=done,
+                   send_window_size=SSWS-QueueSize}};
+            false ->
+                <<BinToSend:MaxToSend/binary,Rest/binary>> = Stream#stream.queued_data,
+                {{#frame_header{
+                     stream_id=Stream#stream.id,
+                     type=?DATA,
+                     length=MaxToSend
+                    },
+                  #data{
+                     data=BinToSend
+                    }},
+                 MaxToSend,
+                 Stream#stream{
+                   queued_data=Rest,
+                   send_window_size=SSWS-MaxToSend}}
+        end,
+    lager:debug("s_send: ~p, ~p, ~p", [Frame, SentBytes, NewS]),
+
+    _Sent = http2_stream:send_frame(Stream#stream.pid, Frame),
+
+    case ExitStrategy of
+        max_frame_size ->
+            s_send_what_we_can(SWS - SentBytes, MFS, NewS);
+        stream ->
+            {SWS - SentBytes, NewS};
+        connection ->
+            {0, NewS}
+    end.
 
 handle_event({send_window_update, 0},
              StateName, Conn) ->
@@ -910,15 +1063,15 @@ handle_event({send_headers, StreamId, Headers},
             ) ->
     lager:debug("[~p] {send headers, ~p, ~p}",
                 [Conn#connection.type, StreamId, Headers]),
-    StreamPid = proplists:get_value(StreamId, Streams),
+    Stream = get_stream(StreamId, Streams),
 
     %% TODO: This is set up in a way that assumes the header frame is
     %% smaller than MAX_FRAME_SIZE. Will need to split that out into
     %% continuation frames,but now will definitely be a
     %% FRAME_SIZE_ERROR
-    {HeaderFrame, NewContext} = http2_frame_headers:to_frame(StreamId, Headers, EncodeContext),
+    {HeaderFrame, NewContext} = http2_frame_headers:to_frame(Stream#stream.id, Headers, EncodeContext),
     sock:send(Socket, http2_frame:to_binary(HeaderFrame)),
-    http2_stream:send_h(StreamPid, Headers),
+    http2_stream:send_h(Stream#stream.pid, Headers),
 
     {next_state, StateName,
      Conn#connection{
@@ -926,20 +1079,30 @@ handle_event({send_headers, StreamId, Headers},
       }};
 handle_event({send_body, StreamId, Body},
              StateName,
-             #connection{
-                streams=Streams,
-                send_settings=SendSettings
-               }=Conn
-            ) ->
+             #connection{}=Conn) ->
     lager:debug("[~p] Send Body Stream ~p",
                 [Conn#connection.type, StreamId]),
-    StreamPid = proplists:get_value(StreamId, Streams),
-    DataFrames = http2_frame_data:to_frames(StreamId, Body, SendSettings),
-    [ begin
-          gen_fsm:send_all_state_event(self(), {send_data_frame, Frame, StreamPid})
-      end || Frame <- DataFrames],
+    Stream = get_stream(StreamId, Conn#connection.streams),
+    lager:info("Stream: ~p", [Stream]),
+    {NewSWS, NewS} =
+        s_send_what_we_can(Conn#connection.send_window_size,
+                           Conn#connection.send_settings#settings.max_frame_size,
+                           Stream#stream{
+                            queued_data=Body
+                            }),
 
-    {next_state, StateName, Conn};
+    {next_state, StateName,
+     Conn#connection{
+       send_window_size=NewSWS,
+       streams=replace_stream(NewS, Conn#connection.streams)
+      }};
+
+%    DataFrames = http2_frame_data:to_frames(StreamId, Body, SendSettings),
+%    [ begin
+%          gen_fsm:send_all_state_event(self(), {send_data_frame, Frame, StreamPid})
+%      end || Frame <- DataFrames],
+
+%    {next_state, StateName, Conn};
 
 handle_event({send_data_frame,
               {#frame_header{
@@ -984,7 +1147,7 @@ handle_event({send_promise, StreamId, NewStreamId, Headers},
                 encode_context=OldContext
                }=Conn
             ) ->
-    NewStreamPid = proplists:get_value(NewStreamId, Streams),
+    NewStream = get_stream(NewStreamId, Streams),
 
     %% TODO: This could be a series of frames, not just one
     {PromiseFrame, NewContext} = http2_frame_push_promise:to_frame(
@@ -999,7 +1162,7 @@ handle_event({send_promise, StreamId, NewStreamId, Headers},
     socksend(Conn, Binary),
 
     %% Get the promised stream rolling
-    http2_stream:send_pp(NewStreamPid, Headers),
+    http2_stream:send_pp(NewStream#stream.pid, Headers),
 
     {next_state, StateName,
      Conn#connection{
@@ -1040,11 +1203,9 @@ handle_sync_event(streams, _F, StateName,
                     }=Conn) ->
     {reply, Streams, StateName, Conn};
 handle_sync_event({get_response, StreamId}, _F, StateName,
-                  #connection{
-                     streams=Streams
-                    }=Conn) ->
-    StreamPid = proplists:get_value(StreamId, Streams),
-    Reply = http2_stream:get_response(StreamPid),
+                  #connection{}=Conn) ->
+    Stream = get_stream(StreamId, Conn#connection.streams),
+    Reply = http2_stream:get_response(Stream#stream.pid),
 
     {reply, Reply, StateName, Conn};
 handle_sync_event({new_stream, NotifyPid}, _F, StateName,
@@ -1067,11 +1228,18 @@ handle_sync_event({new_stream, NotifyPid}, _F, StateName,
                             {socket, Socket}
                            ]),
 
+    NewStream =
+        #stream{
+           id=NextId,
+           send_window_size = SendWindowSize,
+           recv_window_size = RecvWindowSize,
+           pid = NewStreamPid
+          },
     lager:debug("[~p] added stream #~p to ~p",
                 [Conn#connection.type, NextId, Streams]),
     {reply, NextId, StateName, Conn#connection{
                                  next_available_stream_id=NextId+2,
-                                 streams=[{NextId, NewStreamPid}|Streams]
+                                 streams=[NewStream|Streams]
                                 }};
 handle_sync_event(is_push, _F, StateName,
                   #connection{
@@ -1218,8 +1386,8 @@ go_away(ErrorCode,
 -spec rst_stream(stream_id(), error_code(), connection()) ->
                         {next_state, connected, connection()}.
 rst_stream(StreamId, ErrorCode, Conn) ->
-    case proplists:get_value(StreamId, Conn#connection.streams) of
-        undefined ->
+    case get_stream(StreamId, Conn#connection.streams) of
+        false ->
             RstStream = #rst_stream{error_code=ErrorCode},
             RstStreamBin = http2_frame:to_binary(
                              {#frame_header{
@@ -1227,8 +1395,8 @@ rst_stream(StreamId, ErrorCode, Conn) ->
                                 },
                               RstStream}),
             sock:send(Conn#connection.socket, RstStreamBin);
-        StreamPid ->
-            http2_stream:rst_stream(StreamPid, ?PROTOCOL_ERROR)
+        Stream ->
+            http2_stream:rst_stream(Stream#stream.pid, ?PROTOCOL_ERROR)
     end,
     {next_state, connected, Conn}.
 
@@ -1416,3 +1584,22 @@ socksend(#connection{
             lager:debug("[~p] {error, ~p} sending, ~p", [T, Reason, Data]),
             {error, Reason}
     end.
+
+%% Stream list operations. Warning: These are abusing the underlying
+%% tuple structure of the record for efficiency's sake
+
+-spec get_stream(stream_id(), [stream()]) -> stream() | false.
+get_stream(Id, Streams) ->
+    lists:keyfind(Id, 2, Streams).
+
+-spec replace_stream(stream(), [stream()]) -> [stream()].
+replace_stream(Stream, Streams) ->
+    lists:keyreplace(Stream#stream.id, 2, Streams, Stream).
+
+-spec sort_streams([stream()]) -> [stream()].
+sort_streams(Streams) ->
+    lists:keysort(2, Streams).
+
+-spec delete_stream(stream(), [stream()]) -> [stream()].
+delete_stream(S, Streams) ->
+    lists:keydelete(S#stream.id, 2, Streams).
