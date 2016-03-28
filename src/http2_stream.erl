@@ -530,7 +530,7 @@ half_closed_local(
 
     case ?IS_FLAG(Flags, ?FLAG_END_STREAM) of
         true ->
-            Data = [ D || {#frame_header{type=?DATA}, #data{data=D}} <- queue:to_list(IFQ)],
+            Data = [ D || {#frame_header{type=?DATA}, #data{data=D}} <- queue:to_list(NewQ)],
             case NotifyPid of
                 undefined ->
                     ok;
