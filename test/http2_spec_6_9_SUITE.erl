@@ -43,15 +43,15 @@ send_window_update(_Config) ->
          {<<"user-agent">>, <<"chattercli/0.0.1 :D">>}
         ],
 
-    {F, _} = http2_frame_headers:to_frame(1, RequestHeaders, hpack:new_context()),
+    {{FH, FP}, _} = http2_frame_headers:to_frame(1, RequestHeaders, hpack:new_context()),
 
-    http2c:send_unaltered_frames(Client, [F]),
+    http2c:send_unaltered_frames(Client, [{FH#frame_header{flags=?FLAG_END_HEADERS bor ?FLAG_END_STREAM}, FP}]),
 
-    Resp0 = http2c:wait_for_n_frames(Client, 1, 1),
-    ct:pal("Resp9: ~p", [Resp0]),
-    ?assertEqual(1, length(Resp0)), % Should get one byte:
+    Resp0 = http2c:wait_for_n_frames(Client, 1, 2),
+    ct:pal("Resp0: ~p", [Resp0]),
+    ?assertEqual(2, length(Resp0)), % Should get one byte:
 
-    [{Frame1H, _}] = Resp0,
+    [_RespHeaders, {Frame1H, _}] = Resp0,
     ?assertEqual(1, Frame1H#frame_header.length),
 
     http2c:send_unaltered_frames(

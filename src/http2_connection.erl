@@ -71,7 +71,7 @@
           pid :: pid(),
           send_window_size :: non_neg_integer(),
           recv_window_size :: non_neg_integer(),
-          queued_data :: binary()
+          queued_data :: undefined | done | binary()
          }).
 -type stream() :: #stream{}.
 
@@ -88,7 +88,6 @@
           encode_context = hpack:new_context() :: hpack:context(),
           settings_sent = queue:new() :: queue:queue(),
           next_available_stream_id = 2 :: stream_id(),
-          %%streams = [] :: [{stream_id(), pid()}],
           streams = [] :: [stream()],
           stream_callback_mod = application:get_env(chatterbox, stream_callback_mod, chatterbox_static_stream) :: module(),
           content_handler = application:get_env(chatterbox, content_handler, chatterbox_static_content_handler) :: module(),
@@ -607,6 +606,7 @@ route_frame({#frame_header{type=?HEADERS}=FH, _Payload}=Frame,
                                send_window_size=Conn#connection.send_settings#settings.initial_window_size,
                                recv_window_size=Conn#connection.recv_settings#settings.initial_window_size
                                },
+                lager:debug("NewStream ~p", [NewStream]),
                 {Pid, [NewStream|Streams]};
             Stream ->
                 {Stream#stream.pid, Streams}
@@ -863,19 +863,18 @@ route_frame(
         true ->
             go_away(?FLOW_CONTROL_ERROR, Conn);
         false ->
-
             %% TODO: Priority Sort! Right now, it's just sorting on
             %% lowest stream_id first
             Streams = sort_streams(Conn#connection.streams),
 
             {RemainingSendWindow, UpdatedStreams} =
-                c_send_what_we_can(NewSendWindow, Conn#connection.send_settings#settings.max_frame_size, Streams),
-
-            %{RemainingFrames, RemainingSendWindow} =
-            %    http2_frame_queue:connection_ketchup(QF, NewSendWindow, Streams),
+                c_send_what_we_can(
+                  NewSendWindow,
+                  Conn#connection.send_settings#settings.max_frame_size,
+                  Streams
+                 ),
             lager:debug("[~p] and Connection Send Window now: ~p",
                         [Conn#connection.type, RemainingSendWindow]),
-
             {next_state, connected,
              Conn#connection{
                send_window_size=RemainingSendWindow,
@@ -883,7 +882,8 @@ route_frame(
               }}
     end;
 route_frame(
-  {#frame_header{type=?WINDOW_UPDATE}=FH, #window_update{}}=F,
+  {#frame_header{type=?WINDOW_UPDATE}=FH,
+   #window_update{window_size_increment=WSI}}=F,
   #connection{}=Conn
  ) ->
     StreamId = FH#frame_header.stream_id,
@@ -898,19 +898,18 @@ route_frame(
                        [Conn#connection.type, StreamId]),
             go_away(?PROTOCOL_ERROR, Conn);
         S ->
-            %QF = Conn#connection.queued_frames,
             SWS = Conn#connection.send_window_size,
             case http2_stream:recv_wu(S#stream.pid, F) of
                 ok ->
                     {RemainingSendWindow, NewS}
-                        = s_send_what_we_can(SWS, Conn#connection.send_settings#settings.max_frame_size, S),
-
-%                    {RemainingFrames, RemainingSendWindow} =
-%                        http2_frame_queue:stream_ketchup(StreamId, QF, SWS, Streams),
+                        = s_send_what_we_can(
+                            SWS,
+                            Conn#connection.send_settings#settings.max_frame_size,
+                            S#stream{send_window_size=S#stream.send_window_size+WSI}
+                           ),
                     {next_state, connected,
                      Conn#connection{
                        send_window_size=RemainingSendWindow,
- %                      queued_frames=RemainingFrames
                        streams=replace_stream(NewS, Streams)
                       }};
                 _ ->
@@ -933,23 +932,27 @@ route_frame(Frame, #connection{}=Conn) ->
     lager:error("OOPS! ~p", [Conn]),
     go_away(?PROTOCOL_ERROR, Conn).
 
+%% Send at the connection level
 -spec c_send_what_we_can(non_neg_integer(),
                          non_neg_integer(),
                          [stream()]) ->
-                                {non_neg_integer, [stream()]}.
+                                {non_neg_integer(), [stream()]}.
 c_send_what_we_can(SWS, MaxFrameSize, Streams) ->
     c_send_what_we_can(SWS, MaxFrameSize, Streams, []).
 %% If we hit 0, done
 c_send_what_we_can(0, _MFS, Streams, Acc) ->
+    lager:debug("c_send hit 0"),
     {0, lists:reverse(Acc) ++ Streams};
 %% If we hit end of streams list, done
 c_send_what_we_can(SWS, _MFS, [], Acc) ->
+    lager:debug("c_send hit []"),
     {SWS, lists:reverse(Acc)};
 %% Otherwise, try sending on the working stream
 c_send_what_we_can(SWS, MFS, [S|Streams], Acc) ->
     {NewSWS, NewS} = s_send_what_we_can(SWS, MFS, S),
     c_send_what_we_can(NewSWS, MFS, Streams, [NewS|Acc]).
 
+%% Send at the stream level
 s_send_what_we_can(SWS, _, #stream{queued_data=Data}=S)
   when is_atom(Data) ->
     {SWS, S};
