@@ -946,11 +946,9 @@ c_send_what_we_can(SWS, MaxFrameSize, Streams) ->
     c_send_what_we_can(SWS, MaxFrameSize, Streams, []).
 %% If we hit 0, done
 c_send_what_we_can(0, _MFS, Streams, Acc) ->
-    lager:debug("c_send hit 0"),
     {0, lists:reverse(Acc) ++ Streams};
 %% If we hit end of streams list, done
 c_send_what_we_can(SWS, _MFS, [], Acc) ->
-    lager:debug("c_send hit []"),
     {SWS, lists:reverse(Acc)};
 %% Otherwise, try sending on the working stream
 c_send_what_we_can(SWS, MFS, [S|Streams], Acc) ->
@@ -999,7 +997,6 @@ s_send_what_we_can(SWS, MFS, Stream) ->
             _ ->
                 {SSWS, stream}
         end,
-    lager:debug("s_send: ~p, ~p, ~p", [SWS, SSWS, ExitStrategy]),
 
     {Frame, SentBytes, NewS} =
         case MaxToSend > QueueSize of
@@ -1033,7 +1030,6 @@ s_send_what_we_can(SWS, MFS, Stream) ->
                    queued_data=Rest,
                    send_window_size=SSWS-MaxToSend}}
         end,
-    lager:debug("s_send: ~p, ~p, ~p", [Frame, SentBytes, NewS]),
 
     _Sent = http2_stream:send_frame(Stream#stream.pid, Frame),
 
@@ -1091,7 +1087,6 @@ handle_event({send_body, StreamId, Body},
     lager:debug("[~p] Send Body Stream ~p",
                 [Conn#connection.type, StreamId]),
     Stream = get_stream(StreamId, Conn#connection.streams),
-    lager:info("Stream: ~p", [Stream]),
     {NewSWS, NewS} =
         s_send_what_we_can(Conn#connection.send_window_size,
                            Conn#connection.send_settings#settings.max_frame_size,
