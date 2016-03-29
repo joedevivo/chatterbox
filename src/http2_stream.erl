@@ -515,6 +515,8 @@ half_closed_local(
      half_closed_local,
      Stream#stream_state{
        response_headers=Headers}};
+half_closed_local(recv_es, Stream) ->
+    {next_state, closed, end_stream(Stream)};
 half_closed_local(
   {recv_frame,
    {#frame_header{
@@ -522,26 +524,13 @@ half_closed_local(
        type=?DATA
       },_}=F},
   #stream_state{
-     stream_id=StreamId,
-     incoming_frames=IFQ,
-     notify_pid = NotifyPid
+     incoming_frames=IFQ
      } = Stream) ->
     NewQ = queue:in(F, IFQ),
 
     case ?IS_FLAG(Flags, ?FLAG_END_STREAM) of
         true ->
-            Data = [ D || {#frame_header{type=?DATA}, #data{data=D}} <- queue:to_list(NewQ)],
-            case NotifyPid of
-                undefined ->
-                    ok;
-                _ ->
-                    NotifyPid ! {'END_STREAM', StreamId}
-            end,
-            {next_state, closed,
-             Stream#stream_state{
-               incoming_frames=queue:new(),
-               response_body = Data
-              }};
+            {next_state, closed, end_stream(Stream, NewQ)};
         _ ->
             {next_state,
              half_closed_local,
@@ -674,3 +663,25 @@ rst_stream_(ErrorCode,
                       RstStream}),
     sock:send(Socket, RstStreamBin),
     ok.
+
+-spec end_stream(state()) -> state().
+end_stream(#stream_state{incoming_frames=IFQ} = Stream) ->
+    end_stream(Stream, IFQ).
+
+-spec end_stream(state(), queue:queue(frame())) -> state().
+end_stream(#stream_state{
+             notify_pid=NotifyPid,
+             stream_id=StreamId
+            } = Stream,
+          IFQ) ->
+    Data = [ D || {#frame_header{type=?DATA}, #data{data=D}} <- queue:to_list(IFQ)],
+    case NotifyPid of
+        undefined ->
+            ok;
+        _ ->
+            NotifyPid ! {'END_STREAM', StreamId}
+    end,
+    Stream#stream_state{
+      incoming_frames=queue:new(),
+      response_body = Data
+     }.
