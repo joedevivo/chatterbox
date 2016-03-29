@@ -1487,7 +1487,7 @@ maybe_hpack(Continuation, Conn)
         {error, compression_error} ->
             go_away(?COMPRESSION_ERROR, Conn);
         {ok, {Headers, NewDecodeContext}} ->
-            case good_headers(Headers) of
+            case good_req_headers(Headers) of
                 {error, Code} ->
                     rst_stream(Stream#stream.id, Code, Conn);
                 ok ->
@@ -1534,9 +1534,10 @@ maybe_hpack(Continuation, Conn) ->
 %% * Only acceptable psuedoheaders are:
 %%     :method, :scheme, :authority, :path,
 
-good_headers(Headers) ->
+good_req_headers(Headers) ->
     case
-        no_upper_names(Headers)
+        no_upper_names(Headers) andalso
+        all_psuedos_first(Headers)
     of
         true ->
             ok;
@@ -1551,3 +1552,20 @@ no_upper_names(Headers) ->
               NameStr =:= string:to_lower(NameStr)
       end,
      Headers).
+
+all_psuedos_first(Headers) ->
+    Tail = lists:dropwhile(
+             fun({<<$:, _/binary>>, _}) ->
+                     true;
+                (_) -> false
+             end,
+             Headers),
+    no_psuedos_left(Tail).
+
+no_psuedos_left(Headers) ->
+    lists:all(
+      fun({<<$:, _/binary>>, _}) ->
+              false;
+         (_) -> true
+      end,
+      Headers).
