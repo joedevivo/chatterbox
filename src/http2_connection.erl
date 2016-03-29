@@ -531,7 +531,8 @@ route_frame(F={H=#frame_header{
       L > 0
          } of
         {true, _, _} ->
-            lager:error("Data frame too big for stream ~p", [Stream]),
+            lager:error("[~p][Stream ~p] Flow Control got ~p bytes, Stream window was ~p",
+                        [Conn#connection.type, StreamId, L, Stream#stream.recv_window_size]),
             http2_stream:rst_stream(Stream#stream.pid,
                                     ?FLOW_CONTROL_ERROR);
         {false, auto, true} ->
