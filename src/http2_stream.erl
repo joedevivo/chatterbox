@@ -10,7 +10,6 @@
          send_pp/2,
          recv_es/1,
          recv_pp/2,
-         recv_wu/2,
          send_frame/2,
          recv_frame/2,
          stream_id/0,
@@ -19,8 +18,6 @@
          notify_pid/1,
          send_window_update/1,
          send_connection_window_update/1,
-         modify_send_window_size/2,
-         modify_recv_window_size/2,
          rst_stream/2
         ]).
 
@@ -88,8 +85,6 @@
           connection = undefined :: undefined | pid(),
           socket = undefined :: sock:socket(),
           state = idle :: stream_state_name(),
-          send_window_size = ?DEFAULT_INITIAL_WINDOW_SIZE :: integer(),
-          recv_window_size = ?DEFAULT_INITIAL_WINDOW_SIZE :: integer(),
           incoming_frames = queue:new() :: queue:queue(frame()),
           request_headers = [] :: hpack:headers(),
           request_body :: iodata(),
@@ -164,11 +159,6 @@ recv_pp(Pid, Headers) ->
 recv_es(Pid) ->
     gen_fsm:send_event(Pid, recv_es).
 
--spec recv_wu(pid(), {frame_header(), window_update()}) ->
-                     ok | {error, flow_control}.
-recv_wu(Pid, Frame) ->
-    gen_fsm:sync_send_all_state_event(Pid, {recv_wu, Frame}).
-
 -spec recv_frame(pid(), frame()) ->
                         ok.
 recv_frame(Pid, Frame) ->
@@ -207,14 +197,6 @@ send_window_update(Size) ->
 send_connection_window_update(Size) ->
     gen_fsm:send_all_state_event(self(), {send_connection_window_update, Size}).
 
--spec modify_send_window_size(pid(), integer()) -> ok.
-modify_send_window_size(Pid, Delta) ->
-    gen_fsm:send_all_state_event(Pid, {modify_send_window_size, Delta}).
-
--spec modify_recv_window_size(pid(), integer()) -> ok.
-modify_recv_window_size(Pid, Delta) ->
-    gen_fsm:send_all_state_event(Pid, {modify_recv_window_size, Delta}).
-
 rst_stream(Pid, Code) ->
     gen_fsm:sync_send_all_state_event(Pid, {rst_stream, Code}).
 
@@ -228,8 +210,6 @@ rst_stream(Pid, Code) ->
 init(StreamOptions) ->
     StreamId = proplists:get_value(stream_id, StreamOptions),
     ConnectionPid = proplists:get_value(connection, StreamOptions),
-    SendWindowSize = proplists:get_value(initial_send_window_size, StreamOptions),
-    RecvWindowSize = proplists:get_value(initial_recv_window_size, StreamOptions),
     CB = proplists:get_value(callback_module, StreamOptions),
     NotifyPid = proplists:get_value(notify_pid, StreamOptions, ConnectionPid),
     Socket = proplists:get_value(socket, StreamOptions),
@@ -242,8 +222,6 @@ init(StreamOptions) ->
                   socket=Socket,
                   stream_id=StreamId,
                   connection=ConnectionPid,
-                  send_window_size=SendWindowSize,
-                  recv_window_size=RecvWindowSize,
                   callback_state=CallbackState,
                   notify_pid=NotifyPid
                  }}.
@@ -350,30 +328,13 @@ open(recv_es,
        callback_state=NewCBState
       }};
 
-%% Open receive data frame that is larger than the stream's recv_window_size
 open({recv_frame,
       {#frame_header{
-         length=L,
-         type=?DATA
-         },_}},
-     #stream_state{
-        recv_window_size=RWS
-       }=Stream)
-  when RWS < L ->
-    rst_stream_(?FLOW_CONTROL_ERROR, Stream),
-    {next_state,
-     closed,
-     Stream};
-
-open({recv_frame,
-      {#frame_header{
-          length=L,
           flags=Flags,
           type=?DATA
          },_}=F},
      #stream_state{
         incoming_frames=IFQ,
-        recv_window_size=SRWS,
         callback_mod=CB,
         callback_state=CallbackState
        }=Stream)
@@ -385,18 +346,15 @@ open({recv_frame,
        %% TODO: We're storing everything in the state. It's fine for
        %% some cases, but the decision should be left to the user
        incoming_frames=queue:in(F, IFQ),
-       recv_window_size=SRWS-L,
        callback_state=NewCBState
       }};
 open({recv_frame,
       {#frame_header{
-              length=L,
               flags=Flags,
               type=?DATA
          }, _Payload}=F},
      #stream_state{
         incoming_frames=IFQ,
-        recv_window_size=SRWS,
         callback_mod=CB,
         callback_state=CallbackState
        }=Stream)
@@ -407,7 +365,6 @@ open({recv_frame,
      half_closed_remote,
      Stream#stream_state{
        incoming_frames=queue:in(F, IFQ),
-       recv_window_size=SRWS-L,
        request_end_stream=true,
        callback_state=NewCBState
       }};
@@ -415,29 +372,14 @@ open(Msg, Stream) ->
     lager:warning("Some unexpected message in open state. ~p, ~p", [Msg, Stream]),
     {next_state, open, Stream}.
 
-%% TODO: Abstract sending data into one function that does flow
-%% control math and replies either 'ok' or 'flow_control'
 open({send_frame,
       {#frame_header{
           type=?DATA,
-          length=L
-         }, _}=_F},
-     _From,
-     #stream_state{
-        send_window_size=SWS
-       }=Stream)
-  when L > SWS ->
-    {reply, flow_control, open, Stream};
-open({send_frame,
-      {#frame_header{
-          type=?DATA,
-          flags=Flags,
-          length=L
+          flags=Flags
          }, _}=F},
      _From,
      #stream_state{
-        socket=Socket,
-        send_window_size=SWS
+        socket=Socket
        }=Stream) ->
     sock:send(Socket, http2_frame:to_binary(F)),
 
@@ -448,8 +390,7 @@ open({send_frame,
             _ ->
                 open
         end,
-    {reply, ok, NextState,
-     Stream#stream_state{send_window_size=SWS-L}}.
+    {reply, ok, NextState, Stream}.
 
 half_closed_remote(
   {send_h, Headers},
@@ -464,44 +405,25 @@ half_closed_remote(
                   {send_frame,
                    {
                      #frame_header{
-                        type=?DATA,
-                        length=L
-                       },_
-                   }}=_Msg,
-  _From,
-  #stream_state{
-     send_window_size=SWS
-    }=Stream)
-  when L > SWS ->
-    {reply, flow_control, half_closed_remote, Stream};
-half_closed_remote(
-                  {send_frame,
-                   {
-                     #frame_header{
                         flags=Flags,
-                        type=?DATA,
-                        length=L
+                        type=?DATA
                        },_
                    }=F}=_Msg,
   _From,
   #stream_state{
-     socket=Socket,
-     send_window_size=SWS
+     socket=Socket
     }=Stream) ->
     ok = sock:send(Socket, http2_frame:to_binary(F)),
 
     NextState =
         case ?IS_FLAG(Flags, ?FLAG_END_STREAM) of
             true ->
-                %lager:error("half_closed remote -> closed ~p",
-                %            [Stream#stream_state.stream_id]),
-                closed;
-        _ ->
+                 closed;
+            _ ->
                 half_closed_remote
         end,
 
-    {reply, ok, NextState,
-     Stream#stream_state{send_window_size=SWS-L}}.
+    {reply, ok, NextState, Stream}.
 
 %% PUSH_PROMISES can only be received by streams in the open or
 %% half_closed_local, but will create a new stream in the idle state,
@@ -559,26 +481,6 @@ closed(get_response,
        ) ->
     {reply, {ok, {H, B}}, closed, Stream}.
 
-handle_event({modify_send_window_size, Delta},
-            StateName,
-             #stream_state{
-                send_window_size=SWS
-               }=Stream
-            ) ->
-    {next_state, StateName,
-     Stream#stream_state{
-       send_window_size=SWS - Delta
-      }};
-handle_event({modify_recv_window_size, Delta},
-            StateName,
-             #stream_state{
-                recv_window_size=RWS
-               }=Stream
-            ) ->
-    {next_state, StateName,
-     Stream#stream_state{
-       recv_window_size=RWS - Delta
-      }};
 handle_event({send_window_update, 0},
              StateName,
              #stream_state{}=Stream) ->
@@ -587,13 +489,11 @@ handle_event({send_window_update, Size},
              StateName,
              #stream_state{
                 socket=Socket,
-                stream_id=StreamId,
-                recv_window_size=RWS
+                stream_id=StreamId
                }=Stream) ->
     http2_frame_window_update:send(Socket, Size, StreamId),
     {next_state, StateName,
      Stream#stream_state{
-       recv_window_size=RWS+Size
        }};
 handle_event({send_connection_window_update, Size},
              StateName,
@@ -604,37 +504,6 @@ handle_event({send_connection_window_update, Size},
     {next_state, StateName, State};
 handle_event(_E, StateName, State) ->
     {next_state, StateName, State}.
-
-handle_sync_event({recv_wu,
-              {#frame_header{
-                  type=?WINDOW_UPDATE,
-                  stream_id=StreamId
-                 },
-               #window_update{
-                  window_size_increment=WSI
-                 }
-              }},
-                  _F,
-                  StateName,
-              #stream_state{
-                 stream_id=StreamId,
-                 send_window_size=SWS
-                }=Stream)
-             ->
-    NewSendWindow = WSI + SWS,
-    case NewSendWindow > 2147483647 of
-        true ->
-            lager:error("Sending ~p FLOWCONTROL ERROR because NSW = ~p", [StreamId, NewSendWindow]),
-            rst_stream_(?FLOW_CONTROL_ERROR, Stream),
-            {reply, {error, flow_control}, closed, Stream};
-        false ->
-            NewStream = Stream#stream_state{
-                          send_window_size=NewSendWindow
-                         },
-            lager:debug("Stream ~p send window now: ~p", [StreamId, NewSendWindow]),
-            {reply, ok, StateName, NewStream}
-    end;
-
 
 handle_sync_event({rst_stream, ErrorCode}, _F, StateName, State=#stream_state{}) ->
     {reply, {ok, rst_stream_(ErrorCode, State)}, StateName, State};

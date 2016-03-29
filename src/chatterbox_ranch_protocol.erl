@@ -1,6 +1,9 @@
 -module(chatterbox_ranch_protocol).
 
--include("http2_socket.hrl").
+%% While it implements the behaviour, uncommenting the line below
+%% would fail to compile unless I make ranch a dependency of
+%% chatterbox, which I don't plan on
+
 %%-behaviour(ranch_protocol).
 
 -export([
