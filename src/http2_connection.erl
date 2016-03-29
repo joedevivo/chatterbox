@@ -586,6 +586,8 @@ route_frame({#frame_header{type=?HEADERS}=FH, _Payload}=Frame,
     %% 3. We're a client, and these are Response Headers, but the
     %% response is to a Push Promise
 
+    %% 4. We're a server and these are Request Trailers :/
+
     %% Fortunately, the only thing we need to do here is create a new
     %% stream if this is the first scenario. The stream will already
     %% exist if this is a PP or Response
@@ -593,23 +595,8 @@ route_frame({#frame_header{type=?HEADERS}=FH, _Payload}=Frame,
     {StreamPid, NewStreams} =
         case get_stream(StreamId, Streams) of
             false ->
-                lager:debug("Spawning new pid for stream ~p", [StreamId]),
-                {ok, Pid} = http2_stream:start_link(
-                              [
-                               {stream_id, StreamId},
-                               {connection, self()},
-                               {initial_recv_window_size, Conn#connection.recv_settings#settings.initial_window_size},
-                               {callback_module, Conn#connection.stream_callback_mod},
-                               {socket, Conn#connection.socket}
-                             ]),
-                NewStream = #stream{
-                               id = StreamId,
-                               pid = Pid,
-                               send_window_size=Conn#connection.send_settings#settings.initial_window_size,
-                               recv_window_size=Conn#connection.recv_settings#settings.initial_window_size
-                               },
-                lager:debug("NewStream ~p", [NewStream]),
-                {Pid, [NewStream|Streams]};
+                NewStream = new_stream_(StreamId, Conn),
+                {NewStream#stream.pid, [NewStream|Streams]};
             Stream ->
                 {Stream#stream.pid, Streams}
         end,
@@ -748,11 +735,7 @@ route_frame({H=#frame_header{
                 promised_stream_id=PSID
                 }}=Frame,
             #connection{
-               decode_context=DecodeContext,
-               socket=Socket,
-               recv_settings=#settings{initial_window_size=RecvWindowSize},
-               send_settings=#settings{initial_window_size=SendWindowSize},
-               stream_callback_mod=CB
+               decode_context=DecodeContext
               }=Conn)
     when H#frame_header.type == ?PUSH_PROMISE ->
 
@@ -764,22 +747,8 @@ route_frame({H=#frame_header{
     Streams = Conn#connection.streams,
     Old = get_stream(StreamId, Streams),
     {ok, NotifyPid} = http2_stream:notify_pid(Old#stream.pid),
-    {ok, NewStreamPid} = http2_stream:start_link(
-                           [
-                            {stream_id, PSID},
-                            {connection, self()},
-                            {initial_recv_window_size, RecvWindowSize},
-                            {callback_module, CB},
-                            {notify_pid, NotifyPid},
-                            {socket, Socket}
-                           ]),
 
-    New = #stream{
-             id = PSID,
-             pid = NewStreamPid,
-             send_window_size =  SendWindowSize,
-             recv_window_size = RecvWindowSize
-            },
+    New = new_stream_(PSID, NotifyPid, Conn),
 
     lager:debug("[~p] recv(~p, {~p, ~p})",
                 [Conn#connection.type, Frame, StreamId, Conn]),
@@ -789,7 +758,7 @@ route_frame({H=#frame_header{
             case hpack:decode(HeadersBin, DecodeContext) of
                 {ok, {Headers, NewDecodeContext}} ->
 
-                    http2_stream:recv_pp(NewStreamPid, Headers),
+                    http2_stream:recv_pp(New#stream.pid, Headers),
 
                     {next_state, connected,
                      Conn#connection{
@@ -1171,29 +1140,10 @@ handle_sync_event({get_response, StreamId}, _F, StateName,
 handle_sync_event({new_stream, NotifyPid}, _F, StateName,
                   #connection{
                      streams=Streams,
-                     next_available_stream_id=NextId,
-                     recv_settings=#settings{initial_window_size=RecvWindowSize},
-                     send_settings=#settings{initial_window_size=SendWindowSize},
-                           stream_callback_mod=CB,
-                           socket=Socket
-                          }=Conn) ->
-    {ok, NewStreamPid} = http2_stream:start_link(
-                           [
-                            {stream_id, NextId},
-                            {connection, self()},
-                            {initial_recv_window_size, RecvWindowSize},
-                            {callback_module, CB},
-                            {notify_pid, NotifyPid},
-                            {socket, Socket}
-                           ]),
+                     next_available_stream_id=NextId
+                    }=Conn) ->
 
-    NewStream =
-        #stream{
-           id=NextId,
-           send_window_size = SendWindowSize,
-           recv_window_size = RecvWindowSize,
-           pid = NewStreamPid
-          },
+    NewStream = new_stream_(NextId, NotifyPid, Conn),
     lager:debug("[~p] added stream #~p to ~p",
                 [Conn#connection.type, NextId, Streams]),
     {reply, NextId, StateName, Conn#connection{
@@ -1562,3 +1512,27 @@ sort_streams(Streams) ->
 %-spec delete_stream(stream(), [stream()]) -> [stream()].
 %delete_stream(S, Streams) ->
 %    lists:keydelete(S#stream.id, 2, Streams).
+
+-spec new_stream_(stream_id(), connection()) -> stream().
+new_stream_(StreamId, Conn) ->
+    new_stream_(StreamId, self(), Conn).
+
+-spec new_stream_(stream_id(), pid(), connection()) -> stream().
+new_stream_(StreamId, NotifyPid, Conn) ->
+    lager:debug("Spawning new pid for stream ~p", [StreamId]),
+    {ok, Pid} = http2_stream:start_link(
+                  [
+                   {stream_id, StreamId},
+                   {connection, self()},
+                   {notify_pid, NotifyPid},
+                   {callback_module, Conn#connection.stream_callback_mod},
+                   {socket, Conn#connection.socket}
+                  ]),
+    NewStream = #stream{
+                   id = StreamId,
+                   pid = Pid,
+                   send_window_size=Conn#connection.send_settings#settings.initial_window_size,
+                   recv_window_size=Conn#connection.recv_settings#settings.initial_window_size
+                  },
+    lager:debug("NewStream ~p", [NewStream]),
+    NewStream.
