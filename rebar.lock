@@ -4,7 +4,7 @@
   1},
  {<<"hpack">>,
   {git,"git://github.com/joedevivo/hpack.git",
-       {ref,"7e105f6ce9953a234a70cba779b3ef4e938e21e0"}},
+       {ref,"3d3197d131bcc2c90e33b01b0bdc154d32a5525a"}},
   0},
  {<<"lager">>,
   {git,"git://github.com/basho/lager.git",
