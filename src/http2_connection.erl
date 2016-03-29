@@ -543,7 +543,6 @@ route_frame(F={H=#frame_header{
                        [Conn#connection.type, StreamId, L]),
             http2_frame_window_update:send(Conn#connection.socket,
                                            L, StreamId),
-            %%gen_fsm:send_all_state_event(Stream#stream.pid, {send_window_update, L}),
             send_window_update(self(), L);
         _Tried ->
             ok
@@ -1488,28 +1487,33 @@ maybe_hpack(Continuation, Conn)
         {error, compression_error} ->
             go_away(?COMPRESSION_ERROR, Conn);
         {ok, {Headers, NewDecodeContext}} ->
-            case Continuation#continuation_state.type of
-                headers ->
-                    %% If this returns 'trailers' then it had better
-                    %% also be end_stream
-                    case {
-                      http2_stream:recv_h(Stream#stream.pid, Headers),
-                      Continuation#continuation_state.end_stream
-                      } of
-                        {trailers, false} ->
-                            rst_stream(Stream#stream.id, ?PROTOCOL_ERROR, Conn);
-                        _ -> ok
-                    end;
-                push_promise ->
-                    Promised = get_stream(Continuation#continuation_state.promised_id,
-                                          Conn#connection.streams),
-                    http2_stream:recv_pp(Promised#stream.pid, Headers)
-            end,
-            case Continuation#continuation_state.end_stream of
-                true ->
-                    http2_stream:recv_es(Stream#stream.pid);
-                false ->
-                    ok
+            case good_headers(Headers) of
+                {error, Code} ->
+                    rst_stream(Stream#stream.id, Code, Conn);
+                ok ->
+                    case Continuation#continuation_state.type of
+                        headers ->
+                            %% If this returns 'trailers' then it had better
+                            %% also be end_stream
+                            case {
+                              http2_stream:recv_h(Stream#stream.pid, Headers),
+                              Continuation#continuation_state.end_stream
+                             } of
+                                {trailers, false} ->
+                                    rst_stream(Stream#stream.id, ?PROTOCOL_ERROR, Conn);
+                                _ -> ok
+                            end;
+                        push_promise ->
+                            Promised = get_stream(Continuation#continuation_state.promised_id,
+                                                  Conn#connection.streams),
+                            http2_stream:recv_pp(Promised#stream.pid, Headers)
+                    end,
+                    case Continuation#continuation_state.end_stream of
+                        true ->
+                            http2_stream:recv_es(Stream#stream.pid);
+                        false ->
+                            ok
+                    end
             end,
             {next_state, connected,
              Conn#connection{
@@ -1522,3 +1526,28 @@ maybe_hpack(Continuation, Conn) ->
      Conn#connection{
        continuation = Continuation
       }}.
+
+%% A set of headers is "good" if:
+%% * No names contain uppercase letters
+%% * No psuedoheaders are duplicated
+%% * No psuedoheaders occur after a normal header
+%% * Only acceptable psuedoheaders are:
+%%     :method, :scheme, :authority, :path,
+
+good_headers(Headers) ->
+    case
+        no_upper_names(Headers)
+    of
+        true ->
+            ok;
+        false ->
+            {error, ?PROTOCOL_ERROR}
+    end.
+
+no_upper_names(Headers) ->
+    lists:all(
+      fun({Name,_}) ->
+              NameStr = binary_to_list(Name),
+              NameStr =:= string:to_lower(NameStr)
+      end,
+     Headers).
