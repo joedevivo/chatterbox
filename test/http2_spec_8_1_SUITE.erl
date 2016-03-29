@@ -73,10 +73,10 @@ sends_second_headers_with_no_end_stream(_Config) ->
 
     http2c:send_unaltered_frames(Client, [HF, Data, TF]),
 
-    Resp = http2c:wait_for_n_frames(Client, 1, 1),
+    Resp = http2c:wait_for_n_frames(Client, 1, 2),
     ct:pal("Resp: ~p", [Resp]),
-    ?assertEqual(1, length(Resp)),
-    [{Header, Payload}] = Resp,
+    ?assertEqual(2, length(Resp)),
+    [_WindowUpdate,{Header, Payload}] = Resp,
     ?assertEqual(?RST_STREAM, Header#frame_header.type),
     ?assertEqual(?PROTOCOL_ERROR, Payload#rst_stream.error_code),
     ok.
