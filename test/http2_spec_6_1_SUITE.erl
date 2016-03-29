@@ -45,19 +45,6 @@ sends_data_with_invalid_pad_length(_Config) ->
         }
      },
 
-
-%    L = byte_size(Data)+1,
-%    PaddedData = <<L,Data/binary>>,
-%    DF = {
-%      #frame_header{
-%         stream_id=1,
-%         flags=?FLAG_END_STREAM bor ?FLAG_PADDED
-%        },
-%      #data{
-%         data=PaddedData
-%        }
-%     },
-
     http2c:send_unaltered_frames(Client, [HF]),
     http2c:send_binary(
       Client,

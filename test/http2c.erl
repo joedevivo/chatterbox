@@ -96,6 +96,7 @@ wait_for_n_frames(Pid, StreamId, N, Attempts, Acc) ->
 
     case length(Frames) >= N of
         true ->
+            lager:info("Frames: ~p ~p", [N, Frames]),
             ?assertEqual(N, length(Frames)),
             Frames;
         false ->

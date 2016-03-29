@@ -59,10 +59,12 @@
          }).
 
 -record(continuation_state, {
-          stream_id = undefined :: stream_id() | undefined,
-          frames = undefined :: queue:queue(frame()),
-          type = undefined :: undefined | headers | push_promise,
-          end_stream = false :: boolean()
+          stream_id                 :: stream_id(),
+          promised_id = undefined   :: undefined | stream_id(),
+          frames      = queue:new() :: queue:queue(frame()),
+          type                      :: headers | push_promise,
+          end_stream  = false       :: boolean(),
+          end_headers = false       :: boolean()
 }).
 
 
@@ -541,7 +543,7 @@ route_frame(F={H=#frame_header{
                        [Conn#connection.type, StreamId, L]),
             http2_frame_window_update:send(Conn#connection.socket,
                                            L, StreamId),
-            gen_fsm:send_all_state_event(Stream#stream.pid, {send_window_update, L}),
+            %%gen_fsm:send_all_state_event(Stream#stream.pid, {send_window_update, L}),
             send_window_update(self(), L);
         _Tried ->
             ok
@@ -577,7 +579,7 @@ route_frame({#frame_header{type=?HEADERS}=FH, _Payload}=Frame,
     lager:debug("[~p] Received HEADERS Frame for Stream ~p",
                 [Conn#connection.type, StreamId]),
 
-    %% Three things could be happening here.
+    %% Four things could be happening here.
 
     %% 1. We're a server, and these are Request Headers.
 
@@ -586,71 +588,47 @@ route_frame({#frame_header{type=?HEADERS}=FH, _Payload}=Frame,
     %% 3. We're a client, and these are Response Headers, but the
     %% response is to a Push Promise
 
+    %% 4. We're a server and these are Request Trailers :/
+
     %% Fortunately, the only thing we need to do here is create a new
     %% stream if this is the first scenario. The stream will already
     %% exist if this is a PP or Response
 
-    {StreamPid, NewStreams} =
+    NewConn =
         case get_stream(StreamId, Streams) of
             false ->
-                lager:debug("Spawning new pid for stream ~p", [StreamId]),
-                {ok, Pid} = http2_stream:start_link(
-                              [
-                               {stream_id, StreamId},
-                               {connection, self()},
-                               {initial_recv_window_size, Conn#connection.recv_settings#settings.initial_window_size},
-                               {callback_module, Conn#connection.stream_callback_mod},
-                               {socket, Conn#connection.socket}
-                             ]),
-                NewStream = #stream{
-                               id = StreamId,
-                               pid = Pid,
-                               send_window_size=Conn#connection.send_settings#settings.initial_window_size,
-                               recv_window_size=Conn#connection.recv_settings#settings.initial_window_size
-                               },
-                lager:debug("NewStream ~p", [NewStream]),
-                {Pid, [NewStream|Streams]};
-            Stream ->
-                {Stream#stream.pid, Streams}
+                NewStream = new_stream_(StreamId, Conn),
+                Conn#connection{streams=[NewStream|Streams]};
+            _Stream ->
+                Conn
         end,
 
-    % Is ths all to the stream?
-    Flags = FH#frame_header.flags,
-    EndStream = ?IS_FLAG(Flags, ?FLAG_END_STREAM),
+    %% If there's an END_HEADERS flag, the headers were only one
+    %% frame.
 
-    %% We spawned an idle stream if it didn't exist.
-    case ?IS_FLAG(Flags, ?FLAG_END_HEADERS) of
-        true ->
-            HeadersBin = http2_frame_headers:from_frames([Frame]),
-            case hpack:decode(HeadersBin, Conn#connection.decode_context) of
-                {ok, {Headers, NewDecodeContext}} ->
-                    http2_stream:recv_h(StreamPid, Headers),
-                    case EndStream of
-                        true ->
-                            http2_stream:recv_es(StreamPid);
-                        false ->
-                            ok
-                    end,
-                    {next_state, connected,
-                     Conn#connection{
-                       streams = NewStreams,
-                       decode_context=NewDecodeContext
-                      }};
-                {error, compression_error} ->
-                    go_away(?COMPRESSION_ERROR, Conn)
-            end;
-        false ->
-            {next_state, continuation,
-             Conn#connection{
-               streams = NewStreams,
-               continuation = #continuation_state{
-                                 stream_id = StreamId,
-                                 frames = queue:from_list([Frame]),
-                                 end_stream = EndStream,
-                                 type=headers
-                                }
-              }}
-    end;
+    %% If not, we have to wait for all the CONTINUATIONS to roll in.
+
+    %% If there's an END_STREAM flag set AND END_HEADERS, we're done
+    %% with the request.
+
+    %% If there's and END_STREAM and no END_HEADERS, we'll be done
+    %% once those CONTINUATIONS arrive
+
+    %% So what do we do? We construct a #continuation record that
+    %% covers a whole bunch of things and is run through a function
+    %% when every HEADERS, PUSH_PROMISE, or CONTINUATION rolls
+    %% in. Let's give it a whirl.
+
+    ContinuationState =
+        #continuation_state{
+           type = headers,
+           frames = queue:from_list([Frame]),
+           end_stream = ?IS_FLAG(FH#frame_header.flags, ?FLAG_END_STREAM),
+           end_headers = ?IS_FLAG(FH#frame_header.flags, ?FLAG_END_HEADERS),
+           stream_id = StreamId
+          },
+
+    maybe_hpack(ContinuationState, NewConn);
 route_frame(F={H=#frame_header{
                     stream_id=StreamId,
                     type=?CONTINUATION
@@ -658,52 +636,17 @@ route_frame(F={H=#frame_header{
             #connection{
                continuation = #continuation_state{
                                  frames = CFQ,
-                                 stream_id = StreamId,
-                                 end_stream = EndStream,
-                                 type=ContType
+                                 stream_id = StreamId
                                 } = Cont
               }=Conn) ->
     lager:debug("[~p] Received CONTINUATION Frame for Stream ~p",
                 [Conn#connection.type, StreamId]),
 
-    Streams=Conn#connection.streams,
-    Stream = get_stream(StreamId, Streams),
-
-    Queue = queue:in(F, CFQ),
-
-    case ?IS_FLAG(H#frame_header.flags, ?FLAG_END_HEADERS) of
-        true ->
-            HeadersBin = http2_frame_headers:from_frames(queue:to_list(Queue)),
-            DecodeContext = Conn#connection.decode_context,
-            case hpack:decode(HeadersBin, DecodeContext) of
-                {ok, {Headers, NewDecodeContext}} ->
-
-                    case ContType of
-                        headers ->
-                            http2_stream:recv_h(Stream#stream.pid, Headers);
-                        push_promise ->
-                            http2_stream:recv_pp(Stream#stream.pid, Headers)
-                    end,
-                    case EndStream of
-                        true ->
-                            http2_stream:recv_es(Stream#stream.pid);
-                        false ->
-                            ok
-                    end,
-                    {next_state, connected,
-                     Conn#connection{
-                       decode_context=NewDecodeContext,
-                       continuation=undefined
-                      }};
-                {error, compression_error} ->
-                    go_away(?COMPRESSION_ERROR, Conn)
-            end;
-        false ->
-            {next_state, continuation,
-             Conn#connection{
-               continuation=Cont#continuation_state{frames = Queue}
-              }}
-    end;
+    maybe_hpack(Cont#continuation_state{
+                  frames=queue:in(F, CFQ),
+                  end_headers=?IS_FLAG(H#frame_header.flags, ?FLAG_END_HEADERS)
+                 },
+                Conn);
 
 route_frame({H, _Payload},
             #connection{}=Conn)
@@ -741,74 +684,38 @@ route_frame(
             {next_state, connected, Conn}
     end;
 route_frame({H=#frame_header{
-                  stream_id=StreamId,
-                  flags=Flags
+                  stream_id=StreamId
                  },
              #push_promise{
                 promised_stream_id=PSID
                 }}=Frame,
-            #connection{
-               decode_context=DecodeContext,
-               socket=Socket,
-               recv_settings=#settings{initial_window_size=RecvWindowSize},
-               send_settings=#settings{initial_window_size=SendWindowSize},
-               stream_callback_mod=CB
-              }=Conn)
+            #connection{}=Conn)
     when H#frame_header.type == ?PUSH_PROMISE ->
 
-    %% TODO OOOOOOOOOOOPS! PUSH_PROMISE can have continuations too!
-    %% will need rework after this refactor, issue #10
     lager:debug("[~p] Received PUSH_PROMISE Frame on Stream ~p for Stream ~p",
                 [Conn#connection.type, StreamId, PSID]),
 
     Streams = Conn#connection.streams,
     Old = get_stream(StreamId, Streams),
     {ok, NotifyPid} = http2_stream:notify_pid(Old#stream.pid),
-    {ok, NewStreamPid} = http2_stream:start_link(
-                           [
-                            {stream_id, PSID},
-                            {connection, self()},
-                            {initial_recv_window_size, RecvWindowSize},
-                            {callback_module, CB},
-                            {notify_pid, NotifyPid},
-                            {socket, Socket}
-                           ]),
 
-    New = #stream{
-             id = PSID,
-             pid = NewStreamPid,
-             send_window_size =  SendWindowSize,
-             recv_window_size = RecvWindowSize
-            },
+    New = new_stream_(PSID, NotifyPid, Conn),
 
     lager:debug("[~p] recv(~p, {~p, ~p})",
                 [Conn#connection.type, Frame, StreamId, Conn]),
-    case ?IS_FLAG(Flags, ?FLAG_END_HEADERS) of
-        true ->
-            HeadersBin = http2_frame_headers:from_frames([Frame]),
-            case hpack:decode(HeadersBin, DecodeContext) of
-                {ok, {Headers, NewDecodeContext}} ->
 
-                    http2_stream:recv_pp(NewStreamPid, Headers),
+    Continuation = #continuation_state{
+                      stream_id=StreamId,
+                      type=push_promise,
+                      frames = queue:in(Frame, queue:new()),
+                      end_headers=?IS_FLAG(H#frame_header.flags, ?FLAG_END_HEADERS),
+                      promised_id=PSID
+                     },
 
-                    {next_state, connected,
-                     Conn#connection{
-                       decode_context=NewDecodeContext,
-                       streams=[New|Streams]}};
-                {error, compression_error} ->
-                    go_away(?COMPRESSION_ERROR, Conn)
-            end;
-        false ->
-            {next_state, continuation,
-             Conn#connection{
-               continuation = #continuation_state{
-                                 stream_id = StreamId,
-                                 frames = queue:from_list([Frame]),
-                                 type = push_promise
-                                 },
-               streams=[New|Streams]
-              }}
-    end;
+    maybe_hpack(Continuation,
+                Conn#connection{
+                  streams = [New|Streams]
+                 });
 
 %% PING
 
@@ -1171,29 +1078,10 @@ handle_sync_event({get_response, StreamId}, _F, StateName,
 handle_sync_event({new_stream, NotifyPid}, _F, StateName,
                   #connection{
                      streams=Streams,
-                     next_available_stream_id=NextId,
-                     recv_settings=#settings{initial_window_size=RecvWindowSize},
-                     send_settings=#settings{initial_window_size=SendWindowSize},
-                           stream_callback_mod=CB,
-                           socket=Socket
-                          }=Conn) ->
-    {ok, NewStreamPid} = http2_stream:start_link(
-                           [
-                            {stream_id, NextId},
-                            {connection, self()},
-                            {initial_recv_window_size, RecvWindowSize},
-                            {callback_module, CB},
-                            {notify_pid, NotifyPid},
-                            {socket, Socket}
-                           ]),
+                     next_available_stream_id=NextId
+                    }=Conn) ->
 
-    NewStream =
-        #stream{
-           id=NextId,
-           send_window_size = SendWindowSize,
-           recv_window_size = RecvWindowSize,
-           pid = NewStreamPid
-          },
+    NewStream = new_stream_(NextId, NotifyPid, Conn),
     lager:debug("[~p] added stream #~p to ~p",
                 [Conn#connection.type, NextId, Streams]),
     {reply, NextId, StateName, Conn#connection{
@@ -1562,3 +1450,75 @@ sort_streams(Streams) ->
 %-spec delete_stream(stream(), [stream()]) -> [stream()].
 %delete_stream(S, Streams) ->
 %    lists:keydelete(S#stream.id, 2, Streams).
+
+-spec new_stream_(stream_id(), connection()) -> stream().
+new_stream_(StreamId, Conn) ->
+    new_stream_(StreamId, self(), Conn).
+
+-spec new_stream_(stream_id(), pid(), connection()) -> stream().
+new_stream_(StreamId, NotifyPid, Conn) ->
+    lager:debug("Spawning new pid for stream ~p", [StreamId]),
+    {ok, Pid} = http2_stream:start_link(
+                  [
+                   {stream_id, StreamId},
+                   {connection, self()},
+                   {notify_pid, NotifyPid},
+                   {callback_module, Conn#connection.stream_callback_mod},
+                   {socket, Conn#connection.socket}
+                  ]),
+    NewStream = #stream{
+                   id = StreamId,
+                   pid = Pid,
+                   send_window_size=Conn#connection.send_settings#settings.initial_window_size,
+                   recv_window_size=Conn#connection.recv_settings#settings.initial_window_size
+                  },
+    lager:debug("NewStream ~p", [NewStream]),
+    NewStream.
+
+-spec maybe_hpack(#continuation_state{}, connection()) ->
+                         {next_state, atom(), connection()}.
+maybe_hpack(Continuation, Conn)
+  when Continuation#continuation_state.end_headers ->
+    Stream = get_stream(Continuation#continuation_state.stream_id,
+                        Conn#connection.streams),
+
+    HeadersBin = http2_frame_headers:from_frames(
+                   queue:to_list(Continuation#continuation_state.frames)),
+    case hpack:decode(HeadersBin, Conn#connection.decode_context) of
+        {error, compression_error} ->
+            go_away(?COMPRESSION_ERROR, Conn);
+        {ok, {Headers, NewDecodeContext}} ->
+            case Continuation#continuation_state.type of
+                headers ->
+                    %% If this returns 'trailers' then it had better
+                    %% also be end_stream
+                    case {
+                      http2_stream:recv_h(Stream#stream.pid, Headers),
+                      Continuation#continuation_state.end_stream
+                      } of
+                        {trailers, false} ->
+                            rst_stream(Stream#stream.id, ?PROTOCOL_ERROR, Conn);
+                        _ -> ok
+                    end;
+                push_promise ->
+                    Promised = get_stream(Continuation#continuation_state.promised_id,
+                                          Conn#connection.streams),
+                    http2_stream:recv_pp(Promised#stream.pid, Headers)
+            end,
+            case Continuation#continuation_state.end_stream of
+                true ->
+                    http2_stream:recv_es(Stream#stream.pid);
+                false ->
+                    ok
+            end,
+            {next_state, connected,
+             Conn#connection{
+               decode_context=NewDecodeContext,
+               continuation=undefined
+              }}
+    end;
+maybe_hpack(Continuation, Conn) ->
+    {next_state, continuation,
+     Conn#connection{
+       continuation = Continuation
+      }}.
