@@ -16,6 +16,7 @@
 -export([
          send_headers/3,
          send_body/3,
+         send_body/4,
          is_push/1,
          new_stream/1,
          new_stream/2,
@@ -99,6 +100,11 @@
 }).
 
 -type connection() :: #connection{}.
+
+-type send_body_option() :: {send_rst_stream, boolean()}.
+-type send_body_opts() :: [send_body_option()].
+
+-export_type([send_body_option/0, send_body_opts/0]).
 
 -spec start_client_link(gen_tcp | ssl,
                         inet:ip_address() | inet:hostname(),
@@ -210,6 +216,12 @@ send_headers(Pid, StreamId, Headers) ->
 send_body(Pid, StreamId, Body) ->
     gen_fsm:send_all_state_event(Pid, {send_body, StreamId, Body}),
     ok.
+-spec send_body(pid(), stream_id(), binary(), send_body_opts()) -> ok.
+send_body(Pid, StreamId, Body, _Opts) ->
+    gen_fsm:send_all_state_event(Pid, {send_body, StreamId, Body}),
+    ok.
+
+
 
 -spec get_peer(pid()) ->
     {ok, {inet:ip_address(), inet:port_number()}} | {error, term()}.
