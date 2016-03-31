@@ -144,5 +144,5 @@ send_body_opts(_Config) ->
     {ok, {ResponseHeaders, ResponseBody}} = http2_client:sync_request(Client, RequestHeaders, <<>>),
     ct:pal("Response Headers: ~p", [ResponseHeaders]),
     ct:pal("Response Body: ~p", [ResponseBody]),
-    ?assertEqual(ExpectedResponseBody, ResponseBody),
+    ?assertEqual(ExpectedResponseBody, iolist_to_binary(ResponseBody)),
     ok.

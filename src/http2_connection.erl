@@ -74,7 +74,8 @@
           pid :: pid(),
           send_window_size :: non_neg_integer(),
           recv_window_size :: non_neg_integer(),
-          queued_data :: undefined | done | binary()
+          queued_data :: undefined | done | binary(),
+          done_body = false :: boolean()
          }).
 -type stream() :: #stream{}.
 
@@ -214,11 +215,11 @@ send_headers(Pid, StreamId, Headers) ->
 
 -spec send_body(pid(), stream_id(), binary()) -> ok.
 send_body(Pid, StreamId, Body) ->
-    gen_fsm:send_all_state_event(Pid, {send_body, StreamId, Body}),
+    gen_fsm:send_all_state_event(Pid, {send_body, StreamId, Body, []}),
     ok.
 -spec send_body(pid(), stream_id(), binary(), send_body_opts()) -> ok.
-send_body(Pid, StreamId, Body, _Opts) ->
-    gen_fsm:send_all_state_event(Pid, {send_body, StreamId, Body}),
+send_body(Pid, StreamId, Body, Opts) ->
+    gen_fsm:send_all_state_event(Pid, {send_body, StreamId, Body, Opts}),
     ok.
 
 
@@ -914,10 +915,14 @@ s_send_what_we_can(SWS, MFS, Stream) ->
     {Frame, SentBytes, NewS} =
         case MaxToSend > QueueSize of
             true ->
+                Flags = case Stream#stream.done_body of
+                         true -> ?FLAG_END_STREAM;
+                         false -> 0
+                        end,
                 %% We have the power to send everything
                 {{#frame_header{
                      stream_id=Stream#stream.id,
-                     flags=?FLAG_END_STREAM,
+                     flags=Flags,
                      type=?DATA,
                      length=QueueSize
                     },
@@ -994,17 +999,19 @@ handle_event({send_headers, StreamId, Headers},
      Conn#connection{
        encode_context=NewContext
       }};
-handle_event({send_body, StreamId, Body},
+handle_event({send_body, StreamId, Body, Opts},
              StateName,
              #connection{}=Conn) ->
     lager:debug("[~p] Send Body Stream ~p",
                 [Conn#connection.type, StreamId]),
     Stream = get_stream(StreamId, Conn#connection.streams),
+    DoneBody = proplists:get_value(send_rst_stream, Opts, true),
     {NewSWS, NewS} =
         s_send_what_we_can(Conn#connection.send_window_size,
                            Conn#connection.send_settings#settings.max_frame_size,
                            Stream#stream{
-                            queued_data=Body
+                            queued_data=Body,
+                            done_body=DoneBody
                             }),
 
     {next_state, StateName,
