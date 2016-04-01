@@ -75,7 +75,7 @@
           send_window_size :: non_neg_integer(),
           recv_window_size :: non_neg_integer(),
           queued_data :: undefined | done | binary(),
-          done_body = false :: boolean()
+          body_complete = false :: boolean()
          }).
 -type stream() :: #stream{}.
 
@@ -102,7 +102,7 @@
 
 -type connection() :: #connection{}.
 
--type send_body_option() :: {send_rst_stream, boolean()}.
+-type send_body_option() :: {send_end_stream, boolean()}.
 -type send_body_opts() :: [send_body_option()].
 
 -export_type([send_body_option/0, send_body_opts/0]).
@@ -915,7 +915,7 @@ s_send_what_we_can(SWS, MFS, Stream) ->
     {Frame, SentBytes, NewS} =
         case MaxToSend > QueueSize of
             true ->
-                Flags = case Stream#stream.done_body of
+                Flags = case Stream#stream.body_complete of
                          true -> ?FLAG_END_STREAM;
                          false -> 0
                         end,
@@ -1005,13 +1005,13 @@ handle_event({send_body, StreamId, Body, Opts},
     lager:debug("[~p] Send Body Stream ~p",
                 [Conn#connection.type, StreamId]),
     Stream = get_stream(StreamId, Conn#connection.streams),
-    DoneBody = proplists:get_value(send_rst_stream, Opts, true),
+    BodyComplete = proplists:get_value(send_end_stream, Opts, true),
     {NewSWS, NewS} =
         s_send_what_we_can(Conn#connection.send_window_size,
                            Conn#connection.send_settings#settings.max_frame_size,
                            Stream#stream{
                             queued_data=Body,
-                            done_body=DoneBody
+                            body_complete=BodyComplete
                             }),
 
     {next_state, StateName,

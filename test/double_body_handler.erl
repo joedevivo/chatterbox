@@ -45,7 +45,7 @@ on_request_end_stream(State=#state{conn_pid=ConnPid,
                       ],
     http2_connection:send_headers(ConnPid, StreamId, ResponseHeaders),
     http2_connection:send_body(ConnPid, StreamId, <<"BodyPart1\n">>,
-                               [{send_rst_stream, false}]),
+                               [{send_end_stream, false}]),
     http2_connection:send_body(ConnPid, StreamId, <<"BodyPart2">>),
     {ok, State}.
 
