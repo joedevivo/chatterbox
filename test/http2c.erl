@@ -138,7 +138,8 @@ init([]) ->
     {_SSH, ServerSettings} = http2_frame:read({Transport, Socket}, 1000),
     http2_frame_settings:ack({Transport, Socket}),
 
-    ClientSettings = #settings{},
+    ClientSettings = chatterbox:settings(client),
+    lager:debug("[client] settings: ~p", [http2_settings:to_proplist(ClientSettings)]),
 
     BinToSend = http2_frame_settings:send(#settings{}, ClientSettings),
     Transport:send(Socket, BinToSend),

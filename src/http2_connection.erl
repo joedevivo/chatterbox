@@ -440,8 +440,10 @@ route_frame({H, Payload},
             Delta =
                 case proplists:get_value(?SETTINGS_INITIAL_WINDOW_SIZE, PList) of
                     undefined ->
+                        lager:debug("[~p] IWS undefined", [Conn#connection.type]),
                         0;
                     NewIWS ->
+                        lager:debug("old IWS: ~p new IWS: ~p", [OldIWS, NewIWS]),
                         OldIWS - NewIWS
                 end,
             NewSendSettings = http2_frame_settings:overlay(SS, Payload),
@@ -1006,11 +1008,16 @@ handle_event({send_body, StreamId, Body, Opts},
                 [Conn#connection.type, StreamId]),
     Stream = get_stream(StreamId, Conn#connection.streams),
     BodyComplete = proplists:get_value(send_end_stream, Opts, true),
+    OldBody = Stream#stream.queued_data,
+    NewBody = case is_binary(OldBody) of
+                   true -> <<OldBody/binary, Body/binary>>;
+                   false -> Body
+              end,
     {NewSWS, NewS} =
         s_send_what_we_can(Conn#connection.send_window_size,
                            Conn#connection.send_settings#settings.max_frame_size,
                            Stream#stream{
-                            queued_data=Body,
+                            queued_data=NewBody,
                             body_complete=BodyComplete
                             }),
 
