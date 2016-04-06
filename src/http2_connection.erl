@@ -1532,7 +1532,7 @@ maybe_hpack(Continuation, Conn) ->
 good_req_headers(Headers) ->
     case
         no_upper_names(Headers) andalso
-        all_pseudos_first(Headers)
+        validate_pseudos(Headers)
     of
         true ->
             ok;
@@ -1548,19 +1548,20 @@ no_upper_names(Headers) ->
       end,
      Headers).
 
-all_pseudos_first(Headers) ->
-    Tail = lists:dropwhile(
-             fun({<<$:, _/binary>>, _}) ->
-                     true;
-                (_) -> false
-             end,
-             Headers),
-    no_pseudos_left(Tail).
-
-no_pseudos_left(Headers) ->
+validate_pseudos([{<<":path">>,_V}|Tail]) ->
+    validate_pseudos(Tail);
+validate_pseudos([{<<":method">>,_V}|Tail]) ->
+    validate_pseudos(Tail);
+validate_pseudos([{<<":scheme">>,_V}|Tail]) ->
+    validate_pseudos(Tail);
+validate_pseudos([{<<":authority">>,_V}|Tail]) ->
+    validate_pseudos(Tail);
+validate_pseudos(DoneWithPseudos) ->
     lists:all(
       fun({<<$:, _/binary>>, _}) ->
               false;
          (_) -> true
       end,
-      Headers).
+      DoneWithPseudos)
+        andalso
+        no_upper_names(DoneWithPseudos).
