@@ -34,14 +34,12 @@
 
 %% gen_fsm states
 -export([
-         idle/3,
          idle/2,
          reserved_local/2,
-         reserved_remote/3,
+         reserved_remote/2,
          open/2,
          open/3,
          half_closed_local/2,
-         half_closed_local/3,
          half_closed_remote/2,
          half_closed_remote/3,
          closed/3
@@ -140,7 +138,7 @@ start_link(StreamOptions) ->
 -spec recv_h(pid(), hpack:headers()) ->
                     ok | trailers.
 recv_h(Pid, Headers) ->
-    gen_fsm:sync_send_event(Pid, {recv_h, Headers}).
+    gen_fsm:send_event(Pid, {recv_h, Headers}).
 
 -spec send_h(pid(), hpack:headers()) ->
                     ok.
@@ -239,24 +237,19 @@ init(StreamOptions) ->
 %% drove me crazy until I figured it out
 
 %% Server 'RECV H'
-%%idle/3
 idle({recv_h, Headers},
-     _From,
      #stream_state{
         callback_mod=CB,
         callback_state=CallbackState
        }=Stream) ->
     {ok, NewCBState} = CB:on_receive_request_headers(Headers, CallbackState),
-    {reply,
-     ok,
+    {next_state,
      open,
      Stream#stream_state{
        request_headers=Headers,
        callback_state=NewCBState
-      }}.
-
+      }};
 %% Server 'SEND PP'
-%% idle/2
 idle({send_pp, Headers},
      #stream_state{
         callback_mod=CB,
@@ -315,11 +308,9 @@ reserved_local({send_h, Headers},
       }}.
 
 reserved_remote({recv_h, Headers},
-                _From,
                 #stream_state{
                   }=Stream) ->
-    {reply,
-     ok,
+    {next_state,
      half_closed_local,
      Stream#stream_state{
        response_headers=Headers
@@ -377,19 +368,17 @@ open({recv_frame,
        request_end_stream=true,
        callback_state=NewCBState
       }};
-open(Msg, Stream) ->
-    lager:warning("Some unexpected message in open state. ~p, ~p", [Msg, Stream]),
-    {next_state, open, Stream}.
-
+%% Trailers
 open({recv_h, Trailers},
-     _From,
      #stream_state{}=Stream) ->
-    {reply,
-     trailers,
+    {next_state,
      open,
      Stream#stream_state{
        request_headers=Stream#stream_state.request_headers ++ Trailers
       }};
+open(Msg, Stream) ->
+    lager:warning("Some unexpected message in open state. ~p, ~p", [Msg, Stream]),
+    {next_state, open, Stream}.
 
 open({send_frame,
       {#frame_header{
@@ -450,13 +439,12 @@ half_closed_remote(
 %% hope!
 half_closed_local(
   {recv_h, Headers},
-  _From,
   #stream_state{
     }=Stream) ->
-    {reply, ok,
+    {next_state,
      half_closed_local,
      Stream#stream_state{
-       response_headers=Headers}}.
+       response_headers=Headers}};
 
 half_closed_local(
   {recv_frame,

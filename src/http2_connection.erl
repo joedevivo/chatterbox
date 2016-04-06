@@ -62,7 +62,7 @@
           stream_id                 :: stream_id(),
           promised_id = undefined   :: undefined | stream_id(),
           frames      = queue:new() :: queue:queue(frame()),
-          type                      :: headers | push_promise,
+          type                      :: headers | push_promise | trailers,
           end_stream  = false       :: boolean(),
           end_headers = false       :: boolean()
 }).
@@ -580,26 +580,23 @@ route_frame({#frame_header{type=?HEADERS}=FH, _Payload}=Frame,
 
     %% Four things could be happening here.
 
-    %% 1. We're a server, and these are Request Headers.
+    %% If we're a server, these are either Request Headers or Request
+    %% Trailers
 
-    %% 2. We're a client, and these are Response Headers.
+    %% If we're a client, these are Response Headers or Response
+    %% Headers, but the response is to a Push Promise
 
-    %% 3. We're a client, and these are Response Headers, but the
-    %% response is to a Push Promise
 
-    %% 4. We're a server and these are Request Trailers :/
 
-    %% Fortunately, the only thing we need to do here is create a new
-    %% stream if this is the first scenario. The stream will already
-    %% exist if this is a PP or Response
-
-    NewConn =
-        case get_stream(StreamId, Streams) of
-            false ->
+    {ContinuationType, NewConn} =
+        case {get_stream(StreamId, Streams), Conn#connection.type} of
+            {false, server} ->
                 NewStream = new_stream_(StreamId, Conn),
-                Conn#connection{streams=[NewStream|Streams]};
-            _Stream ->
-                Conn
+                {headers, Conn#connection{streams=[NewStream|Streams]}};
+            {_Stream, server} ->
+                {trailers, Conn};
+            _ ->
+                {headers, Conn}
         end,
 
     %% If there's an END_HEADERS flag, the headers were only one
@@ -620,7 +617,7 @@ route_frame({#frame_header{type=?HEADERS}=FH, _Payload}=Frame,
 
     ContinuationState =
         #continuation_state{
-           type = headers,
+           type = ContinuationType,
            frames = queue:from_list([Frame]),
            end_stream = ?IS_FLAG(FH#frame_header.flags, ?FLAG_END_STREAM),
            end_headers = ?IS_FLAG(FH#frame_header.flags, ?FLAG_END_HEADERS),
@@ -1491,19 +1488,19 @@ maybe_hpack(Continuation, Conn)
                 {error, Code} ->
                     rst_stream(Stream#stream.id, Code, Conn);
                 ok ->
-                    case Continuation#continuation_state.type of
-                        headers ->
-                            %% If this returns 'trailers' then it had better
-                            %% also be end_stream
-                            case {
-                              http2_stream:recv_h(Stream#stream.pid, Headers),
-                              Continuation#continuation_state.end_stream
-                             } of
-                                {trailers, false} ->
-                                    rst_stream(Stream#stream.id, ?PROTOCOL_ERROR, Conn);
-                                _ -> ok
-                            end;
-                        push_promise ->
+                    case {Continuation#continuation_state.type,
+                          Continuation#continuation_state.end_stream} of
+                        {headers, _} ->
+                            http2_stream:recv_h(Stream#stream.pid, Headers),
+                            ok;
+                        %% If this returns 'trailers' then it had better
+                        %% also be end_stream
+                        {trailers, false} ->
+                            rst_stream(Stream#stream.id, ?PROTOCOL_ERROR, Conn);
+                        {trailers, true} ->
+                            http2_stream:recv_h(Stream#stream.pid, Headers),
+                            ok;
+                        {push_promise, _} ->
                             Promised = get_stream(Continuation#continuation_state.promised_id,
                                                   Conn#connection.streams),
                             http2_stream:recv_pp(Promised#stream.pid, Headers)

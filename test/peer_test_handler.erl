@@ -27,7 +27,7 @@ init(ConnPid, StreamId) -> {ok, #state{conn_pid=ConnPid,
             CallbackState :: any()) -> {ok, NewState :: any()}.
 on_receive_request_headers(_Headers, State=#state{conn_pid=ConnPid}) ->
     {ok, Peer} = http2_connection:get_peer(ConnPid),
-    State#state{peer=Peer}.
+    {ok, State#state{peer=Peer}}.
 
 -spec on_send_push_promise(
             Headers :: hpack:headers(),
@@ -52,4 +52,3 @@ on_request_end_stream(State=#state{conn_pid=ConnPid,
     http2_connection:send_headers(ConnPid, StreamId, ResponseHeaders),
     http2_connection:send_body(ConnPid, StreamId, Body),
     {ok, State}.
-
