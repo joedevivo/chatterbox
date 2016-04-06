@@ -1537,7 +1537,7 @@ maybe_hpack(Continuation, Conn) ->
 good_req_headers(Headers) ->
     case
         no_upper_names(Headers) andalso
-        all_psuedos_first(Headers)
+        all_pseudos_first(Headers)
     of
         true ->
             ok;
@@ -1553,16 +1553,16 @@ no_upper_names(Headers) ->
       end,
      Headers).
 
-all_psuedos_first(Headers) ->
+all_pseudos_first(Headers) ->
     Tail = lists:dropwhile(
              fun({<<$:, _/binary>>, _}) ->
                      true;
                 (_) -> false
              end,
              Headers),
-    no_psuedos_left(Tail).
+    no_pseudos_left(Tail).
 
-no_psuedos_left(Headers) ->
+no_pseudos_left(Headers) ->
     lists:all(
       fun({<<$:, _/binary>>, _}) ->
               false;
