@@ -580,13 +580,11 @@ route_frame({#frame_header{type=?HEADERS}=FH, _Payload}=Frame,
 
     %% Four things could be happening here.
 
-    %% If we're a server, these are either Request Headers or Request
-    %% Trailers
+    %% If we're a server, these are either request headers or request
+    %% trailers
 
-    %% If we're a client, these are Response Headers or Response
-    %% Headers, but the response is to a Push Promise
-
-
+    %% If we're a client, these are either headers in response to a
+    %% client request, or headers in response to a push promise
 
     {ContinuationType, NewConn} =
         case {get_stream(StreamId, Streams), Conn#connection.type} of
