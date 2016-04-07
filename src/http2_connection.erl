@@ -444,7 +444,7 @@ route_frame({H, Payload},
                         0;
                     NewIWS ->
                         lager:debug("old IWS: ~p new IWS: ~p", [OldIWS, NewIWS]),
-                        OldIWS - NewIWS
+                        NewIWS - OldIWS
                 end,
             NewSendSettings = http2_frame_settings:overlay(SS, Payload),
             %% We've just got connection settings from a peer. He have a

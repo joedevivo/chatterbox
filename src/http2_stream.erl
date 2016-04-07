@@ -330,7 +330,7 @@ open({recv_frame,
       {#frame_header{
           flags=Flags,
           type=?DATA
-         },{data, Payload}}=F},
+         }, #data{data=Payload}}=F},
      #stream_state{
         incoming_frames=IFQ,
         callback_mod=CB,
@@ -350,7 +350,7 @@ open({recv_frame,
       {#frame_header{
               flags=Flags,
               type=?DATA
-         }, {data, Payload}}=F},
+         }, #data{data=Payload}}=F},
      #stream_state{
         incoming_frames=IFQ,
         callback_mod=CB,
