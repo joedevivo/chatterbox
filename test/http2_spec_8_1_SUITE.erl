@@ -13,7 +13,8 @@ all() ->
      sends_pseudo_after_regular,
      sends_invalid_pseudo,
      sends_response_pseudo_with_request,
-     sends_connection_header
+     sends_connection_header,
+     sends_bad_TE_header
     ].
 
 init_per_suite(Config) ->
@@ -199,4 +200,17 @@ sends_connection_header(_Config) ->
          {<<"accept-encoding">>, <<"gzip, deflate">>},
          {<<"user-agent">>, <<"chattercli/0.0.1 :D">>},
          {<<"connection">>, <<"keep-alive">>}
+        ]).
+
+sends_bad_TE_header(_Config) ->
+    test_rst_stream(
+        [
+         {<<":path">>, <<"/">>},
+         {<<":scheme">>, <<"https">>},
+         {<<":authority">>, <<"localhost:8080">>},
+         {<<":method">>, <<"GET">>},
+         {<<"accept">>, <<"*/*">>},
+         {<<"accept-encoding">>, <<"gzip, deflate">>},
+         {<<"user-agent">>, <<"chattercli/0.0.1 :D">>},
+         {<<"te">>, <<"trailers, deflate">>}
         ]).

@@ -1622,6 +1622,10 @@ validate_pseudos(_, DoneWithPseudos) ->
               false;
          ({<<"connection">>, _}) ->
               false;
+         ({<<"te">>, <<"trailers">>}) ->
+              true;
+         ({<<"te">>, _}) ->
+              false;
          (_) -> true
       end,
       DoneWithPseudos)
