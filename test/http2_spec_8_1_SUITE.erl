@@ -7,19 +7,50 @@
 
 all() ->
     [
+     sends_head_request,
      sends_second_headers_with_no_end_stream,
      sends_uppercase_headers,
      sends_pseudo_after_regular,
      sends_invalid_pseudo,
-     sends_response__pseudo_with_request
+     sends_response_pseudo_with_request
     ].
 
 init_per_suite(Config) ->
-%%    application:ensure_started(crypto),
     chatterbox_test_buddy:start(Config).
 
 end_per_suite(Config) ->
     chatterbox_test_buddy:stop(Config),
+    ok.
+
+sends_head_request(_Config) ->
+    {ok, Client} = http2c:start_link(),
+    RequestHeaders =
+        [
+         {<<":method">>, <<"HEAD">>},
+         {<<":path">>, <<"/index.html">>},
+         {<<":scheme">>, <<"https">>},
+         {<<":authority">>, <<"localhost:8080">>},
+         {<<"accept">>, <<"*/*">>},
+         {<<"accept-encoding">>, <<"gzip, deflate">>},
+         {<<"user-agent">>, <<"chattercli/0.0.1 :D">>}
+        ],
+    {ok, {HeadersBin, _EC}} = hpack:encode(RequestHeaders, hpack:new_context()),
+    HF = {
+      #frame_header{
+         stream_id=1,
+         flags=?FLAG_END_HEADERS bor ?FLAG_END_STREAM
+        },
+      #headers{
+         block_fragment=HeadersBin
+        }
+     },
+    http2c:send_unaltered_frames(Client, [HF]),
+
+    Resp = http2c:wait_for_n_frames(Client, 1, 1),
+    ct:pal("Resp: ~p", [Resp]),
+    ?assertEqual(1, length(Resp)),
+    [{Header, _Payload}] = Resp,
+    ?assertEqual(?HEADERS, Header#frame_header.type),
     ok.
 
 sends_second_headers_with_no_end_stream(_Config) ->
@@ -122,7 +153,7 @@ sends_invalid_pseudo(_Config) ->
          {<<"user-agent">>, <<"chattercli/0.0.1 :D">>}
         ]).
 
-sends_response__pseudo_with_request(_Config) ->
+sends_response_pseudo_with_request(_Config) ->
     test_rst_stream(
         [
          {<<":status">>, <<"200">>},

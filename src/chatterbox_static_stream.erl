@@ -42,6 +42,8 @@ on_request_end_stream(State=#cb_static{connection_pid=ConnPid,
     %ConnPid = http2_stream:connection(),
     Headers = State#cb_static.req_headers,
 
+    Method = proplists:get_value(<<":method">>, Headers),
+
     Path = binary_to_list(proplists:get_value(<<":path">>, Headers)),
 
     %% QueryString Hack?
@@ -72,95 +74,90 @@ on_request_end_stream(State=#cb_static{connection_pid=ConnPid,
     lager:debug("[chatterbox_static_stream] ~p serving ~p on stream ~p", [self(), File, StreamId]),
     %%lager:info("Request Headers: ~p", [Headers]),
 
-    case {filelib:is_file(File), filelib:is_dir(File)} of
-        {_, true} ->
-            ResponseHeaders = [
-                               {<<":status">>,<<"403">>}
-                              ],
-            http2_connection:send_headers(ConnPid, StreamId, ResponseHeaders),
-            http2_connection:send_body(ConnPid, StreamId, <<"No soup for you!">>),
-            ok;
-        {true, false} ->
-            Ext = filename:extension(File),
-            MimeType = case Ext of
-                ".js" -> <<"text/javascript">>;
-                ".html" -> <<"text/html">>;
-                ".css" -> <<"text/css">>;
-                ".scss" -> <<"text/css">>;
-                ".woff" -> <<"application/font-woff">>;
-                ".ttf" -> <<"application/font-snft">>;
-                _ -> <<"unknown">>
-            end,
-            {ok, Data} = file:read_file(File),
+    {HeadersToSend, BodyToSend} =
+        case {filelib:is_file(File), filelib:is_dir(File)} of
+            {_, true} ->
+                ResponseHeaders = [
+                                   {<<":status">>,<<"403">>}
+                                  ],
+                {ResponseHeaders, <<"No soup for you!">>};
+            {true, false} ->
+                Ext = filename:extension(File),
+                MimeType = case Ext of
+                               ".js" -> <<"text/javascript">>;
+                               ".html" -> <<"text/html">>;
+                               ".css" -> <<"text/css">>;
+                               ".scss" -> <<"text/css">>;
+                               ".woff" -> <<"application/font-woff">>;
+                               ".ttf" -> <<"application/font-snft">>;
+                               _ -> <<"unknown">>
+                           end,
+                {ok, Data} = file:read_file(File),
 
-            ResponseHeaders = [
-                {<<":status">>, <<"200">>},
-                {<<"content-type">>, MimeType}
-            ],
+                ResponseHeaders = [
+                                   {<<":status">>, <<"200">>},
+                                   {<<"content-type">>, MimeType}
+                                  ],
 
-            http2_connection:send_headers(ConnPid, StreamId, ResponseHeaders),
+                case {MimeType, http2_connection:is_push(ConnPid)} of
+                    {<<"text/html">>, true} ->
+                        %% Search Data for resources to push
+                        {ok, RE} = re:compile("<link rel=\"stylesheet\" href=\"([^\"]*)|<script src=\"([^\"]*)|src: '([^']*)"),
+                        Resources = case re:run(Data, RE, [global, {capture,all,binary}]) of
+                                        {match, Matches} ->
+                                            [dot_hack(lists:last(M)) || M <- Matches];
+                                        _ -> []
+                                    end,
+                        lager:debug("Resources to push: ~p", [Resources]),
 
+                        NewStreams =
+                            lists:foldl(
+                              fun(R, Acc) ->
+                                      NewStreamId = http2_connection:new_stream(ConnPid),
+                                      PHeaders = generate_push_promise_headers(Headers, <<$/,R/binary>>),
+                                      http2_connection:send_promise(ConnPid, StreamId, NewStreamId, PHeaders),
+                                      [{NewStreamId, PHeaders}|Acc]
+                              end,
+                              [],
+                              Resources
+                             ),
+                        lager:debug("New Streams for promises: ~p", [NewStreams]),
+                        ok;
+                    _ ->
+                        ok
+                end,
 
-            case {MimeType, http2_connection:is_push(ConnPid)} of
-                {<<"text/html">>, true} ->
-                    %% Search Data for resources to push
-                    {ok, RE} = re:compile("<link rel=\"stylesheet\" href=\"([^\"]*)|<script src=\"([^\"]*)|src: '([^']*)"),
-                    Resources = case re:run(Data, RE, [global, {capture,all,binary}]) of
-                        {match, Matches} ->
-                            [dot_hack(lists:last(M)) || M <- Matches];
-                        _ -> []
-                    end,
-                    lager:debug("Resources to push: ~p", [Resources]),
+                %% For each chunk of data:
 
-                    NewStreams =
-                        lists:foldl(
-                          fun(R, Acc) ->
-                                  NewStreamId = http2_connection:new_stream(ConnPid),
-                                  PHeaders = generate_push_promise_headers(Headers, <<$/,R/binary>>),
-                                  http2_connection:send_promise(ConnPid, StreamId, NewStreamId, PHeaders),
-                                  [{NewStreamId, PHeaders}|Acc]
-                          end,
-                          [],
-                          Resources
-                         ),
+                %% 1. Ask the connection if it's got enough bytes in the
+                %% send window.
+                %% maybe just send the frame header?
 
-                    lager:debug("New Streams for promises: ~p", [NewStreams]),
-                    %[spawn_handle(ConnPid, NewStreamId, PHeaders, <<>>) || {NewStreamId, PHeaders} <- NewStreams],
-                    ok;
-                _ ->
-                    ok
-            end,
+                %% If it doesn't, we need to put this frame in a place
+                %% that will get looked at when our connection window size
+                %% increases.
 
-            %% Ooof. I need to do a bunch of things here, and it'd be
-            %% best to keep the process messages on the low side.
-
-            %% For each chunk of data:
-
-            %% 1. Ask the connection if it's got enough bytes in the
-            %% send window.
-            %% maybe just send the frame header?
-
-            %% If it doesn't, we need to put this frame in a place
-            %% that will get looked at when our connection window size
-            %% increases.
-
-            %% If it does, we still need to try and check stream level flow control.
-            %http2_stream:send_data(Data),
-            http2_connection:send_body(ConnPid, StreamId, Data),
-            ok;
+                %% If it does, we still need to try and check stream level
+                %% flow control.
+                {ResponseHeaders, Data};
         {false, false} ->
             ResponseHeaders = [
                                {<<":status">>,<<"404">>}
                               ],
-            http2_connection:send_headers(ConnPid, StreamId, ResponseHeaders),
-            http2_connection:send_body(ConnPid, StreamId, <<"No soup for you!">>),
-            ok
+                {ResponseHeaders, <<"No soup for you!">>}
+        end,
+
+    case {Method, HeadersToSend, BodyToSend} of
+        {<<"HEAD">>, _, _} ->
+                http2_connection:send_headers(ConnPid, StreamId, HeadersToSend, [{send_end_stream, true}]);
+        {<<"GET">>, _, _} ->
+            http2_connection:send_headers(ConnPid, StreamId, HeadersToSend),
+            http2_connection:send_body(ConnPid, StreamId, BodyToSend);
+        _ ->
+            lager:error("[chatterbox_static_stream] Unsupported :method (~p)", [Method])
     end,
 
     {ok, State}.
-
-
-
 
 %% Internal
 

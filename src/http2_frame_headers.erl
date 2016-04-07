@@ -8,8 +8,7 @@
     format/1,
     from_frames/1,
     read_binary/2,
-    to_frame/3,
-    send/4,
+    to_frames/5,
     to_binary/1
   ]).
 
@@ -46,28 +45,21 @@ is_priority(#frame_header{flags=F}) when ?IS_FLAG(F, ?FLAG_PRIORITY) ->
 is_priority(_) ->
     false.
 
--spec to_frame(pos_integer(), hpack:headers(), hpack:context()) ->
-                      {{frame_header(), headers()}, hpack:context()}.
-%% Maybe break this up into continuations like the data frame
-to_frame(StreamId, Headers, EncodeContext) ->
-    {ok, {HeadersToSend, NewContext}} = hpack:encode(Headers, EncodeContext),
-    L = byte_size(HeadersToSend),
-    {{#frame_header{
-         length=L,
-         type=?HEADERS,
-         flags=?FLAG_END_HEADERS,
-         stream_id=StreamId
-        },
-      #headers{
-         block_fragment=HeadersToSend
-        }},
-    NewContext}.
+-spec to_frames(StreamId      :: stream_id(),
+                Headers       :: hpack:headers(),
+                EncodeContext :: hpack:context(),
+                MaxFrameSize  :: pos_integer(),
+                EndStream     :: boolean()) ->
+                       {[frame()], hpack:context()}.
+to_frames(StreamId, Headers, EncodeContext, MaxFrameSize, EndStream) ->
+    {ok, {HeadersBin, NewContext}} = hpack:encode(Headers, EncodeContext),
 
-send({Transport, Socket}, StreamId, Headers, EncodeContext) ->
-    {Frame, NewContext} = to_frame(StreamId, Headers, EncodeContext),
-    Bytes = http2_frame:to_binary(Frame),
-    Transport:send(Socket, Bytes),
-    NewContext.
+    %% Break HeadersBin into chunks
+    Chunks = split(HeadersBin, MaxFrameSize),
+
+    Frames = build_frames(StreamId, Chunks, EndStream),
+
+    {Frames, NewContext}.
 
 -spec to_binary(headers()) -> iodata().
 to_binary(#headers{
@@ -91,3 +83,74 @@ from_frames([], Acc) ->
     Acc;
 from_frames([{#frame_header{type=?CONTINUATION},#continuation{block_fragment=BF}}|Continuations], Acc) ->
     from_frames(Continuations, <<Acc/binary,BF/binary>>).
+
+-spec split(Binary::binary(),
+            MaxFrameSize::pos_integer()) ->
+                   [binary()].
+split(Binary, MaxFrameSize) ->
+    split(Binary, MaxFrameSize, []).
+
+-spec split(Binary::binary(),
+            MaxFrameSize::pos_integer(),
+            [binary()]) ->
+                   [binary()].
+split(Binary, MaxFrameSize, Acc)
+  when byte_size(Binary) =< MaxFrameSize ->
+    lists:reverse([Binary|Acc]);
+split(Binary, MaxFrameSize, Acc) ->
+    <<NextFrame:MaxFrameSize/binary,Remaining/binary>> = Binary,
+    split(Remaining, MaxFrameSize, [NextFrame|Acc]).
+
+%% Now build frames.
+%% The first will be a HEADERS frame, followed by CONTINUATION
+%% If EndStream, that flag needs to be set on the first frame
+%% ?FLAG_END_HEADERS needs to be set on the last.
+%% If there's only one, it needs to be set on both.
+-spec build_frames(StreamId :: stream_id(),
+                   Chunks::[binary()],
+                   EndStream::boolean()) ->
+                          [frame()].
+build_frames(StreamId, [FirstChunk|Rest], EndStream) ->
+    Flag = case EndStream of
+               true ->
+                   ?FLAG_END_STREAM;
+               false ->
+                   0
+           end,
+    HeadersFrame =
+        { #frame_header{
+             type=?HEADERS,
+             flags=Flag,
+             length=byte_size(FirstChunk),
+             stream_id=StreamId},
+          #headers{
+             block_fragment=FirstChunk}},
+    [{LastFrameHeader, LastFrameBody}|Frames] =
+        build_frames_(StreamId, Rest, [HeadersFrame]),
+    NewLastFrame = {
+      LastFrameHeader#frame_header{
+        flags=LastFrameHeader#frame_header.flags bor ?FLAG_END_HEADERS
+       },
+      LastFrameBody},
+
+    lists:reverse([NewLastFrame|Frames]).
+
+-spec build_frames_(StreamId::stream_id(),
+                    Chunks::[binary()],
+                    Acc::[frame()])->
+                           [frame()].
+build_frames_(_StreamId, [], Acc) ->
+    Acc;
+build_frames_(StreamId, [NextChunk|Rest], Acc) ->
+    NextFrame = {
+      #frame_header{
+         stream_id=StreamId,
+         type=?CONTINUATION,
+         flags=0,
+         length=byte_size(NextChunk)
+        },
+      #continuation{
+         block_fragment=NextChunk
+        }
+     },
+    build_frames_(StreamId, Rest, [NextFrame|Acc]).

@@ -42,10 +42,14 @@ send_window_update(_Config) ->
          {<<"accept-encoding">>, <<"gzip, deflate">>},
          {<<"user-agent">>, <<"chattercli/0.0.1 :D">>}
         ],
+    {H, _} =
+        http2_frame_headers:to_frames(1,
+                                      RequestHeaders,
+                                      hpack:new_context(),
+                                      16384,
+                                      true),
 
-    {{FH, FP}, _} = http2_frame_headers:to_frame(1, RequestHeaders, hpack:new_context()),
-
-    http2c:send_unaltered_frames(Client, [{FH#frame_header{flags=?FLAG_END_HEADERS bor ?FLAG_END_STREAM}, FP}]),
+    http2c:send_unaltered_frames(Client, H),
 
     Resp0 = http2c:wait_for_n_frames(Client, 1, 2),
     ct:pal("Resp0: ~p", [Resp0]),
@@ -111,12 +115,16 @@ send_window_update_with_zero_on_stream(_Config) ->
          {<<"user-agent">>, <<"chattercli/0.0.1 :D">>}
         ],
 
-    {F, _} = http2_frame_headers:to_frame(1, RequestHeaders, hpack:new_context()),
-
+    {[H], _} =
+        http2_frame_headers:to_frames(1,
+                                      RequestHeaders,
+                                      hpack:new_context(),
+                                      16384,
+                                      false),
 
     http2c:send_unaltered_frames(
       Client,
-      [F,
+      [H,
        {#frame_header{
            type=?WINDOW_UPDATE,
            length=24,
@@ -165,8 +173,14 @@ send_window_updates_greater_than_max_on_stream(_Config) ->
          {<<"user-agent">>, <<"chattercli/0.0.1 :D">>}
         ],
 
-    {F1, _} = http2_frame_headers:to_frame(1, RequestHeaders, hpack:new_context()),
-    F2 = {#frame_header{
+    {[H], _} =
+        http2_frame_headers:to_frames(1,
+                                      RequestHeaders,
+                                      hpack:new_context(),
+                                      16384,
+                                      false),
+
+    WU = {#frame_header{
             type=?WINDOW_UPDATE,
             length=24,
             stream_id=1
@@ -175,7 +189,7 @@ send_window_updates_greater_than_max_on_stream(_Config) ->
 
     http2c:send_unaltered_frames(
       Client,
-      [F1, F2]),
+      [H, WU]),
 
     Resp = http2c:wait_for_n_frames(Client, 1, 1),
     ct:pal("Resp: ~p", [Resp]),
