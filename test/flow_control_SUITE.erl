@@ -8,7 +8,8 @@
 all() ->
     [
      exceed_server_connection_receive_window,
-     exceed_server_stream_receive_window
+     exceed_server_stream_receive_window,
+     server_buffer_response
     ].
 
 init_per_suite(Config) ->
@@ -34,6 +35,14 @@ init_per_testcase(
     PreChatterConfig =
         [
          {stream_callback_mod, server_stream_receive_window},
+         {initial_window_size, 64},
+         {flow_control, manual}
+        |Config],
+    chatterbox_test_buddy:start(PreChatterConfig);
+init_per_testcase(server_buffer_response, Config) ->
+    PreChatterConfig =
+        [
+         {stream_callback_mod, flow_control_handler},
          {initial_window_size, 64},
          {flow_control, manual}
         |Config],
@@ -77,6 +86,52 @@ exceed_server_stream_receive_window(_Config) ->
     ?assertEqual(?FLOW_CONTROL_ERROR, RstStream#rst_stream.error_code),
     ok.
 
+server_buffer_response(_Config) ->
+    WindowSize = 64,
+    application:load(chatterbox),
+    application:set_env(chatterbox, client_initial_window_size, WindowSize),
+    Headers = [{<<":path">>, <<"/">>},
+               {<<":method">>, <<"GET">>}],
+    {ok, Client} = http2c:start_link(),
+    {ok, {HeadersBin, _EC}} = hpack:encode(Headers, hpack:new_context()),
+    HF = {#frame_header{length=byte_size(HeadersBin),
+                        type=?HEADERS,
+                        flags=?FLAG_END_HEADERS bor ?FLAG_END_STREAM,
+                        stream_id=3},
+          #headers{block_fragment=HeadersBin}},
+    http2c:send_unaltered_frames(Client, [HF]),
+
+    timer:sleep(300),
+    Resp1 = http2c:get_frames(Client, 3),
+    Size1 = data_frame_size(Resp1),
+    ?assertEqual(WindowSize, Size1),
+    send_window_update(Client, 64),
+
+    timer:sleep(200),
+    Resp2 = http2c:get_frames(Client, 3),
+    Size2 = data_frame_size(Resp2),
+    ?assertEqual(WindowSize, Size2),
+
+    send_window_update(Client, 64),
+    timer:sleep(200),
+    Resp3 = http2c:get_frames(Client, 3),
+    Size3 = data_frame_size(Resp3),
+    %% (68 * 2) - (64 * 2) = 8
+    ?assertEqual(8, Size3).
+
+data_frame_size(Frames) ->
+    DataFrames = lists:filter(fun({#frame_header{type=?DATA}, _}) -> true;
+                                 (_) -> false end, Frames),
+    lists:foldl(fun({_FH, #data{data=Data}}, Acc) ->
+                    Acc + byte_size(Data) end, 0, DataFrames).
+
+send_window_update(Client, Size) ->
+    http2c:send_unaltered_frames(Client,
+                                 [{#frame_header{length=4,
+                                                 type=?WINDOW_UPDATE,
+                                                 stream_id=3},
+                                   #window_update{window_size_increment=Size}}
+                                 ]).
 send_n_bytes(N) ->
     %% We're up and running with a ridiculously small connection
     %% window size of 64 bytes. The problem is that each stream will

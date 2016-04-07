@@ -7,13 +7,15 @@
 all() ->
     [
      {group, default_handler},
-     {group, peer_handler}
+     {group, peer_handler},
+     {group, double_body_handler}
     ].
 
 groups() -> [{default_handler,  [complex_request,
                                  upgrade_tcp_connection,
                                  basic_push]},
-             {peer_handler, [get_peer_in_handler]}
+             {peer_handler, [get_peer_in_handler]},
+             {double_body_handler, [send_body_opts]}
             ].
 
 init_per_suite(Config) ->
@@ -23,11 +25,16 @@ init_per_group(default_handler, Config) ->
     %% We'll start up a chatterbox server once, with this data_dir.
     NewConfig = [{www_root, data_dir},{initial_window_size,99999999}|Config],
     chatterbox_test_buddy:start(NewConfig);
-init_per_group(_, Config) ->
-    NewConfig = [{stream_callback_mod, peer_test_handler},
+init_per_group(double_body_handler, Config) ->
+    NewConfig = [{stream_callback_mod, double_body_handler},
                  {initial_window_size,99999999}|Config],
     chatterbox_test_buddy:start(NewConfig),
-    Config.
+    Config;
+init_per_group(peer_handler, Config) ->
+    NewConfig = [{stream_callback_mod, peer_test_handler},
+                 {initial_window_size,99999999}|Config],
+    chatterbox_test_buddy:start(NewConfig);
+init_per_group(_, Config) -> Config.
 
 init_per_testcase(_, Config) ->
     Config.
@@ -117,4 +124,25 @@ get_peer_in_handler(_Config) ->
     {ok, {ResponseHeaders, ResponseBody}} = http2_client:sync_request(Client, RequestHeaders, <<>>),
     ct:pal("Response Headers: ~p", [ResponseHeaders]),
     ct:pal("Response Body: ~p", [ResponseBody]),
+    ok.
+
+send_body_opts(_Config) ->
+    {ok, Client} = http2_client:start_link(),
+    RequestHeaders =
+        [
+         {<<":method">>, <<"GET">>},
+         {<<":path">>, <<"/index.html">>},
+         {<<":scheme">>, <<"https">>},
+         {<<":authority">>, <<"localhost:8080">>},
+         {<<"accept">>, <<"*/*">>},
+         {<<"accept-encoding">>, <<"gzip, deflate">>},
+         {<<"user-agent">>, <<"chattercli/0.0.1 :D">>}
+        ],
+
+    ExpectedResponseBody = <<"BodyPart1\nBodyPart2">>,
+
+    {ok, {ResponseHeaders, ResponseBody}} = http2_client:sync_request(Client, RequestHeaders, <<>>),
+    ct:pal("Response Headers: ~p", [ResponseHeaders]),
+    ct:pal("Response Body: ~p", [ResponseBody]),
+    ?assertEqual(ExpectedResponseBody, iolist_to_binary(ResponseBody)),
     ok.

@@ -16,6 +16,7 @@
 -export([
          send_headers/3,
          send_body/3,
+         send_body/4,
          is_push/1,
          new_stream/1,
          new_stream/2,
@@ -73,7 +74,8 @@
           pid :: pid(),
           send_window_size :: non_neg_integer(),
           recv_window_size :: non_neg_integer(),
-          queued_data :: undefined | done | binary()
+          queued_data :: undefined | done | binary(),
+          body_complete = false :: boolean()
          }).
 -type stream() :: #stream{}.
 
@@ -99,6 +101,11 @@
 }).
 
 -type connection() :: #connection{}.
+
+-type send_body_option() :: {send_end_stream, boolean()}.
+-type send_body_opts() :: [send_body_option()].
+
+-export_type([send_body_option/0, send_body_opts/0]).
 
 -spec start_client_link(gen_tcp | ssl,
                         inet:ip_address() | inet:hostname(),
@@ -208,8 +215,14 @@ send_headers(Pid, StreamId, Headers) ->
 
 -spec send_body(pid(), stream_id(), binary()) -> ok.
 send_body(Pid, StreamId, Body) ->
-    gen_fsm:send_all_state_event(Pid, {send_body, StreamId, Body}),
+    gen_fsm:send_all_state_event(Pid, {send_body, StreamId, Body, []}),
     ok.
+-spec send_body(pid(), stream_id(), binary(), send_body_opts()) -> ok.
+send_body(Pid, StreamId, Body, Opts) ->
+    gen_fsm:send_all_state_event(Pid, {send_body, StreamId, Body, Opts}),
+    ok.
+
+
 
 -spec get_peer(pid()) ->
     {ok, {inet:ip_address(), inet:port_number()}} | {error, term()}.
@@ -427,8 +440,10 @@ route_frame({H, Payload},
             Delta =
                 case proplists:get_value(?SETTINGS_INITIAL_WINDOW_SIZE, PList) of
                     undefined ->
+                        lager:debug("[~p] IWS undefined", [Conn#connection.type]),
                         0;
                     NewIWS ->
+                        lager:debug("old IWS: ~p new IWS: ~p", [OldIWS, NewIWS]),
                         OldIWS - NewIWS
                 end,
             NewSendSettings = http2_frame_settings:overlay(SS, Payload),
@@ -902,10 +917,14 @@ s_send_what_we_can(SWS, MFS, Stream) ->
     {Frame, SentBytes, NewS} =
         case MaxToSend > QueueSize of
             true ->
+                Flags = case Stream#stream.body_complete of
+                         true -> ?FLAG_END_STREAM;
+                         false -> 0
+                        end,
                 %% We have the power to send everything
                 {{#frame_header{
                      stream_id=Stream#stream.id,
-                     flags=?FLAG_END_STREAM,
+                     flags=Flags,
                      type=?DATA,
                      length=QueueSize
                     },
@@ -982,17 +1001,24 @@ handle_event({send_headers, StreamId, Headers},
      Conn#connection{
        encode_context=NewContext
       }};
-handle_event({send_body, StreamId, Body},
+handle_event({send_body, StreamId, Body, Opts},
              StateName,
              #connection{}=Conn) ->
     lager:debug("[~p] Send Body Stream ~p",
                 [Conn#connection.type, StreamId]),
     Stream = get_stream(StreamId, Conn#connection.streams),
+    BodyComplete = proplists:get_value(send_end_stream, Opts, true),
+    OldBody = Stream#stream.queued_data,
+    NewBody = case is_binary(OldBody) of
+                   true -> <<OldBody/binary, Body/binary>>;
+                   false -> Body
+              end,
     {NewSWS, NewS} =
         s_send_what_we_can(Conn#connection.send_window_size,
                            Conn#connection.send_settings#settings.max_frame_size,
                            Stream#stream{
-                            queued_data=Body
+                            queued_data=NewBody,
+                            body_complete=BodyComplete
                             }),
 
     {next_state, StateName,
