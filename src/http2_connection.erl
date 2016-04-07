@@ -1451,7 +1451,7 @@ new_stream_(StreamId, Conn) ->
 
 -spec new_stream_(stream_id(), pid(), connection()) -> stream().
 new_stream_(StreamId, NotifyPid, Conn) ->
-    lager:debug("Spawning new pid for stream ~p", [StreamId]),
+    lager:debug("[~p] Spawning new pid for stream ~p", [Conn#connection.type, StreamId]),
     {ok, Pid} = http2_stream:start_link(
                   [
                    {stream_id, StreamId},
@@ -1476,13 +1476,24 @@ maybe_hpack(Continuation, Conn)
     Stream = get_stream(Continuation#continuation_state.stream_id,
                         Conn#connection.streams),
 
+    HeadersType =
+        case {Continuation#continuation_state.type,
+              Conn#connection.type
+             } of
+            {headers, server} ->
+                request;
+            {push_promise, client} ->
+                request;
+             _ -> response
+            end,
+
     HeadersBin = http2_frame_headers:from_frames(
                    queue:to_list(Continuation#continuation_state.frames)),
     case hpack:decode(HeadersBin, Conn#connection.decode_context) of
         {error, compression_error} ->
             go_away(?COMPRESSION_ERROR, Conn);
         {ok, {Headers, NewDecodeContext}} ->
-            case good_req_headers(Headers) of
+            case is_valid_headers(HeadersType, Headers) of
                 {error, Code} ->
                     rst_stream(Stream#stream.id, Code, Conn);
                 ok ->
@@ -1522,17 +1533,27 @@ maybe_hpack(Continuation, Conn) ->
        continuation = Continuation
       }}.
 
-%% A set of headers is "good" if:
-%% * No names contain uppercase letters
-%% * No psuedoheaders are duplicated
-%% * No psuedoheaders occur after a normal header
-%% * Only acceptable psuedoheaders are:
+%% Function checks if a set of headers is valid. Currently that means:
+%%
+%% The list of acceptable pseudoheaders for requests are:
 %%     :method, :scheme, :authority, :path,
+%%
+%% The only acceptable pseudoheader for responses is :status
+%%
+%% All header names are lowercase.
+%%
+%% All pseudoheaders occur before normal headers.
+%%
+%% Still TODO:
+%% * No pseudoheaders are duplicated #44
+%% * A validation case for trailers  #43
 
-good_req_headers(Headers) ->
+-spec is_valid_headers( request | response,
+                        hpack:headers() ) ->
+                              ok | {error, term()}.
+is_valid_headers(Type, Headers) ->
     case
-        no_upper_names(Headers) andalso
-        validate_pseudos(Headers)
+        validate_pseudos(Type, Headers)
     of
         true ->
             ok;
@@ -1541,6 +1562,7 @@ good_req_headers(Headers) ->
     end.
 
 no_upper_names(Headers) ->
+    lager:error("Headers: ~p", [Headers]),
     lists:all(
       fun({Name,_}) ->
               NameStr = binary_to_list(Name),
@@ -1548,15 +1570,17 @@ no_upper_names(Headers) ->
       end,
      Headers).
 
-validate_pseudos([{<<":path">>,_V}|Tail]) ->
-    validate_pseudos(Tail);
-validate_pseudos([{<<":method">>,_V}|Tail]) ->
-    validate_pseudos(Tail);
-validate_pseudos([{<<":scheme">>,_V}|Tail]) ->
-    validate_pseudos(Tail);
-validate_pseudos([{<<":authority">>,_V}|Tail]) ->
-    validate_pseudos(Tail);
-validate_pseudos(DoneWithPseudos) ->
+validate_pseudos(request, [{<<":path">>,_V}|Tail]) ->
+    validate_pseudos(request, Tail);
+validate_pseudos(request, [{<<":method">>,_V}|Tail]) ->
+    validate_pseudos(request, Tail);
+validate_pseudos(request, [{<<":scheme">>,_V}|Tail]) ->
+    validate_pseudos(request, Tail);
+validate_pseudos(request, [{<<":authority">>,_V}|Tail]) ->
+    validate_pseudos(request, Tail);
+validate_pseudos(response, [{<<":status">>,_V}|Tail]) ->
+    validate_pseudos(response, Tail);
+validate_pseudos(_, DoneWithPseudos) ->
     lists:all(
       fun({<<$:, _/binary>>, _}) ->
               false;

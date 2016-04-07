@@ -38,10 +38,8 @@
          reserved_local/2,
          reserved_remote/2,
          open/2,
-         open/3,
          half_closed_local/2,
          half_closed_remote/2,
-         half_closed_remote/3,
          closed/3
         ]).
 
@@ -167,7 +165,7 @@ recv_frame(Pid, Frame) ->
 -spec send_frame(pid(), frame()) ->
                         ok | flow_control.
 send_frame(Pid, Frame) ->
-    gen_fsm:sync_send_event(Pid, {send_frame, Frame}).
+    gen_fsm:send_event(Pid, {send_frame, Frame}).
 
 -spec stream_id() -> stream_id().
 stream_id() ->
@@ -376,16 +374,11 @@ open({recv_h, Trailers},
      Stream#stream_state{
        request_headers=Stream#stream_state.request_headers ++ Trailers
       }};
-open(Msg, Stream) ->
-    lager:warning("Some unexpected message in open state. ~p, ~p", [Msg, Stream]),
-    {next_state, open, Stream}.
-
 open({send_frame,
       {#frame_header{
           type=?DATA,
           flags=Flags
          }, _}=F},
-     _From,
      #stream_state{
         socket=Socket
        }=Stream) ->
@@ -398,7 +391,10 @@ open({send_frame,
             _ ->
                 open
         end,
-    {reply, ok, NextState, Stream}.
+    {next_state, NextState, Stream};
+open(Msg, Stream) ->
+    lager:warning("Some unexpected message in open state. ~p, ~p", [Msg, Stream]),
+    {next_state, open, Stream}.
 
 half_closed_remote(
   {send_h, Headers},
@@ -407,8 +403,7 @@ half_closed_remote(
      half_closed_remote,
      Stream#stream_state{
        response_headers=Headers
-      }}.
-
+      }};
 half_closed_remote(
                   {send_frame,
                    {
@@ -417,7 +412,6 @@ half_closed_remote(
                         type=?DATA
                        },_
                    }=F}=_Msg,
-  _From,
   #stream_state{
      socket=Socket
     }=Stream) ->
@@ -431,7 +425,7 @@ half_closed_remote(
                 half_closed_remote
         end,
 
-    {reply, ok, NextState, Stream}.
+    {next_state, NextState, Stream}.
 
 %% PUSH_PROMISES can only be received by streams in the open or
 %% half_closed_local, but will create a new stream in the idle state,
