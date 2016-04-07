@@ -1606,17 +1606,30 @@ no_upper_names(Headers) ->
       end,
      Headers).
 
-validate_pseudos(request, [{<<":path">>,_V}|Tail]) ->
-    validate_pseudos(request, Tail);
-validate_pseudos(request, [{<<":method">>,_V}|Tail]) ->
-    validate_pseudos(request, Tail);
-validate_pseudos(request, [{<<":scheme">>,_V}|Tail]) ->
-    validate_pseudos(request, Tail);
-validate_pseudos(request, [{<<":authority">>,_V}|Tail]) ->
-    validate_pseudos(request, Tail);
-validate_pseudos(response, [{<<":status">>,_V}|Tail]) ->
-    validate_pseudos(response, Tail);
-validate_pseudos(_, DoneWithPseudos) ->
+validate_pseudos(Type, Headers) ->
+    validate_pseudos(Type, Headers, #{}).
+
+validate_pseudos(request, [{<<":path">>,_V}|_Tail], #{<<":path">> := true }) ->
+    false;
+validate_pseudos(request, [{<<":path">>,_V}|Tail], Found) ->
+    validate_pseudos(request, Tail, Found#{<<":path">> => true});
+validate_pseudos(request, [{<<":method">>,_V}|_Tail], #{<<":method">> := true }) ->
+    false;
+validate_pseudos(request, [{<<":method">>,_V}|Tail], Found) ->
+    validate_pseudos(request, Tail, Found#{<<":method">> => true});
+validate_pseudos(request, [{<<":scheme">>,_V}|_Tail], #{<<":scheme">> := true }) ->
+    false;
+validate_pseudos(request, [{<<":scheme">>,_V}|Tail], Found) ->
+    validate_pseudos(request, Tail, Found#{<<":scheme">> => true});
+validate_pseudos(request, [{<<":authority">>,_V}|_Tail], #{<<":authority">> := true }) ->
+    false;
+validate_pseudos(request, [{<<":authority">>,_V}|Tail], Found) ->
+    validate_pseudos(request, Tail, Found#{<<":authority">> => true});
+validate_pseudos(request, [{<<":status">>,_V}|_Tail], #{<<":status">> := true }) ->
+    false;
+validate_pseudos(response, [{<<":status">>,_V}|Tail], Found) ->
+    validate_pseudos(response, Tail, Found#{<<":status">> => true});
+validate_pseudos(_, DoneWithPseudos, _Found) ->
     lists:all(
       fun({<<$:, _/binary>>, _}) ->
               false;

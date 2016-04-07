@@ -14,7 +14,8 @@ all() ->
      sends_invalid_pseudo,
      sends_response_pseudo_with_request,
      sends_connection_header,
-     sends_bad_TE_header
+     sends_bad_TE_header,
+     sends_double_pseudo
     ].
 
 init_per_suite(Config) ->
@@ -214,3 +215,56 @@ sends_bad_TE_header(_Config) ->
          {<<"user-agent">>, <<"chattercli/0.0.1 :D">>},
          {<<"te">>, <<"trailers, deflate">>}
         ]).
+
+sends_double_pseudo(_Config) ->
+    test_rst_stream(
+        [
+         {<<":path">>, <<"/">>},
+         {<<":path">>, <<"/">>},
+         {<<":scheme">>, <<"https">>},
+         {<<":authority">>, <<"localhost:8080">>},
+         {<<":method">>, <<"GET">>},
+         {<<"accept">>, <<"*/*">>},
+         {<<"accept-encoding">>, <<"gzip, deflate">>},
+         {<<"user-agent">>, <<"chattercli/0.0.1 :D">>}
+        ]),
+
+    test_rst_stream(
+        [
+         {<<":path">>, <<"/">>},
+         {<<":scheme">>, <<"https">>},
+         {<<":scheme">>, <<"https">>},
+         {<<":authority">>, <<"localhost:8080">>},
+         {<<":method">>, <<"GET">>},
+         {<<"accept">>, <<"*/*">>},
+         {<<"accept-encoding">>, <<"gzip, deflate">>},
+         {<<"user-agent">>, <<"chattercli/0.0.1 :D">>}
+        ]),
+
+    test_rst_stream(
+        [
+         {<<":path">>, <<"/">>},
+         {<<":scheme">>, <<"https">>},
+         {<<":authority">>, <<"localhost:8080">>},
+         {<<":authority">>, <<"localhost:8080">>},
+         {<<":method">>, <<"GET">>},
+         {<<"accept">>, <<"*/*">>},
+         {<<"accept-encoding">>, <<"gzip, deflate">>},
+         {<<"user-agent">>, <<"chattercli/0.0.1 :D">>}
+        ]),
+
+    test_rst_stream(
+        [
+         {<<":path">>, <<"/">>},
+         {<<":scheme">>, <<"https">>},
+         {<<":authority">>, <<"localhost:8080">>},
+         {<<":method">>, <<"GET">>},
+         {<<":method">>, <<"GET">>},
+         {<<"accept">>, <<"*/*">>},
+         {<<"accept-encoding">>, <<"gzip, deflate">>},
+         {<<"user-agent">>, <<"chattercli/0.0.1 :D">>}
+        ]),
+
+
+
+    ok.
