@@ -15,6 +15,7 @@
 
 -export([
          send_headers/3,
+         send_headers/4,
          send_body/3,
          send_body/4,
          is_push/1,
@@ -102,10 +103,10 @@
 
 -type connection() :: #connection{}.
 
--type send_body_option() :: {send_end_stream, boolean()}.
--type send_body_opts() :: [send_body_option()].
+-type send_option() :: {send_end_stream, boolean()}.
+-type send_opts() :: [send_option()].
 
--export_type([send_body_option/0, send_body_opts/0]).
+-export_type([send_option/0, send_opts/0]).
 
 -spec start_client_link(gen_tcp | ssl,
                         inet:ip_address() | inet:hostname(),
@@ -210,14 +211,19 @@ send_frame(Pid, Frame) ->
 
 -spec send_headers(pid(), stream_id(), hpack:headers()) -> ok.
 send_headers(Pid, StreamId, Headers) ->
-    gen_fsm:send_all_state_event(Pid, {send_headers, StreamId, Headers}),
+    gen_fsm:send_all_state_event(Pid, {send_headers, StreamId, Headers, []}),
+    ok.
+
+-spec send_headers(pid(), stream_id(), hpack:headers(), send_opts()) -> ok.
+send_headers(Pid, StreamId, Headers, Opts) ->
+    gen_fsm:send_all_state_event(Pid, {send_headers, StreamId, Headers, Opts}),
     ok.
 
 -spec send_body(pid(), stream_id(), binary()) -> ok.
 send_body(Pid, StreamId, Body) ->
     gen_fsm:send_all_state_event(Pid, {send_body, StreamId, Body, []}),
     ok.
--spec send_body(pid(), stream_id(), binary(), send_body_opts()) -> ok.
+-spec send_body(pid(), stream_id(), binary(), send_opts()) -> ok.
 send_body(Pid, StreamId, Body, Opts) ->
     gen_fsm:send_all_state_event(Pid, {send_body, StreamId, Body, Opts}),
     ok.
@@ -977,7 +983,7 @@ handle_event({send_window_update, Size},
      Conn#connection{
        recv_window_size=CRWS+Size
       }};
-handle_event({send_headers, StreamId, Headers},
+handle_event({send_headers, StreamId, Headers, Opts},
              StateName,
              #connection{
                 encode_context=EncodeContext,
@@ -988,13 +994,17 @@ handle_event({send_headers, StreamId, Headers},
     lager:debug("[~p] {send headers, ~p, ~p}",
                 [Conn#connection.type, StreamId, Headers]),
     Stream = get_stream(StreamId, Streams),
+    StreamComplete = proplists:get_value(send_end_stream, Opts, false),
 
-    %% TODO: This is set up in a way that assumes the header frame is
-    %% smaller than MAX_FRAME_SIZE. Will need to split that out into
-    %% continuation frames,but now will definitely be a
-    %% FRAME_SIZE_ERROR
-    {HeaderFrame, NewContext} = http2_frame_headers:to_frame(Stream#stream.id, Headers, EncodeContext),
-    sock:send(Socket, http2_frame:to_binary(HeaderFrame)),
+    {FramesToSend, NewContext} =
+        http2_frame_headers:to_frames(Stream#stream.id,
+                                      Headers,
+                                      EncodeContext,
+                                      Conn#connection.send_settings#settings.max_frame_size,
+                                      StreamComplete
+                                     ),
+
+    [ sock:send(Socket, http2_frame:to_binary(Frame)) || Frame <- FramesToSend],
     http2_stream:send_h(Stream#stream.pid, Headers),
 
     {next_state, StateName,
@@ -1596,19 +1606,38 @@ no_upper_names(Headers) ->
       end,
      Headers).
 
-validate_pseudos(request, [{<<":path">>,_V}|Tail]) ->
-    validate_pseudos(request, Tail);
-validate_pseudos(request, [{<<":method">>,_V}|Tail]) ->
-    validate_pseudos(request, Tail);
-validate_pseudos(request, [{<<":scheme">>,_V}|Tail]) ->
-    validate_pseudos(request, Tail);
-validate_pseudos(request, [{<<":authority">>,_V}|Tail]) ->
-    validate_pseudos(request, Tail);
-validate_pseudos(response, [{<<":status">>,_V}|Tail]) ->
-    validate_pseudos(response, Tail);
-validate_pseudos(_, DoneWithPseudos) ->
+validate_pseudos(Type, Headers) ->
+    validate_pseudos(Type, Headers, #{}).
+
+validate_pseudos(request, [{<<":path">>,_V}|_Tail], #{<<":path">> := true }) ->
+    false;
+validate_pseudos(request, [{<<":path">>,_V}|Tail], Found) ->
+    validate_pseudos(request, Tail, Found#{<<":path">> => true});
+validate_pseudos(request, [{<<":method">>,_V}|_Tail], #{<<":method">> := true }) ->
+    false;
+validate_pseudos(request, [{<<":method">>,_V}|Tail], Found) ->
+    validate_pseudos(request, Tail, Found#{<<":method">> => true});
+validate_pseudos(request, [{<<":scheme">>,_V}|_Tail], #{<<":scheme">> := true }) ->
+    false;
+validate_pseudos(request, [{<<":scheme">>,_V}|Tail], Found) ->
+    validate_pseudos(request, Tail, Found#{<<":scheme">> => true});
+validate_pseudos(request, [{<<":authority">>,_V}|_Tail], #{<<":authority">> := true }) ->
+    false;
+validate_pseudos(request, [{<<":authority">>,_V}|Tail], Found) ->
+    validate_pseudos(request, Tail, Found#{<<":authority">> => true});
+validate_pseudos(request, [{<<":status">>,_V}|_Tail], #{<<":status">> := true }) ->
+    false;
+validate_pseudos(response, [{<<":status">>,_V}|Tail], Found) ->
+    validate_pseudos(response, Tail, Found#{<<":status">> => true});
+validate_pseudos(_, DoneWithPseudos, _Found) ->
     lists:all(
       fun({<<$:, _/binary>>, _}) ->
+              false;
+         ({<<"connection">>, _}) ->
+              false;
+         ({<<"te">>, <<"trailers">>}) ->
+              true;
+         ({<<"te">>, _}) ->
               false;
          (_) -> true
       end,

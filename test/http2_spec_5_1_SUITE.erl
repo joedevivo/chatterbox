@@ -74,9 +74,14 @@ client_sends_even_stream_id(_Config) ->
          {<<"user-agent">>, <<"chattercli/0.0.1 :D">>}
         ],
 
-    {F, _} = http2_frame_headers:to_frame(2, RequestHeaders, hpack:new_context()),
+    {H, _} =
+        http2_frame_headers:to_frames(2,
+                                      RequestHeaders,
+                                      hpack:new_context(),
+                                      16384,
+                                      false),
 
-    http2c:send_unaltered_frames(Client, [F]),
+    http2c:send_unaltered_frames(Client, H),
 
     Resp = http2c:wait_for_n_frames(Client, 0, 1),
     ct:pal("Resp: ~p", [Resp]),
