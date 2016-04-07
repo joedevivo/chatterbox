@@ -1620,6 +1620,8 @@ validate_pseudos(_, DoneWithPseudos) ->
     lists:all(
       fun({<<$:, _/binary>>, _}) ->
               false;
+         ({<<"connection">>, _}) ->
+              false;
          (_) -> true
       end,
       DoneWithPseudos)

@@ -12,7 +12,8 @@ all() ->
      sends_uppercase_headers,
      sends_pseudo_after_regular,
      sends_invalid_pseudo,
-     sends_response_pseudo_with_request
+     sends_response_pseudo_with_request,
+     sends_connection_header
     ].
 
 init_per_suite(Config) ->
@@ -186,3 +187,16 @@ test_rst_stream(RequestHeaders) ->
     ?assertEqual(?RST_STREAM, Header#frame_header.type),
     ?assertEqual(?PROTOCOL_ERROR, Payload#rst_stream.error_code),
     ok.
+
+sends_connection_header(_Config) ->
+    test_rst_stream(
+        [
+         {<<":path">>, <<"/">>},
+         {<<":scheme">>, <<"https">>},
+         {<<":authority">>, <<"localhost:8080">>},
+         {<<":method">>, <<"GET">>},
+         {<<"accept">>, <<"*/*">>},
+         {<<"accept-encoding">>, <<"gzip, deflate">>},
+         {<<"user-agent">>, <<"chattercli/0.0.1 :D">>},
+         {<<"connection">>, <<"keep-alive">>}
+        ]).
