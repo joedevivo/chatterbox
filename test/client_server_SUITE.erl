@@ -1,5 +1,7 @@
 -module(client_server_SUITE).
 
+-include("http2.hrl").
+
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("common_test/include/ct.hrl").
 -compile([export_all]).
@@ -8,14 +10,16 @@ all() ->
     [
      {group, default_handler},
      {group, peer_handler},
-     {group, double_body_handler}
+     {group, double_body_handler},
+     {group, echo_handler}
     ].
 
 groups() -> [{default_handler,  [complex_request,
                                  upgrade_tcp_connection,
                                  basic_push]},
              {peer_handler, [get_peer_in_handler]},
-             {double_body_handler, [send_body_opts]}
+             {double_body_handler, [send_body_opts]},
+             {echo_handler, [echo_body]}
             ].
 
 init_per_suite(Config) ->
@@ -33,6 +37,10 @@ init_per_group(double_body_handler, Config) ->
 init_per_group(peer_handler, Config) ->
     NewConfig = [{stream_callback_mod, peer_test_handler},
                  {initial_window_size,99999999}|Config],
+    chatterbox_test_buddy:start(NewConfig);
+init_per_group(echo_handler, Config) ->
+    NewConfig = [{stream_callback_mod, echo_handler},
+                 {initial_window_size,64}|Config],
     chatterbox_test_buddy:start(NewConfig);
 init_per_group(_, Config) -> Config.
 
@@ -145,4 +153,42 @@ send_body_opts(_Config) ->
     ct:pal("Response Headers: ~p", [ResponseHeaders]),
     ct:pal("Response Body: ~p", [ResponseBody]),
     ?assertEqual(ExpectedResponseBody, iolist_to_binary(ResponseBody)),
+    ok.
+
+echo_body(_Config) ->
+    {ok, Client} = http2c:start_link(),
+    RequestHeaders =
+    [
+      {<<":method">>, <<"POST">>},
+      {<<":path">>, <<"/">>},
+      {<<":scheme">>, <<"https">>},
+      {<<":authority">>, <<"localhost:8080">>},
+      {<<"accept">>, <<"*/*">>},
+      {<<"accept-encoding">>, <<"gzip, deflate">>},
+      {<<"user-agent">>, <<"chattercli/0.0.1 :D">>}
+    ],
+
+    {ok, {HeadersBin, _EncodeContext}} = hpack:encode(RequestHeaders, hpack:new_context()),
+
+    HeaderFrame = {#frame_header{
+                      length=byte_size(HeadersBin),
+                      type=?HEADERS,
+                      flags=?FLAG_END_HEADERS,
+                      stream_id=3
+                     },
+                   #headers{block_fragment=HeadersBin}},
+
+    http2c:send_unaltered_frames(Client, [HeaderFrame]),
+
+    Body = crypto:rand_bytes(128),
+    BodyFrames = http2_frame_data:to_frames(3, Body, #settings{max_frame_size=64}),
+    http2c:send_unaltered_frames(Client, BodyFrames),
+
+    timer:sleep(300),
+    Frames = http2c:get_frames(Client, 3),
+    DataFrames = lists:filter(fun({#frame_header{type=?DATA}, _}) -> true;
+                                 (_) -> false end, Frames),
+    ResponseData = lists:map(fun({_, #data{data=Data}}) -> Data end, DataFrames),
+    io:format("Body: ~p, response: ~p~n", [Body, ResponseData]),
+    ?assertEqual(Body, iolist_to_binary(ResponseData)),
     ok.
