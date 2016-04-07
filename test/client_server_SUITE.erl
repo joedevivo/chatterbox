@@ -8,14 +8,16 @@ all() ->
     [
      {group, default_handler},
      {group, peer_handler},
-     {group, double_body_handler}
+     {group, double_body_handler},
+     {group, echo_handler}
     ].
 
 groups() -> [{default_handler,  [complex_request,
                                  upgrade_tcp_connection,
                                  basic_push]},
              {peer_handler, [get_peer_in_handler]},
-             {double_body_handler, [send_body_opts]}
+             {double_body_handler, [send_body_opts]},
+             {echo_handler, [echo_body]}
             ].
 
 init_per_suite(Config) ->
@@ -32,6 +34,10 @@ init_per_group(double_body_handler, Config) ->
     Config;
 init_per_group(peer_handler, Config) ->
     NewConfig = [{stream_callback_mod, peer_test_handler},
+                 {initial_window_size,99999999}|Config],
+    chatterbox_test_buddy:start(NewConfig);
+init_per_group(echo_handler, Config) ->
+    NewConfig = [{stream_callback_mod, echo_handler},
                  {initial_window_size,99999999}|Config],
     chatterbox_test_buddy:start(NewConfig);
 init_per_group(_, Config) -> Config.
@@ -146,3 +152,28 @@ send_body_opts(_Config) ->
     ct:pal("Response Body: ~p", [ResponseBody]),
     ?assertEqual(ExpectedResponseBody, iolist_to_binary(ResponseBody)),
     ok.
+
+echo_body(_Config) ->
+    {ok, Client} = http2_client:start_link(),
+    RequestHeaders =
+        [
+         {<<":method">>, <<"POST">>},
+         {<<":path">>, <<"/">>},
+         {<<":scheme">>, <<"https">>},
+         {<<":authority">>, <<"localhost:8080">>},
+         {<<"accept">>, <<"*/*">>},
+         {<<"accept-encoding">>, <<"gzip, deflate">>},
+         {<<"user-agent">>, <<"chattercli/0.0.1 :D">>}
+        ],
+
+    Body = <<"echo!echo!echo!echo!echo!">>,
+
+    {ok, {ResponseHeaders,
+          ResponseBody}} = http2_client:sync_request(Client, RequestHeaders,
+                                                     Body),
+    ct:pal("Response Headers: ~p", [ResponseHeaders]),
+    ct:pal("Response Body: ~p", [ResponseBody]),
+    ?assertEqual(Body, iolist_to_binary(ResponseBody)),
+    ok.
+
+

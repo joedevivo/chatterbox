@@ -330,14 +330,14 @@ open({recv_frame,
       {#frame_header{
           flags=Flags,
           type=?DATA
-         },_}=F},
+         },{data, Payload}}=F},
      #stream_state{
         incoming_frames=IFQ,
         callback_mod=CB,
         callback_state=CallbackState
        }=Stream)
   when ?NOT_FLAG(Flags, ?FLAG_END_STREAM) ->
-    {ok, NewCBState} = CB:on_receive_request_data(F, CallbackState),
+    {ok, NewCBState} = CB:on_receive_request_data(Payload, CallbackState),
     {next_state,
      open,
      Stream#stream_state{
@@ -350,14 +350,14 @@ open({recv_frame,
       {#frame_header{
               flags=Flags,
               type=?DATA
-         }, _Payload}=F},
+         }, {data, Payload}}=F},
      #stream_state{
         incoming_frames=IFQ,
         callback_mod=CB,
         callback_state=CallbackState
        }=Stream)
   when ?IS_FLAG(Flags, ?FLAG_END_STREAM) ->
-    {ok, CallbackState1} = CB:on_receive_request_data(F, CallbackState),
+    {ok, CallbackState1} = CB:on_receive_request_data(Payload, CallbackState),
     {ok, NewCBState} = CB:on_request_end_stream(CallbackState1),
     {next_state,
      half_closed_remote,
