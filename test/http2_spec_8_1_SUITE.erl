@@ -18,7 +18,8 @@ all() ->
      sends_bad_TE_header,
      sends_double_pseudo,
      sends_invalid_content_length_single_frame,
-     sends_invalid_content_length_multi_frame
+     sends_invalid_content_length_multi_frame,
+     sends_non_integer_content_length
     ].
 
 init_per_suite(Config) ->
@@ -408,4 +409,38 @@ test_content_length(DataFrames) ->
 
 
     WindowUpdates = ExpectedWUs,
+    ok.
+
+sends_non_integer_content_length(_Context) ->
+    RequestHeaders =
+        [
+         {<<":path">>, <<"/">>},
+         {<<":scheme">>, <<"https">>},
+         {<<":authority">>, <<"localhost:8080">>},
+         {<<":method">>, <<"GET">>},
+         {<<"accept">>, <<"*/*">>},
+         {<<"accept-encoding">>, <<"gzip, deflate">>},
+         {<<"user-agent">>, <<"chattercli/0.0.1 :D">>},
+         {<<"content-length">>, <<"q">>}
+        ],
+
+    {ok, Client} = http2c:start_link(),
+    {ok, {HeadersBin, _EC}} = hpack:encode(RequestHeaders, hpack:new_context()),
+    HF = {
+      #frame_header{
+         stream_id=1,
+         flags=?FLAG_END_HEADERS bor ?FLAG_END_STREAM
+        },
+      #headers{
+         block_fragment=HeadersBin
+        }
+     },
+    http2c:send_unaltered_frames(Client, [HF]),
+    Resp = http2c:wait_for_n_frames(Client, 1, 1),
+    ct:pal("Resp: ~p", [Resp]),
+    ?assertEqual(1, length(Resp)),
+    [{Header, Payload}] = Resp,
+    ?assertEqual(?RST_STREAM, Header#frame_header.type),
+    ?assertEqual(?PROTOCOL_ERROR, Payload#rst_stream.error_code),
+
     ok.

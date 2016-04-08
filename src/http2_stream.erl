@@ -321,13 +321,19 @@ open(recv_es,
         callback_mod=CB,
         callback_state=CallbackState
        }=Stream) ->
-    check_content_length(Stream),
-    {ok, NewCBState} = CB:on_request_end_stream(CallbackState),
-    {next_state,
-     half_closed_remote,
-     Stream#stream_state{
-       callback_state=NewCBState
-      }};
+    case check_content_length(Stream) of
+        ok ->
+            {ok, NewCBState} = CB:on_request_end_stream(CallbackState),
+            {next_state,
+             half_closed_remote,
+             Stream#stream_state{
+               callback_state=NewCBState
+              }};
+        rst_stream ->
+            {next_state,
+             closed,
+             Stream}
+    end;
 
 open({recv_frame,
       {#frame_header{
@@ -574,10 +580,17 @@ check_content_length(Stream) ->
         undefined ->
             ok;
         _Other ->
-            case Stream#stream_state.request_body_size =:= binary_to_integer(ContentLength) of
-                true ->
-                    ok;
-                false ->
+            try binary_to_integer(ContentLength) of
+                Integer ->
+                    case Stream#stream_state.request_body_size =:= Integer of
+                        true ->
+                            ok;
+                        false ->
+                            rst_stream_(?PROTOCOL_ERROR, Stream),
+                            rst_stream
+                    end
+            catch
+                _:_ ->
                     rst_stream_(?PROTOCOL_ERROR, Stream),
                     rst_stream
             end
