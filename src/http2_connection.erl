@@ -617,7 +617,6 @@ route_frame({#frame_header{type=?HEADERS}=FH, _Payload}=Frame,
             _ ->
                 {headers, Conn}
         end,
-
     %% If there's an END_HEADERS flag, the headers were only one
     %% frame.
 
@@ -1512,50 +1511,29 @@ maybe_hpack(Continuation, Conn)
     Stream = get_stream(Continuation#continuation_state.stream_id,
                         Conn#connection.streams),
 
-    HeadersType =
-        case {Continuation#continuation_state.type,
-              Conn#connection.type
-             } of
-            {headers, server} ->
-                request;
-            {push_promise, client} ->
-                request;
-             _ -> response
-            end,
-
     HeadersBin = http2_frame_headers:from_frames(
                    queue:to_list(Continuation#continuation_state.frames)),
     case hpack:decode(HeadersBin, Conn#connection.decode_context) of
         {error, compression_error} ->
             go_away(?COMPRESSION_ERROR, Conn);
         {ok, {Headers, NewDecodeContext}} ->
-            case is_valid_headers(HeadersType, Headers) of
-                {error, Code} ->
-                    rst_stream(Stream#stream.id, Code, Conn);
-                ok ->
-                    case {Continuation#continuation_state.type,
-                          Continuation#continuation_state.end_stream} of
-                        {headers, _} ->
-                            http2_stream:recv_h(Stream#stream.pid, Headers),
-                            ok;
-                        %% If this returns 'trailers' then it had better
-                        %% also be end_stream
-                        {trailers, false} ->
-                            rst_stream(Stream#stream.id, ?PROTOCOL_ERROR, Conn);
-                        {trailers, true} ->
-                            http2_stream:recv_h(Stream#stream.pid, Headers),
-                            ok;
-                        {push_promise, _} ->
-                            Promised = get_stream(Continuation#continuation_state.promised_id,
-                                                  Conn#connection.streams),
-                            http2_stream:recv_pp(Promised#stream.pid, Headers)
-                    end,
-                    case Continuation#continuation_state.end_stream of
-                        true ->
-                            http2_stream:recv_es(Stream#stream.pid);
-                        false ->
-                            ok
-                    end
+
+            case {Continuation#continuation_state.type,
+                  Continuation#continuation_state.end_stream} of
+                {push_promise, _} ->
+                    Promised = get_stream(Continuation#continuation_state.promised_id,
+                                          Conn#connection.streams),
+                    http2_stream:recv_pp(Promised#stream.pid, Headers);
+                {trailers, false} ->
+                    rst_stream(Stream#stream.id, ?PROTOCOL_ERROR, Conn);
+                _ -> %% headers or trailers!
+                    http2_stream:recv_h(Stream#stream.pid, Headers)
+            end,
+            case Continuation#continuation_state.end_stream of
+                true ->
+                    http2_stream:recv_es(Stream#stream.pid);
+                false ->
+                    ok
             end,
             {next_state, connected,
              Conn#connection{
@@ -1568,78 +1546,3 @@ maybe_hpack(Continuation, Conn) ->
      Conn#connection{
        continuation = Continuation
       }}.
-
-%% Function checks if a set of headers is valid. Currently that means:
-%%
-%% The list of acceptable pseudoheaders for requests are:
-%%     :method, :scheme, :authority, :path,
-%%
-%% The only acceptable pseudoheader for responses is :status
-%%
-%% All header names are lowercase.
-%%
-%% All pseudoheaders occur before normal headers.
-%%
-%% Still TODO:
-%% * No pseudoheaders are duplicated #44
-%% * A validation case for trailers  #43
-
--spec is_valid_headers( request | response,
-                        hpack:headers() ) ->
-                              ok | {error, term()}.
-is_valid_headers(Type, Headers) ->
-    case
-        validate_pseudos(Type, Headers)
-    of
-        true ->
-            ok;
-        false ->
-            {error, ?PROTOCOL_ERROR}
-    end.
-
-no_upper_names(Headers) ->
-    lists:all(
-      fun({Name,_}) ->
-              NameStr = binary_to_list(Name),
-              NameStr =:= string:to_lower(NameStr)
-      end,
-     Headers).
-
-validate_pseudos(Type, Headers) ->
-    validate_pseudos(Type, Headers, #{}).
-
-validate_pseudos(request, [{<<":path">>,_V}|_Tail], #{<<":path">> := true }) ->
-    false;
-validate_pseudos(request, [{<<":path">>,_V}|Tail], Found) ->
-    validate_pseudos(request, Tail, Found#{<<":path">> => true});
-validate_pseudos(request, [{<<":method">>,_V}|_Tail], #{<<":method">> := true }) ->
-    false;
-validate_pseudos(request, [{<<":method">>,_V}|Tail], Found) ->
-    validate_pseudos(request, Tail, Found#{<<":method">> => true});
-validate_pseudos(request, [{<<":scheme">>,_V}|_Tail], #{<<":scheme">> := true }) ->
-    false;
-validate_pseudos(request, [{<<":scheme">>,_V}|Tail], Found) ->
-    validate_pseudos(request, Tail, Found#{<<":scheme">> => true});
-validate_pseudos(request, [{<<":authority">>,_V}|_Tail], #{<<":authority">> := true }) ->
-    false;
-validate_pseudos(request, [{<<":authority">>,_V}|Tail], Found) ->
-    validate_pseudos(request, Tail, Found#{<<":authority">> => true});
-validate_pseudos(request, [{<<":status">>,_V}|_Tail], #{<<":status">> := true }) ->
-    false;
-validate_pseudos(response, [{<<":status">>,_V}|Tail], Found) ->
-    validate_pseudos(response, Tail, Found#{<<":status">> => true});
-validate_pseudos(_, DoneWithPseudos, _Found) ->
-    lists:all(
-      fun({<<$:, _/binary>>, _}) ->
-              false;
-         ({<<"connection">>, _}) ->
-              false;
-         ({<<"te">>, <<"trailers">>}) ->
-              true;
-         ({<<"te">>, _}) ->
-              false;
-         (_) -> true
-      end,
-      DoneWithPseudos)
-        andalso
-        no_upper_names(DoneWithPseudos).
