@@ -86,6 +86,7 @@
           incoming_frames = queue:new() :: queue:queue(frame()),
           request_headers = [] :: hpack:headers(),
           request_body :: iodata(),
+          request_body_size = 0 :: non_neg_integer(),
           request_end_stream = false :: boolean(),
           request_end_headers = false :: boolean(),
           response_headers = [] :: hpack:headers(),
@@ -290,6 +291,7 @@ reserved_local(timeout,
                   callback_state=CallbackState,
                   callback_mod=CB
                   }=Stream) ->
+    check_content_length(Stream),
     {ok, NewCBState} = CB:on_request_end_stream(CallbackState),
     {next_state,
      reserved_local,
@@ -319,6 +321,7 @@ open(recv_es,
         callback_mod=CB,
         callback_state=CallbackState
        }=Stream) ->
+    check_content_length(Stream),
     {ok, NewCBState} = CB:on_request_end_stream(CallbackState),
     {next_state,
      half_closed_remote,
@@ -329,6 +332,7 @@ open(recv_es,
 open({recv_frame,
       {#frame_header{
           flags=Flags,
+          length=L,
           type=?DATA
          }, #data{data=Payload}}=F},
      #stream_state{
@@ -344,12 +348,14 @@ open({recv_frame,
        %% TODO: We're storing everything in the state. It's fine for
        %% some cases, but the decision should be left to the user
        incoming_frames=queue:in(F, IFQ),
+       request_body_size=Stream#stream_state.request_body_size+L,
        callback_state=NewCBState
       }};
 open({recv_frame,
       {#frame_header{
-              flags=Flags,
-              type=?DATA
+          flags=Flags,
+          length=L,
+          type=?DATA
          }, #data{data=Payload}}=F},
      #stream_state{
         incoming_frames=IFQ,
@@ -358,14 +364,26 @@ open({recv_frame,
        }=Stream)
   when ?IS_FLAG(Flags, ?FLAG_END_STREAM) ->
     {ok, CallbackState1} = CB:on_receive_request_data(Payload, CallbackState),
-    {ok, NewCBState} = CB:on_request_end_stream(CallbackState1),
-    {next_state,
-     half_closed_remote,
-     Stream#stream_state{
-       incoming_frames=queue:in(F, IFQ),
-       request_end_stream=true,
-       callback_state=NewCBState
-      }};
+    NewStream = Stream#stream_state{
+                  incoming_frames=queue:in(F, IFQ),
+                  request_body_size=Stream#stream_state.request_body_size+L,
+                  request_end_stream=true,
+                  callback_state=CallbackState1
+                 },
+    case check_content_length(NewStream) of
+        ok ->
+            {ok, NewCBState} = CB:on_request_end_stream(CallbackState1),
+            {next_state,
+             half_closed_remote,
+             NewStream#stream_state{
+               callback_state=NewCBState
+              }};
+        rst_stream ->
+            {next_state,
+             closed,
+             NewStream}
+        end;
+
 %% Trailers
 open({recv_h, Trailers},
      #stream_state{}=Stream) ->
@@ -546,3 +564,21 @@ rst_stream_(ErrorCode,
                       RstStream}),
     sock:send(Socket, RstStreamBin),
     ok.
+
+check_content_length(Stream) ->
+    ContentLength =
+        proplists:get_value(<<"content-length">>,
+                            Stream#stream_state.request_headers),
+
+    case ContentLength of
+        undefined ->
+            ok;
+        _Other ->
+            case Stream#stream_state.request_body_size =:= ContentLength of
+                true ->
+                    ok;
+                false ->
+                    rst_stream_(?PROTOCOL_ERROR, Stream),
+                    rst_stream
+            end
+    end.
