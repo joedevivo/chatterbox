@@ -40,6 +40,7 @@
          open/2,
          half_closed_local/2,
          half_closed_remote/2,
+         closed/2,
          closed/3
         ]).
 
@@ -241,13 +242,19 @@ idle({recv_h, Headers},
         callback_mod=CB,
         callback_state=CallbackState
        }=Stream) ->
-    {ok, NewCBState} = CB:on_receive_request_headers(Headers, CallbackState),
-    {next_state,
-     open,
-     Stream#stream_state{
-       request_headers=Headers,
-       callback_state=NewCBState
-      }};
+    case is_valid_headers(request, Headers) of
+        ok ->
+            {ok, NewCBState} = CB:on_receive_request_headers(Headers, CallbackState),
+            {next_state,
+             open,
+             Stream#stream_state{
+               request_headers=Headers,
+               callback_state=NewCBState
+              }};
+        {error, Code} ->
+            rst_stream_(Code, Stream)
+    end;
+
 %% Server 'SEND PP'
 idle({send_pp, Headers},
      #stream_state{
@@ -393,11 +400,16 @@ open({recv_frame,
 %% Trailers
 open({recv_h, Trailers},
      #stream_state{}=Stream) ->
-    {next_state,
-     open,
-     Stream#stream_state{
-       request_headers=Stream#stream_state.request_headers ++ Trailers
-      }};
+    case is_valid_headers(request, Trailers) of
+        ok ->
+            {next_state,
+             open,
+             Stream#stream_state{
+               request_headers=Stream#stream_state.request_headers ++ Trailers
+              }};
+        {error, Code} ->
+            rst_stream_(Code, Stream)
+    end;
 open({send_frame,
       {#frame_header{
           type=?DATA,
@@ -449,7 +461,10 @@ half_closed_remote(
                 half_closed_remote
         end,
 
-    {next_state, NextState, Stream}.
+    {next_state, NextState, Stream};
+half_closed_remote(_,
+       #stream_state{}=Stream) ->
+    rst_stream_(?STREAM_CLOSED, Stream).
 
 %% PUSH_PROMISES can only be received by streams in the open or
 %% half_closed_local, but will create a new stream in the idle state,
@@ -459,11 +474,15 @@ half_closed_local(
   {recv_h, Headers},
   #stream_state{
     }=Stream) ->
-    {next_state,
-     half_closed_local,
-     Stream#stream_state{
-       response_headers=Headers}};
-
+  case is_valid_headers(response, Headers) of
+      ok ->
+          {next_state,
+           half_closed_local,
+           Stream#stream_state{
+             response_headers=Headers}};
+      {error, Code} ->
+          rst_stream_(Code, Stream)
+  end;
 half_closed_local(
   {recv_frame,
    {#frame_header{
@@ -497,7 +516,16 @@ half_closed_local(
              Stream#stream_state{
                incoming_frames=NewQ
               }}
-    end.
+    end;
+half_closed_local(_,
+       #stream_state{}=Stream) ->
+    rst_stream_(?STREAM_CLOSED, Stream).
+
+
+
+closed(_,
+       #stream_state{}=Stream) ->
+    rst_stream_(?STREAM_CLOSED, Stream).
 
 closed(get_response,
        _From,
@@ -555,12 +583,15 @@ terminate(normal, _StateName, _State) ->
 terminate(_Reason, _StateName, _State) ->
     lager:debug("terminate reason: ~p~n", [_Reason]).
 
--spec rst_stream_(error_code(), state()) -> ok.
+-spec rst_stream_(error_code(), state()) ->
+                         {next_state,
+                          closed,
+                          state()}.
 rst_stream_(ErrorCode,
            #stream_state{
               socket=Socket,
               stream_id=StreamId
-              }
+              }=Stream
           ) ->
     RstStream = #rst_stream{error_code=ErrorCode},
     RstStreamBin = http2_frame:to_binary(
@@ -569,7 +600,9 @@ rst_stream_(ErrorCode,
                         },
                       RstStream}),
     sock:send(Socket, RstStreamBin),
-    ok.
+    {next_state,
+     closed,
+     Stream}.
 
 check_content_length(Stream) ->
     ContentLength =
@@ -595,3 +628,75 @@ check_content_length(Stream) ->
                     rst_stream
             end
     end.
+
+
+%%% Moving header validation into streams
+
+%% Function checks if a set of headers is valid. Currently that means:
+%%
+%% * The list of acceptable pseudoheaders for requests are:
+%%      :method, :scheme, :authority, :path,
+%% * The only acceptable pseudoheader for responses is :status
+%% * All header names are lowercase.
+%% * All pseudoheaders occur before normal headers.
+%% * No pseudoheaders are duplicated
+
+-spec is_valid_headers( request | response,
+                        hpack:headers() ) ->
+                              ok | {error, term()}.
+is_valid_headers(Type, Headers) ->
+    case
+        validate_pseudos(Type, Headers)
+    of
+        true ->
+            ok;
+        false ->
+            {error, ?PROTOCOL_ERROR}
+    end.
+
+no_upper_names(Headers) ->
+    lists:all(
+      fun({Name,_}) ->
+              NameStr = binary_to_list(Name),
+              NameStr =:= string:to_lower(NameStr)
+      end,
+     Headers).
+
+validate_pseudos(Type, Headers) ->
+    validate_pseudos(Type, Headers, #{}).
+
+validate_pseudos(request, [{<<":path">>,_V}|_Tail], #{<<":path">> := true }) ->
+    false;
+validate_pseudos(request, [{<<":path">>,_V}|Tail], Found) ->
+    validate_pseudos(request, Tail, Found#{<<":path">> => true});
+validate_pseudos(request, [{<<":method">>,_V}|_Tail], #{<<":method">> := true }) ->
+    false;
+validate_pseudos(request, [{<<":method">>,_V}|Tail], Found) ->
+    validate_pseudos(request, Tail, Found#{<<":method">> => true});
+validate_pseudos(request, [{<<":scheme">>,_V}|_Tail], #{<<":scheme">> := true }) ->
+    false;
+validate_pseudos(request, [{<<":scheme">>,_V}|Tail], Found) ->
+    validate_pseudos(request, Tail, Found#{<<":scheme">> => true});
+validate_pseudos(request, [{<<":authority">>,_V}|_Tail], #{<<":authority">> := true }) ->
+    false;
+validate_pseudos(request, [{<<":authority">>,_V}|Tail], Found) ->
+    validate_pseudos(request, Tail, Found#{<<":authority">> => true});
+validate_pseudos(response, [{<<":status">>,_V}|_Tail], #{<<":status">> := true }) ->
+    false;
+validate_pseudos(response, [{<<":status">>,_V}|Tail], Found) ->
+    validate_pseudos(response, Tail, Found#{<<":status">> => true});
+validate_pseudos(_, DoneWithPseudos, _Found) ->
+    lists:all(
+      fun({<<$:, _/binary>>, _}) ->
+              false;
+         ({<<"connection">>, _}) ->
+              false;
+         ({<<"te">>, <<"trailers">>}) ->
+              true;
+         ({<<"te">>, _}) ->
+              false;
+         (_) -> true
+      end,
+      DoneWithPseudos)
+        andalso
+        no_upper_names(DoneWithPseudos).
