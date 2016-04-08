@@ -150,11 +150,10 @@ on_request_end_stream(State=#cb_static{connection_pid=ConnPid,
     case {Method, HeadersToSend, BodyToSend} of
         {<<"HEAD">>, _, _} ->
                 http2_connection:send_headers(ConnPid, StreamId, HeadersToSend, [{send_end_stream, true}]);
-        {<<"GET">>, _, _} ->
-            http2_connection:send_headers(ConnPid, StreamId, HeadersToSend),
-            http2_connection:send_body(ConnPid, StreamId, BodyToSend);
+        %%{<<"GET">>, _, _} ->
         _ ->
-            lager:error("[chatterbox_static_stream] Unsupported :method (~p)", [Method])
+            http2_connection:send_headers(ConnPid, StreamId, HeadersToSend),
+            http2_connection:send_body(ConnPid, StreamId, BodyToSend)
     end,
 
     {ok, State}.
