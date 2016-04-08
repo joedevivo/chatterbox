@@ -8,6 +8,7 @@
 all() ->
     [
      sends_head_request,
+     sends_headers_containing_trailer_part,
      sends_second_headers_with_no_end_stream,
      sends_uppercase_headers,
      sends_pseudo_after_regular,
@@ -57,6 +58,70 @@ sends_head_request(_Config) ->
     [{Header, _Payload}] = Resp,
     ?assertEqual(?HEADERS, Header#frame_header.type),
     ok.
+
+sends_headers_containing_trailer_part(_Config) ->
+    {ok, Client} = http2c:start_link(),
+    RequestHeaders =
+        [
+         {<<":method">>, <<"POST">>},
+         {<<":path">>, <<"/index.html">>},
+         {<<":scheme">>, <<"https">>},
+         {<<":authority">>, <<"localhost:8080">>},
+         {<<"accept">>, <<"*/*">>},
+         {<<"accept-encoding">>, <<"gzip, deflate">>},
+         {<<"user-agent">>, <<"chattercli/0.0.1 :D">>},
+         {<<"content-type">>, <<"text/plain">>},
+         {<<"content-length">>, <<"4">>},
+         {<<"trailer">>, <<"x-test">>}
+        ],
+    {ok, {HeadersBin, EC}} = hpack:encode(RequestHeaders, hpack:new_context()),
+
+    HF = {
+      #frame_header{
+         stream_id=1,
+         flags=?FLAG_END_HEADERS
+        },
+      #headers{
+         block_fragment=HeadersBin
+        }
+     },
+
+    Data = {
+      #frame_header{
+         stream_id=1,
+         length=4
+        },
+      #data{
+         data= <<"test">>
+        }
+     },
+
+    RequestTrailers =
+        [
+         {<<"x-test">>, <<"ok">>}
+        ],
+    {ok, {TrailersBin, _EC2}} = hpack:encode(RequestTrailers, EC),
+    TF = {
+      #frame_header{
+         stream_id=1,
+         flags=?FLAG_END_HEADERS bor ?FLAG_END_STREAM
+        },
+      #headers{
+         block_fragment=TrailersBin
+        }
+     },
+
+    http2c:send_unaltered_frames(Client, [HF, Data, TF]),
+
+    Resp = http2c:wait_for_n_frames(Client, 1, 3),
+    ct:pal("Resp: ~p", [Resp]),
+
+    ?assertEqual(3, length(Resp)),
+    [{_, #window_update{}},{Header, _Payload},{_,#data{}}] = Resp,
+    ?assertEqual(?HEADERS, Header#frame_header.type),
+    %%?assertEqual(?PROTOCOL_ERROR, Payload#rst_stream.error_code),
+    ok.
+
 
 sends_second_headers_with_no_end_stream(_Config) ->
 

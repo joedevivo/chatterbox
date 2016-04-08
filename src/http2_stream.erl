@@ -574,7 +574,7 @@ check_content_length(Stream) ->
         undefined ->
             ok;
         _Other ->
-            case Stream#stream_state.request_body_size =:= ContentLength of
+            case Stream#stream_state.request_body_size =:= binary_to_integer(ContentLength) of
                 true ->
                     ok;
                 false ->

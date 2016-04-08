@@ -1598,7 +1598,6 @@ is_valid_headers(Type, Headers) ->
     end.
 
 no_upper_names(Headers) ->
-    lager:error("Headers: ~p", [Headers]),
     lists:all(
       fun({Name,_}) ->
               NameStr = binary_to_list(Name),
