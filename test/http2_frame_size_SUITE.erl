@@ -34,14 +34,15 @@ wrong_size_window_update(Config) ->
 
 send_wrong_size(Type, _Config) ->
     {ok, Client} = http2c:start_link(),
-    http2c:send_binary(Client, <<10:24,Type:8,0:1,0:31,0:100>>),
+    http2c:send_binary(Client, <<10:24,Type:8,0:1,0:31,0:104>>),
 
     Resp = http2c:wait_for_n_frames(Client, 0, 1),
     ct:pal("Resp: ~p", [Resp]),
 
     ?assertEqual(1, length(Resp)),
-    [{_GoAwayH, GoAway}] = Resp,
-    ?FRAME_SIZE_ERROR = GoAway#goaway.error_code,
+    [{GoAwayH, GoAway}] = Resp,
+    ?assertEqual(?GOAWAY, GoAwayH#frame_header.type),
+    ?assertEqual(?FRAME_SIZE_ERROR, http2_frame_goaway:error_code(GoAway)),
     ok.
 
 frame_too_big(_Config) ->
@@ -53,18 +54,16 @@ frame_too_big(_Config) ->
              type=?HEADERS,
              flags=?FLAG_END_HEADERS,
              stream_id=3},
-          #headers{block_fragment = <<1:131136>>}}
+          http2_frame_headers:new(<<1:131136>>)}
     ],
     http2c:send_unaltered_frames(Client, Frames),
 
     Resp = http2c:wait_for_n_frames(Client, 0, 1),
     ct:pal("Resp: ~p", [Resp]),
-
     ?assertEqual(1, length(Resp)),
-
-    [{_GoAwayH, GoAway}] = Resp,
-    ?FRAME_SIZE_ERROR = GoAway#goaway.error_code,
-
+    [{GoAwayH, GoAway}] = Resp,
+    ?assertEqual(?GOAWAY, GoAwayH#frame_header.type),
+    ?assertEqual(?FRAME_SIZE_ERROR, http2_frame_goaway:error_code(GoAway)),
     ok.
 
 euc(_Config) ->
@@ -93,9 +92,12 @@ euc(_Config) ->
     {ok, {HeadersBin3, _HeaderContext4}} = hpack:encode(Headers3, HeaderContext3),
 
     Frames = [
-              {#frame_header{length=byte_size(HeadersBin1),type=?HEADERS,flags=?FLAG_END_HEADERS,stream_id=3},#headers{block_fragment=HeadersBin1}},
-              {#frame_header{length=byte_size(HeadersBin2),type=?HEADERS,flags=?FLAG_END_HEADERS,stream_id=5},#headers{block_fragment=HeadersBin2}},
-              {#frame_header{length=byte_size(HeadersBin3),type=?HEADERS,flags=?FLAG_END_HEADERS,stream_id=7},#headers{block_fragment=HeadersBin3}}
+              {#frame_header{length=byte_size(HeadersBin1),type=?HEADERS,flags=?FLAG_END_HEADERS,stream_id=3},
+               http2_frame_headers:new(HeadersBin1)},
+              {#frame_header{length=byte_size(HeadersBin2),type=?HEADERS,flags=?FLAG_END_HEADERS,stream_id=5},
+               http2_frame_headers:new(HeadersBin2)},
+              {#frame_header{length=byte_size(HeadersBin3),type=?HEADERS,flags=?FLAG_END_HEADERS,stream_id=7},
+               http2_frame_headers:new(HeadersBin3)}
     ],
 
     http2c:send_unaltered_frames(Client, Frames),

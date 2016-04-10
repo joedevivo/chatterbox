@@ -25,9 +25,7 @@ sends_rst_stream_to_idle(_Config) ->
       #frame_header{
          stream_id=1
         },
-      #rst_stream{
-         error_code=?CANCEL
-        }
+      http2_frame_rst_stream:new(?CANCEL)
      },
 
     http2c:send_unaltered_frames(Client, [F]),
@@ -35,6 +33,7 @@ sends_rst_stream_to_idle(_Config) ->
     Resp = http2c:wait_for_n_frames(Client, 0, 1),
     ct:pal("Resp: ~p", [Resp]),
     ?assertEqual(1, length(Resp)),
-    [{_Header, Payload}] = Resp,
-    ?PROTOCOL_ERROR = Payload#goaway.error_code,
+    [{GoAwayH, GoAway}] = Resp,
+    ?assertEqual(?GOAWAY, GoAwayH#frame_header.type),
+    ?assertEqual(?PROTOCOL_ERROR, http2_frame_goaway:error_code(GoAway)),
     ok.

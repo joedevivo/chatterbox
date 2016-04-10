@@ -30,6 +30,7 @@ sends_invalid_header_block_fragment(_Config) ->
     Resp = http2c:wait_for_n_frames(Client, 0, 1),
     ct:pal("Resp: ~p", [Resp]),
     ?assertEqual(1, length(Resp)),
-    [{_GoAwayH, GoAway}] = Resp,
-    ?COMPRESSION_ERROR = GoAway#goaway.error_code,
+    [{GoAwayH, GoAway}] = Resp,
+    ?assertEqual(?GOAWAY, GoAwayH#frame_header.type),
+    ?assertEqual(?COMPRESSION_ERROR, http2_frame_goaway:error_code(GoAway)),
     ok.

@@ -176,7 +176,8 @@ echo_body(_Config) ->
                       flags=?FLAG_END_HEADERS,
                       stream_id=3
                      },
-                   #headers{block_fragment=HeadersBin}},
+                   http2_frame_headers:new(HeadersBin)
+                  },
 
     http2c:send_unaltered_frames(Client, [HeaderFrame]),
 
@@ -188,7 +189,9 @@ echo_body(_Config) ->
     Frames = http2c:get_frames(Client, 3),
     DataFrames = lists:filter(fun({#frame_header{type=?DATA}, _}) -> true;
                                  (_) -> false end, Frames),
-    ResponseData = lists:map(fun({_, #data{data=Data}}) -> Data end, DataFrames),
+    ResponseData = lists:map(fun({_, DataP}) ->
+                                     http2_frame_data:data(DataP)
+                             end, DataFrames),
     io:format("Body: ~p, response: ~p~n", [Body, ResponseData]),
     ?assertEqual(Body, iolist_to_binary(ResponseData)),
     ok.

@@ -84,7 +84,7 @@
           connection = undefined :: undefined | pid(),
           socket = undefined :: sock:socket(),
           state = idle :: stream_state_name(),
-          incoming_frames = queue:new() :: queue:queue(frame()),
+          incoming_frames = queue:new() :: queue:queue(http2_frame:frame()),
           request_headers = [] :: hpack:headers(),
           request_body :: iodata(),
           request_body_size = 0 :: non_neg_integer(),
@@ -159,12 +159,12 @@ recv_pp(Pid, Headers) ->
 recv_es(Pid) ->
     gen_fsm:send_event(Pid, recv_es).
 
--spec recv_frame(pid(), frame()) ->
+-spec recv_frame(pid(), http2_frame:frame()) ->
                         ok.
 recv_frame(Pid, Frame) ->
     gen_fsm:send_event(Pid, {recv_frame, Frame}).
 
--spec send_frame(pid(), frame()) ->
+-spec send_frame(pid(), http2_frame:frame()) ->
                         ok | flow_control.
 send_frame(Pid, Frame) ->
     gen_fsm:send_event(Pid, {send_frame, Frame}).
@@ -347,14 +347,15 @@ open({recv_frame,
           flags=Flags,
           length=L,
           type=?DATA
-         }, #data{data=Payload}}=F},
+         }, Payload}=F},
      #stream_state{
         incoming_frames=IFQ,
         callback_mod=CB,
         callback_state=CallbackState
        }=Stream)
   when ?NOT_FLAG(Flags, ?FLAG_END_STREAM) ->
-    {ok, NewCBState} = CB:on_receive_request_data(Payload, CallbackState),
+    Bin = http2_frame_data:data(Payload),
+    {ok, NewCBState} = CB:on_receive_request_data(Bin, CallbackState),
     {next_state,
      open,
      Stream#stream_state{
@@ -369,14 +370,15 @@ open({recv_frame,
           flags=Flags,
           length=L,
           type=?DATA
-         }, #data{data=Payload}}=F},
+         }, Payload}=F},
      #stream_state{
         incoming_frames=IFQ,
         callback_mod=CB,
         callback_state=CallbackState
        }=Stream)
   when ?IS_FLAG(Flags, ?FLAG_END_STREAM) ->
-    {ok, CallbackState1} = CB:on_receive_request_data(Payload, CallbackState),
+    Bin = http2_frame_data:data(Payload),
+    {ok, CallbackState1} = CB:on_receive_request_data(Bin, CallbackState),
     NewStream = Stream#stream_state{
                   incoming_frames=queue:in(F, IFQ),
                   request_body_size=Stream#stream_state.request_body_size+L,
@@ -498,7 +500,9 @@ half_closed_local(
 
     case ?IS_FLAG(Flags, ?FLAG_END_STREAM) of
         true ->
-            Data = [ D || {#frame_header{type=?DATA}, #data{data=D}} <- queue:to_list(NewQ)],
+            Data =
+                [ http2_frame_data:data(Payload)
+                  || {#frame_header{type=?DATA}, Payload} <- queue:to_list(NewQ)],
             case NotifyPid of
                 undefined ->
                     ok;
@@ -593,7 +597,7 @@ rst_stream_(ErrorCode,
               stream_id=StreamId
               }=Stream
           ) ->
-    RstStream = #rst_stream{error_code=ErrorCode},
+    RstStream = http2_frame_rst_stream:new(ErrorCode),
     RstStreamBin = http2_frame:to_binary(
                      {#frame_header{
                          stream_id=StreamId

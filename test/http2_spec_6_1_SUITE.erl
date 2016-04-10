@@ -40,9 +40,7 @@ sends_data_with_invalid_pad_length(_Config) ->
          stream_id=1,
          flags=?FLAG_END_HEADERS bor ?FLAG_PADDED
         },
-      #headers{
-         block_fragment=HeadersBin
-        }
+      http2_frame_headers:new(HeadersBin)
      },
 
     http2c:send_unaltered_frames(Client, [HF]),
@@ -54,6 +52,7 @@ sends_data_with_invalid_pad_length(_Config) ->
     Resp = http2c:wait_for_n_frames(Client, 0, 1),
     ct:pal("Resp: ~p", [Resp]),
     ?assertEqual(1, length(Resp)),
-    [{_Header, Payload}] = Resp,
-    ?PROTOCOL_ERROR = Payload#goaway.error_code,
+    [{GoAwayH, GoAway}] = Resp,
+    ?assertEqual(?GOAWAY, GoAwayH#frame_header.type),
+    ?assertEqual(?PROTOCOL_ERROR, http2_frame_goaway:error_code(GoAway)),
     ok.

@@ -90,39 +90,23 @@
     flags = 0   :: non_neg_integer(),
     stream_id   :: stream_id()
     }).
-
 -type frame_header() :: #frame_header{}.
 
--record(data, {
-    data :: iodata()
-  }).
--type data() :: #data{}.
+-type transport() :: gen_tcp | ssl.
+-type socket() :: {gen_tcp, inet:socket()|undefined} | {ssl, ssl:sslsocket()|undefined}.
 
--record(headers, {
-          priority = undefined :: priority() | undefined,
-          block_fragment :: binary()
-}).
--type headers() :: #headers{}.
+-define(PREFACE, "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n").
 
--record(priority, {
-    exclusive = 0 :: 0 | 1,
-    stream_id = 0 :: stream_id(),
-    weight = 0 :: non_neg_integer()
-  }).
--type priority() :: #priority{}.
+-define(DEFAULT_INITIAL_WINDOW_SIZE, 65535).
 
--record(rst_stream, {
-          error_code :: error_code()
-}).
--type rst_stream() :: #rst_stream{}.
-
+%% Settings are too big to be part of the data type refactor. We'll
+%% get to it next
 -record(settings, {header_table_size        = 4096,
                    enable_push              = 1,
                    max_concurrent_streams   = unlimited,
                    initial_window_size      = 65535,
                    max_frame_size           = 16384,
                    max_header_list_size     = unlimited}).
--define(DEFAULT_SETTINGS, #settings{}).
 -type settings() :: #settings{}.
 
 -define(SETTINGS_HEADER_TABLE_SIZE,         <<16#1>>).
@@ -140,58 +124,5 @@
                         ?SETTINGS_MAX_HEADER_LIST_SIZE]).
 
 -type setting_name() :: binary().
-
-
 -type settings_property() :: {setting_name(), any()}.
 -type settings_proplist() :: [settings_property()].
-
--record(push_promise, {
-          promised_stream_id :: stream_id(),
-          block_fragment :: binary()
-}).
--type push_promise() :: #push_promise{}.
-
--record(ping, {
-          opaque_data :: binary()
-}).
--type ping() :: #ping{}.
-
--record(goaway, {
-          last_stream_id :: stream_id(),
-          error_code :: error_code(),
-          additional_debug_data = <<>> :: binary()
-}).
--type goaway() :: #goaway{}.
-
--record(window_update, {
-          window_size_increment :: non_neg_integer()
-}).
--type window_update() :: #window_update{}.
-
--record(continuation, {
-          block_fragment :: binary()
-}).
--type continuation() :: #continuation{}.
-
--type payload() :: data()
-                 | headers()
-                 | settings() | {settings, [proplists:property()]}
-                 | priority()
-                 | settings()
-                 | rst_stream()
-                 | push_promise()
-                 | ping()
-                 | goaway()
-                 | window_update()
-                 | continuation()
-                 | binary().
-
--type frame() :: {frame_header(), payload()}.
-
-
--type transport() :: gen_tcp | ssl.
--type socket() :: {gen_tcp, inet:socket()|undefined} | {ssl, ssl:sslsocket()|undefined}.
-
--define(PREFACE, "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n").
-
--define(DEFAULT_INITIAL_WINDOW_SIZE, 65535).

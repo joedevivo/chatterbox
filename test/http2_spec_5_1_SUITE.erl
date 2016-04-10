@@ -24,7 +24,7 @@ end_per_suite(Config) ->
 sends_rst_stream_to_idle(_Config) ->
     {ok, Client} = http2c:start_link(),
 
-    RstStream = #rst_stream{error_code=?CANCEL},
+    RstStream = http2_frame_rst_stream:new(?CANCEL),
     RstStreamBin = http2_frame:to_binary(
                      {#frame_header{
                          stream_id=1
@@ -37,7 +37,7 @@ sends_rst_stream_to_idle(_Config) ->
     ct:pal("Resp: ~p", [Resp]),
     ?assertEqual(1, length(Resp)),
     [{_GoAwayH, GoAway}] = Resp,
-    ?PROTOCOL_ERROR = GoAway#goaway.error_code,
+    ?assertEqual(?PROTOCOL_ERROR, http2_frame_goaway:error_code(GoAway)),
     ok.
 
 half_closed_remote_sends_headers(_Config) ->
@@ -77,31 +77,30 @@ half_closed_remote_sends_headers(_Config) ->
     Resp = http2c:wait_for_n_frames(Client, 1, 4),
     ct:pal("Resp: ~p", [Resp]),
     ?assertEqual(4, length(Resp)),
-    [{_, #headers{}}, {_, #data{}}, {RstStreamH, RstStream}, _] = Resp,
+    [ {HeadersH, _}, {DataH, _}, {RstStreamH, RstStream}, _] = Resp,
+    ?assertEqual(?HEADERS, HeadersH#frame_header.type),
+    ?assertEqual(?DATA, DataH#frame_header.type),
     ?assertEqual(?RST_STREAM, RstStreamH#frame_header.type),
-    ?assertEqual(?STREAM_CLOSED, RstStream#rst_stream.error_code),
-
+    ?assertEqual(?STREAM_CLOSED, http2_frame_rst_stream:error_code(RstStream)),
     ok.
 
 sends_window_update_to_idle(_Config) ->
     {ok, Client} = http2c:start_link(),
-
-
-
-    WU = #window_update{window_size_increment=1},
     WUBin = http2_frame:to_binary(
                      {#frame_header{
                          stream_id=1
                         },
-                      WU}),
+                      http2_frame_window_update:new(1)
+                      }),
 
     http2c:send_binary(Client, WUBin),
 
     Resp = http2c:wait_for_n_frames(Client, 0, 1),
     ct:pal("Resp: ~p", [Resp]),
     ?assertEqual(1, length(Resp)),
-    [{_GoAwayH, GoAway}] = Resp,
-    ?PROTOCOL_ERROR = GoAway#goaway.error_code,
+    [{GoAwayH, GoAway}] = Resp,
+    ?assertEqual(?GOAWAY, GoAwayH#frame_header.type),
+    ?assertEqual(?PROTOCOL_ERROR, http2_frame_goaway:error_code(GoAway)),
     ok.
 
 client_sends_even_stream_id(_Config) ->
@@ -130,6 +129,7 @@ client_sends_even_stream_id(_Config) ->
     Resp = http2c:wait_for_n_frames(Client, 0, 1),
     ct:pal("Resp: ~p", [Resp]),
     ?assertEqual(1, length(Resp)),
-    [{_GoAwayH, GoAway}] = Resp,
-    ?PROTOCOL_ERROR = GoAway#goaway.error_code,
+    [{GoAwayH, GoAway}] = Resp,
+    ?assertEqual(?GOAWAY, GoAwayH#frame_header.type),
+    ?assertEqual(?PROTOCOL_ERROR, http2_frame_goaway:error_code(GoAway)),
     ok.

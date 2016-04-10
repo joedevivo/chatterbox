@@ -61,10 +61,9 @@ exceed_server_connection_receive_window(_Config) ->
     ct:pal("Resp: ~p", [Resp]),
 
     ?assertEqual(1 , length(Resp)),
-
-    [{#frame_header{type=?GOAWAY}, GoAway}] = Resp,
-    ?assertEqual(?FLOW_CONTROL_ERROR, GoAway#goaway.error_code),
-
+    [{GoAwayH, GoAway}] = Resp,
+    ?assertEqual(?GOAWAY, GoAwayH#frame_header.type),
+    ?assertEqual(?FLOW_CONTROL_ERROR, http2_frame_goaway:error_code(GoAway)),
     ok.
 
 exceed_server_stream_receive_window(_Config) ->
@@ -74,16 +73,18 @@ exceed_server_stream_receive_window(_Config) ->
     [WindowUpdate] = http2c:wait_for_n_frames(Client, 0, 1),
     ct:pal("Expected window update, and got ~p", [WindowUpdate]),
     %% now challenge that
-    {#frame_header{}, #window_update{}} = WindowUpdate,
+
+    {WUH, _} = WindowUpdate,
+    ?assertEqual(?WINDOW_UPDATE, WUH#frame_header.type),
 
     %% Check for RST_STREAM
     Resp = http2c:wait_for_n_frames(Client, 3, 1),
     ct:pal("Resp: ~p", [Resp]),
 
     ?assertEqual(1, length(Resp)),
-
-    [{#frame_header{type=?RST_STREAM}, RstStream}] = Resp,
-    ?assertEqual(?FLOW_CONTROL_ERROR, RstStream#rst_stream.error_code),
+    [{RstStreamH, RstStream}] = Resp,
+    ?assertEqual(?RST_STREAM, RstStreamH#frame_header.type),
+    ?assertEqual(?FLOW_CONTROL_ERROR, http2_frame_rst_stream:error_code(RstStream)),
     ok.
 
 server_buffer_response(_Config) ->
@@ -94,11 +95,13 @@ server_buffer_response(_Config) ->
                {<<":method">>, <<"GET">>}],
     {ok, Client} = http2c:start_link(),
     {ok, {HeadersBin, _EC}} = hpack:encode(Headers, hpack:new_context()),
+
     HF = {#frame_header{length=byte_size(HeadersBin),
                         type=?HEADERS,
                         flags=?FLAG_END_HEADERS bor ?FLAG_END_STREAM,
                         stream_id=3},
-          #headers{block_fragment=HeadersBin}},
+          http2_frame_headers:new(HeadersBin)
+         },
     http2c:send_unaltered_frames(Client, [HF]),
 
     timer:sleep(300),
@@ -122,15 +125,18 @@ server_buffer_response(_Config) ->
 data_frame_size(Frames) ->
     DataFrames = lists:filter(fun({#frame_header{type=?DATA}, _}) -> true;
                                  (_) -> false end, Frames),
-    lists:foldl(fun({_FH, #data{data=Data}}, Acc) ->
-                    Acc + byte_size(Data) end, 0, DataFrames).
+    lists:foldl(fun({_FH, DataP}, Acc) ->
+                        Data = http2_frame_data:data(DataP),
+                        Acc + byte_size(Data) end,
+                0, DataFrames).
 
 send_window_update(Client, Size) ->
     http2c:send_unaltered_frames(Client,
                                  [{#frame_header{length=4,
                                                  type=?WINDOW_UPDATE,
                                                  stream_id=3},
-                                   #window_update{window_size_increment=Size}}
+                                   http2_frame_window_update:new(Size)
+                                  }
                                  ]).
 send_n_bytes(N) ->
     %% We're up and running with a ridiculously small connection
@@ -156,7 +162,8 @@ send_n_bytes(N) ->
                       flags=?FLAG_END_HEADERS,
                       stream_id=3
                      },
-                   #headers{block_fragment=HeadersBin}},
+                   http2_frame_headers:new(HeadersBin)
+                  },
 
     http2c:send_unaltered_frames(Client, [HeaderFrame]),
     %% If the server_connection_receive_window callback_mod worked,
