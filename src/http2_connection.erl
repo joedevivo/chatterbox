@@ -570,11 +570,6 @@ route_frame({#frame_header{type=?HEADERS}=FH, _Payload},
   when Conn#connection.type == server,
        FH#frame_header.stream_id rem 2 == 0 ->
     go_away(?PROTOCOL_ERROR, Conn);
-%route_frame({#frame_header{stream_id=StreamId, type=?HEADERS}=FH, #headers{priority=P}},
-%            #connection{}=Conn)
-%  when ?IS_FLAG(FH#frame_header.flags, ?FLAG_PRIORITY),
-%       P#priority.stream_id == FH#frame_header.stream_id ->
-%    rst_stream(StreamId, ?PROTOCOL_ERROR, Conn);
 route_frame({#frame_header{type=?HEADERS}=FH, _Payload}=Frame,
             #connection{}=Conn) ->
     StreamId = FH#frame_header.stream_id,
@@ -652,10 +647,6 @@ route_frame({H, _Payload},
     when H#frame_header.type == ?PRIORITY,
          H#frame_header.stream_id == 0 ->
     go_away(?PROTOCOL_ERROR, Conn);
-%route_frame({#frame_header{type=?PRIORITY, stream_id=StreamId}, P},
-%            #connection{}=Conn)
-%  when StreamId == P#priority.stream_id ->
-%    rst_stream(StreamId, ?PROTOCOL_ERROR, Conn);
 route_frame({H, _Payload},
             #connection{} = Conn)
     when H#frame_header.type == ?PRIORITY ->
@@ -1410,8 +1401,6 @@ handle_socket_data(Data,
             %% This too
             active_once(Socket),
             {next_state, StateName, NewConn#connection{buffer={frame, Header, Bin}}};
-%%        {error, Code} ->
-%%            go_away(Code, NewConn);
         {error, 0, Code, _Rem} ->
             %% Remaining Bytes don't matter, we're closing up shop.
             go_away(Code, NewConn);

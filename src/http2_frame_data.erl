@@ -17,8 +17,7 @@
     data :: iodata()
   }).
 -type payload() :: #data{}.
--type frame() :: {#frame_header{}, payload()}.
--export_type([frame/0, payload/0]).
+-export_type([payload/0]).
 
 -spec data(payload()) -> iodata().
 data(#data{data=D}) ->
@@ -53,7 +52,7 @@ read_binary(Bin, H=#frame_header{length=L}) ->
             {ok, #data{data=Data}, Rem}
     end.
 
--spec to_frames(stream_id(), iodata(), settings()) -> [frame()].
+-spec to_frames(stream_id(), iodata(), settings()) -> [http2_frame:frame()].
 to_frames(StreamId, IOList, Settings)
   when is_list(IOList) ->
     to_frames(StreamId, iolist_to_binary(IOList), Settings);

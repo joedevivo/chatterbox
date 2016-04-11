@@ -34,7 +34,9 @@ read_binary(<<Data:8/binary,Rem/bits>>, #frame_header{length=8}) ->
     Payload = #ping{
                  opaque_data = Data
                 },
-    {ok, Payload, Rem}.
+    {ok, Payload, Rem};
+read_binary(_, _) ->
+    {error, 0, ?PROTOCOL_ERROR, <<>>}.
 
 -spec to_binary(payload()) -> iodata().
 to_binary(#ping{opaque_data=D}) ->
