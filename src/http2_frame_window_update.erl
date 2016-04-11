@@ -33,6 +33,12 @@ new(Increment) ->
                       Header::frame_header()) ->
                          {ok, payload(), binary()}
                        | {error, stream_id(), error_code(), binary()}.
+read_binary(_,
+            #frame_header{
+               length=L
+               })
+  when L =/= 4 ->
+    {error, 0, ?FRAME_SIZE_ERROR, <<>>};
 read_binary(<<_R:1,0:31,Rem/bits>>, FH) ->
     {error, FH#frame_header.stream_id, ?PROTOCOL_ERROR, Rem};
 read_binary(Bin, #frame_header{length=4}) ->

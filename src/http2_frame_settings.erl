@@ -65,12 +65,23 @@ format({settings, PList}) ->
 -spec read_binary(binary(), frame_header()) ->
                          {ok, payload(), binary()}
                        | {error, stream_id(), error_code(), binary()}.
-read_binary(Bin, _Header = #frame_header{length=0}) ->
+read_binary(Bin,
+            #frame_header{
+               length=0,
+               stream_id=0
+              }) ->
     {ok, {settings, []}, Bin};
-read_binary(Bin, _Header = #frame_header{length=Length}) ->
+read_binary(Bin,
+            #frame_header{
+               length=Length,
+               stream_id=0
+              }) ->
     <<SettingsBin:Length/binary,Rem/bits>> = Bin,
     Settings = parse_settings(SettingsBin),
-    {ok, {settings, Settings}, Rem}.
+    {ok, {settings, Settings}, Rem};
+read_binary(_, _) ->
+    {error, 0, ?PROTOCOL_ERROR, <<>>}.
+
 
 -spec parse_settings(binary()) -> [proplists:property()].
 parse_settings(Bin) ->

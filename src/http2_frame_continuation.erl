@@ -31,6 +31,11 @@ new(Bin) ->
 -spec read_binary(binary(), frame_header()) ->
                          {ok, payload(), binary()}
                        | {error, stream_id(), error_code(), binary()}.
+read_binary(_,
+            #frame_header{
+               stream_id=0
+               }) ->
+    {error, 0, ?PROTOCOL_ERROR, <<>>};
 read_binary(Bin, #frame_header{length=Length}) ->
     <<Data:Length/binary,Rem/bits>> = Bin,
     Payload = #continuation{

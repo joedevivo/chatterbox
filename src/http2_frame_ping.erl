@@ -30,7 +30,18 @@ new(Bin) ->
 -spec read_binary(binary(), frame_header()) ->
                          {ok, payload(), binary()}
                        | {error, stream_id(), error_code(), binary()}.
-read_binary(<<Data:8/binary,Rem/bits>>, #frame_header{length=8}) ->
+read_binary(_,
+            #frame_header{
+               length=L
+               })
+  when L =/= 8->
+     {error, 0, ?FRAME_SIZE_ERROR, <<>>};
+read_binary(<<Data:8/binary,Rem/bits>>,
+            #frame_header{
+               length=8,
+               stream_id=0
+              }
+           ) ->
     Payload = #ping{
                  opaque_data = Data
                 },

@@ -39,7 +39,10 @@ new(Data) ->
     #data{data=Data}.
 
 -spec read_binary(binary(), frame_header()) ->
-    {ok, payload(), binary()}.
+                         {ok, payload(), binary()}
+                       | {error, stream_id(), error_code(), binary()}.
+read_binary(_, #frame_header{stream_id=0}) ->
+    {error, 0, ?PROTOCOL_ERROR, <<>>};
 read_binary(Bin, _H=#frame_header{length=0}) ->
     {ok, #data{data= <<>>}, Bin};
 read_binary(Bin, H=#frame_header{length=L}) ->

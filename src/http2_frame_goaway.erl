@@ -40,7 +40,11 @@ new(StreamId, ErrorCode) ->
 -spec read_binary(binary(), frame_header()) ->
                          {ok, payload(), binary()}
                        | {error, stream_id(), error_code(), binary()}.
-read_binary(Bin, #frame_header{length=L}) ->
+read_binary(Bin,
+            #frame_header{
+               length=L,
+               stream_id=0
+              }) ->
     <<Data:L/binary,Rem/bits>> = Bin,
     <<_R:1,LastStream:31,ErrorCode:32,Extra/bits>> = Data,
     Payload = #goaway{
@@ -48,7 +52,9 @@ read_binary(Bin, #frame_header{length=L}) ->
                  error_code = ErrorCode,
                  additional_debug_data = Extra
                 },
-    {ok, Payload, Rem}.
+    {ok, Payload, Rem};
+read_binary(_, _) ->
+    {error, 0, ?PROTOCOL_ERROR, <<>>}.
 
 -spec to_binary(payload()) -> iodata().
 to_binary(#goaway{

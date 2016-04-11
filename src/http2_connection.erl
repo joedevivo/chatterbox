@@ -348,58 +348,6 @@ route_frame({#frame_header{length=L}, _},
               }=Conn)
     when L > MFS ->
     go_away(?FRAME_SIZE_ERROR, Conn);
-%% Some types have fixed lengths and there's nothing we can do about
-%% it except Frame Size error
-route_frame({#frame_header{
-                length=L,
-                type=T}, _Payload},
-            #connection{}=Conn)
-  when (T == ?PRIORITY      andalso L =/= 5) orelse
-       (T == ?RST_STREAM    andalso L =/= 4) orelse
-       (T == ?PING          andalso L =/= 8) orelse
-       (T == ?WINDOW_UPDATE andalso L =/= 4) ->
-    go_away(?FRAME_SIZE_ERROR, Conn);
-
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%%
-%% Protocol Errors
-%%
-
-%% Not allowed on Stream 0:
-%% - DATA
-%% - HEADERS
-%% - PRIORITY
-%% - RST_STREAM
-%% - PUSH_PROMISE
-%% - CONTINUATION
-route_frame({#frame_header{
-                stream_id=0,
-                type=Type
-                },_Payload},
-            #connection{} = Conn)
-  when Type == ?DATA;
-       Type == ?HEADERS;
-       Type == ?PRIORITY;
-       Type == ?RST_STREAM;
-       Type == ?PUSH_PROMISE;
-       Type == ?CONTINUATION ->
-    lager:error("[~p] ~p frame not allowed on stream 0",
-                [Conn#connection.type, ?FT(Type)]),
-    go_away(?PROTOCOL_ERROR, Conn);
-
-%% Only allowed on stream 0
-route_frame({#frame_header{
-                stream_id=StreamId,
-                type=Type
-                },_Payload},
-            #connection{} = Conn)
-  when StreamId > 0 andalso (
-       Type == ?SETTINGS orelse
-       Type == ?PING orelse
-       Type == ?GOAWAY) ->
-    lager:error("[~p] ~p frame only allowed on stream 0",
-                [Conn#connection.type, ?FT(Type)]),
-    go_away(?PROTOCOL_ERROR, Conn);
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Connection Level Frames

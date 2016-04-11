@@ -37,7 +37,21 @@ new(Exclusive, StreamId, Weight) ->
 -spec read_binary(binary(), frame_header()) ->
                          {ok, payload(), binary()}
                        | {error, stream_id(), error_code(), binary()}.
-read_binary(Bin, #frame_header{}=H) ->
+read_binary(_,
+            #frame_header{
+               stream_id=0
+              }) ->
+    {error, 0, ?PROTOCOL_ERROR, <<>>};
+read_binary(_,
+           #frame_header{
+             length=L
+             })
+  when L =/= 5 ->
+    {error, 0, ?FRAME_SIZE_ERROR, <<>>};
+read_binary(Bin,
+            #frame_header{
+               length=5
+              }=H) ->
     {Payload, Rem} = read_priority(Bin),
     PriorityStream = Payload#priority.stream_id,
     case H#frame_header.stream_id of

@@ -31,14 +31,24 @@ format(Payload) ->
     io_lib:format("[RST Stream: ~p]", [Payload]).
 
 -spec read_binary(binary(), frame_header()) ->
-    {ok, payload(), binary()}.
+                         {ok, payload(), binary()}
+                       | {error, stream_id(), error_code(), binary()}.
+read_binary(_,
+            #frame_header{
+               stream_id=0
+               }) ->
+    {error, 0, ?PROTOCOL_ERROR, <<>>};
+read_binary(_,
+            #frame_header{
+               length=L
+              })
+  when L =/= 4 ->
+    {error, 0, ?FRAME_SIZE_ERROR, <<>>};
 read_binary(<<ErrorCode:32,Rem/bits>>, #frame_header{length=4}) ->
     Payload = #rst_stream{
                  error_code = ErrorCode
                 },
-    {ok, Payload, Rem};
-read_binary(_, #frame_header{stream_id=0}) ->
-    {error, frame_size_error}.
+    {ok, Payload, Rem}.
 
 -spec to_binary(payload()) -> iodata().
 to_binary(#rst_stream{error_code=C}) ->
