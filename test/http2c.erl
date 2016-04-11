@@ -3,7 +3,7 @@
 %% PLEASE ONLY USE FOR TESTING
 %%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
+-compile({parse_transform, lager_transform}).
 -module(http2c).
 
 -behaviour(gen_server).
@@ -41,7 +41,7 @@
           send_settings = #settings{} :: settings(),
           encode_context = hpack:new_context() :: hpack:context(),
           next_available_stream_id = 1 :: pos_integer(),
-          incoming_frames = [] :: [frame()],
+          incoming_frames = [] :: [http2_frame:frame()],
           working_frame_header = undefined :: undefined | frame_header(),
           working_frame_payload = <<>> :: binary(),
           working_length = 0 :: non_neg_integer()
@@ -68,7 +68,7 @@ send_binary(Pid, Binary) ->
 %% desgined for testing error conditions by giving you the freedom to
 %% create bad sets of frames. This will problably only be exported
 %% ifdef(TEST)
--spec send_unaltered_frames(pid(), [frame()]) -> ok.
+-spec send_unaltered_frames(pid(), [http2_frame:frame()]) -> ok.
 send_unaltered_frames(Pid, Frames) ->
     [ send_binary(Pid, http2_frame:to_binary(F)) || F <- Frames],
     ok.
@@ -251,7 +251,7 @@ code_change(_OldVsn, State, _Extra) ->
     binary(),
     frame_header() | undefined,
     binary(),
-    [frame()]) -> {[frame()], frame_header() | undefined, binary() | undefined}.
+    [http2_frame:frame()]) -> {[http2_frame:frame()], frame_header() | undefined, binary() | undefined}.
 %%OMG probably a monad
 process_binary(<<>>, undefined, <<>>, Frames) -> {Frames, undefined, <<>>};
 

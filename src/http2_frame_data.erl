@@ -6,12 +6,24 @@
          format/1,
          read_binary/2,
          to_frames/3,
-         to_binary/1
+         to_binary/1,
+         data/1,
+         new/1
         ]).
 
 -behaviour(http2_frame).
 
--spec format(data()) -> iodata().
+-record(data, {
+    data :: iodata()
+  }).
+-type payload() :: #data{}.
+-export_type([payload/0]).
+
+-spec data(payload()) -> iodata().
+data(#data{data=D}) ->
+    D.
+
+-spec format(payload()) -> iodata().
 format(Payload) ->
     BinToShow = case size(Payload) > 7 of
         false ->
@@ -22,8 +34,15 @@ format(Payload) ->
     end,
     io_lib:format("[Data: {data: ~p ...}]", [BinToShow]).
 
+-spec new(binary()) -> payload().
+new(Data) ->
+    #data{data=Data}.
+
 -spec read_binary(binary(), frame_header()) ->
-    {ok, payload(), binary()}.
+                         {ok, payload(), binary()}
+                       | {error, stream_id(), error_code(), binary()}.
+read_binary(_, #frame_header{stream_id=0}) ->
+    {error, 0, ?PROTOCOL_ERROR, <<>>};
 read_binary(Bin, _H=#frame_header{length=0}) ->
     {ok, #data{data= <<>>}, Bin};
 read_binary(Bin, H=#frame_header{length=L}) ->
@@ -36,7 +55,7 @@ read_binary(Bin, H=#frame_header{length=L}) ->
             {ok, #data{data=Data}, Rem}
     end.
 
--spec to_frames(stream_id(), iodata(), settings()) -> [frame()].
+-spec to_frames(stream_id(), iodata(), settings()) -> [http2_frame:frame()].
 to_frames(StreamId, IOList, Settings)
   when is_list(IOList) ->
     to_frames(StreamId, iolist_to_binary(IOList), Settings);
@@ -61,6 +80,6 @@ to_frames(StreamId, Data, S=#settings{max_frame_size=MFS}) ->
     end.
 
 
--spec to_binary(data()) -> iodata().
+-spec to_binary(payload()) -> iodata().
 to_binary(#data{data=D}) ->
     D.

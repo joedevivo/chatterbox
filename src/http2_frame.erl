@@ -16,6 +16,22 @@
          header_to_binary/1
 ]).
 
+-type payload() :: http2_frame_data:payload()
+                 | http2_frame_headers:payload()
+                 | http2_frame_priority:payload()
+                 | http2_frame_rst_stream:payload()
+                 | http2_frame_settings:payload()
+                 | http2_frame_push_promise:payload()
+                 | http2_frame_ping:payload()
+                 | http2_frame_goaway:payload()
+                 | http2_frame_window_update:payload()
+                 | http2_frame_continuation:payload().
+
+-type frame() :: {frame_header(),
+                  payload()}.
+
+-export_type([frame/0, payload/0]).
+
 %% Each frame type should be able to be read off a binary stream. If
 %% the header is good, then it'll know how many more bytes to take off
 %% the stream for the payload. If there are more bytes left over, it's
@@ -23,7 +39,8 @@
 %% remainder as well.
 -callback read_binary(Bin::binary(),
                       Header::frame_header()) ->
-    {ok, payload(), Remainder::binary()} | {error, term()}.
+    {ok, payload(), Remainder::binary()}
+  | {error, stream_id(), error_code(), binary()}.
 
 %% For io:formating
 -callback format(payload()) -> iodata().
@@ -34,30 +51,27 @@
 %% TODO: some kind of callback for sending frames
 %-callback send(port(), payload()) -> ok | {error, term()}.
 
-
-%% for http2_socket
 -spec recv(binary() |
            {frame_header(), binary()}) ->
                   {ok, frame(), binary()}
-                | {error, not_enoguh_header, binary()}
-                | {error, not_enough_payload, frame_header(), binary()}
-                | {error, error_code()}.
+                | {not_enough_header, binary()}
+                | {not_enough_payload, frame_header(), binary()}
+                | {error, stream_id(), error_code(), binary()}.
 recv(Bin)
   when is_binary(Bin), byte_size(Bin) < 9 ->
-    {error, not_enough_header, Bin};
+    {not_enough_header, Bin};
 recv(Bin)
   when is_binary(Bin) ->
     {Header, PayloadBin} = read_binary_frame_header(Bin),
     recv({Header, PayloadBin});
 recv({Header, PayloadBin})
   when byte_size(PayloadBin) < Header#frame_header.length ->
-    {error, not_enough_payload, Header, PayloadBin};
+    {not_enough_payload, Header, PayloadBin};
 recv({Header, PayloadBin}) ->
     case read_binary_payload(PayloadBin, Header) of
         {ok, Payload, Rem} ->
             {ok, {Header, Payload}, Rem};
-        {error, Code} ->
-            {error, Code}
+        Error -> Error
     end.
 
 -spec read(socket()) -> {frame_header(), payload()}.
@@ -132,7 +146,9 @@ read_payload({Transport, Socket}, Header=#frame_header{length=L}, Timeout) ->
     end.
 
 -spec read_binary_payload(binary(), frame_header()) ->
-    {ok, payload(), binary()} | {error, error_code()}.
+                                 {ok, payload(), binary()}
+                               | {error, error_code()}
+                               | {error, stream_id(), error_code(), binary()}.
 read_binary_payload(Bin, Header = #frame_header{type=?DATA}) ->
     http2_frame_data:read_binary(Bin, Header);
 read_binary_payload(Bin, Header = #frame_header{type=?HEADERS}) ->
@@ -217,16 +233,23 @@ header_to_binary(#frame_header{
     <<L:24,T:8,F:8,0:1,StreamId:31>>.
 
 -spec payload_to_binary(payload()) -> {frame_type(), iodata()}.
-payload_to_binary(P=#data{})          -> {?DATA, http2_frame_data:to_binary(P)};
-payload_to_binary(P=#headers{})       -> {?HEADERS, http2_frame_headers:to_binary(P)};
-payload_to_binary(P=#priority{})      -> {?PRIORITY, http2_frame_priority:to_binary(P)};
-payload_to_binary(P=#rst_stream{})    -> {?RST_STREAM, http2_frame_rst_stream:to_binary(P)};
-payload_to_binary(P=#settings{})      -> {?SETTINGS, http2_frame_settings:to_binary(P)};
-payload_to_binary(P=#push_promise{})  -> {?PUSH_PROMISE, http2_frame_push_promise:to_binary(P)};
-payload_to_binary(P=#ping{})          -> {?PING, http2_frame_ping:to_binary(P)};
-payload_to_binary(P=#goaway{})        -> {?GOAWAY, http2_frame_goaway:to_binary(P)};
-payload_to_binary(P=#window_update{}) -> {?WINDOW_UPDATE, http2_frame_window_update:to_binary(P)};
-payload_to_binary(P=#continuation{})  -> {?CONTINUATION, http2_frame_continuation:to_binary(P)}.
+payload_to_binary(P) ->
+    Type = payload_type(P),
+
+    Bin =
+        case Type of
+            ?DATA -> http2_frame_data:to_binary(P);
+            ?HEADERS -> http2_frame_headers:to_binary(P);
+            ?PRIORITY -> http2_frame_priority:to_binary(P);
+            ?RST_STREAM -> http2_frame_rst_stream:to_binary(P);
+            ?SETTINGS ->  http2_frame_settings:to_binary(P);
+            ?PUSH_PROMISE -> http2_frame_push_promise:to_binary(P);
+            ?PING -> http2_frame_ping:to_binary(P);
+            ?GOAWAY -> http2_frame_goaway:to_binary(P);
+            ?WINDOW_UPDATE -> http2_frame_window_update:to_binary(P);
+            ?CONTINUATION -> http2_frame_continuation:to_binary(P)
+        end,
+    {Type, Bin}.
 
 iodata_size(L) when is_list(L) ->
     lists:foldl(fun(X, Acc) ->
@@ -234,3 +257,19 @@ iodata_size(L) when is_list(L) ->
                 end, 0, L);
 iodata_size(B) when is_binary(B) ->
     byte_size(B).
+
+%% Breaking my own abstraction here, but only for a performance
+%% optimization. This function assumes that records are built with the
+%% record name as the first element in the tuple, and if that changes,
+%% or if payloads are no longer records, then this will stop working.
+-spec payload_type(payload()) -> frame_type().
+payload_type(P) when element(1, P) =:= data          -> ?DATA;
+payload_type(P) when element(1, P) =:= headers       -> ?HEADERS;
+payload_type(P) when element(1, P) =:= priority      -> ?PRIORITY;
+payload_type(P) when element(1, P) =:= rst_stream    -> ?RST_STREAM;
+payload_type(P) when element(1, P) =:= settings      -> ?SETTINGS;
+payload_type(P) when element(1, P) =:= push_promise  -> ?PUSH_PROMISE;
+payload_type(P) when element(1, P) =:= ping          -> ?PING;
+payload_type(P) when element(1, P) =:= goaway        -> ?GOAWAY;
+payload_type(P) when element(1, P) =:= window_update -> ?WINDOW_UPDATE;
+payload_type(P) when element(1, P) =:= continuation  -> ?CONTINUATION.

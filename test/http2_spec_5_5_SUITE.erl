@@ -28,22 +28,22 @@ sends_unknown_extension_frame(_Config) ->
     http2c:send_binary(Client, Bin),
 
     %% It should be ignored, so let's send a ping and get one back
-    http2c:send_unaltered_frames(Client,
-                                 [
-                                  {#frame_header{
-                                      type=?PING,
-                                      stream_id=0,
-                                      length=8
-                                     },
-                                   #ping{
-                                      opaque_data= crypto:rand_bytes(8)
-                                     }}
-                                 ]),
-
+    Data = crypto:rand_bytes(8),
+    http2c:send_unaltered_frames(
+      Client,
+      [
+       {#frame_header{
+           type=?PING,
+           stream_id=0,
+           length=8
+          },
+        http2_frame_ping:new(Data)
+       }
+      ]),
 
     Resp = http2c:wait_for_n_frames(Client, 0, 1),
     ct:pal("Resp: ~p", [Resp]),
     ?assertEqual(1, length(Resp)),
     [{PingH, _PingBody}] = Resp,
-    ?PING = PingH#frame_header.type,
+    ?assertEqual(?PING, PingH#frame_header.type),
     ok.

@@ -37,24 +37,24 @@ basic_continuation(_Config) ->
     {ok, {HeadersBin, _NewContext}} = hpack:encode(Headers, hpack:new_context()),
 
     <<H1:8/binary,H2:8/binary,H3/binary>> = HeadersBin,
-
-    Frames = [
-              {#frame_header{length=8,type=?HEADERS,flags=?FLAG_END_STREAM,stream_id=3},#headers{block_fragment=H1}},
-              {#frame_header{length=8,type=?CONTINUATION,stream_id=3},#continuation{block_fragment=H2}},
-              {#frame_header{length=8,type=?CONTINUATION,flags=?FLAG_END_HEADERS,stream_id=3},#continuation{block_fragment=H3}}
-    ],
+    Frames =
+        [
+         {#frame_header{length=8,type=?HEADERS,flags=?FLAG_END_STREAM,stream_id=3},
+          http2_frame_headers:new(H1)},
+         {#frame_header{length=8,type=?CONTINUATION,stream_id=3},
+          http2_frame_continuation:new(H2)},
+         {#frame_header{length=8,type=?CONTINUATION,flags=?FLAG_END_HEADERS,stream_id=3},
+          http2_frame_continuation:new(H3)}
+        ],
     http2c:send_unaltered_frames(Client, Frames),
-
     Resp = http2c:wait_for_n_frames(Client, 3, 2),
     cthr:pal("Resp: ~p", [Resp]),
-
     ?assertEqual(2, length(Resp)),
     ok.
 
 
 basic_continuation_end_stream_first(_Config) ->
     {ok, Client} = http2c:start_link(),
-
     %% build some headers
     Headers = [
                {<<":method">>, <<"GET">>},
@@ -70,18 +70,21 @@ basic_continuation_end_stream_first(_Config) ->
 
     <<H1:8/binary,H2:8/binary,H3/binary>> = HeadersBin,
 
-    Frames = [
-              {#frame_header{length=8,type=?HEADERS,flags=?FLAG_END_STREAM,stream_id=3},#headers{block_fragment=H1}},
-              {#frame_header{length=8,type=?CONTINUATION,stream_id=3},#continuation{block_fragment=H2}},
-              {#frame_header{length=8,type=?CONTINUATION,flags=?FLAG_END_HEADERS,stream_id=3},#continuation{block_fragment=H3}}
-    ],
+    Frames =
+        [
+         {#frame_header{length=8,type=?HEADERS,flags=?FLAG_END_STREAM,stream_id=3},
+          http2_frame_headers:new(H1)},
+         {#frame_header{length=8,type=?CONTINUATION,stream_id=3},
+          http2_frame_continuation:new(H2)},
+         {#frame_header{length=8,type=?CONTINUATION,flags=?FLAG_END_HEADERS,stream_id=3},
+          http2_frame_continuation:new(H3)}
+        ],
     http2c:send_unaltered_frames(Client, Frames),
 
     Resp = http2c:wait_for_n_frames(Client, 3, 2),
     cthr:pal("Resp: ~p", [Resp]),
     ?assertEqual(2, length(Resp)),
     ok.
-
 
 bad_frame_wrong_type_between_continuations(_Config) ->
     {ok, Client} = http2c:start_link(),
@@ -101,12 +104,17 @@ bad_frame_wrong_type_between_continuations(_Config) ->
 
     <<H1:8/binary,H2:8/binary,H3/binary>> = HeadersBin,
 
-    Frames = [
-              {#frame_header{length=8,type=?HEADERS,stream_id=3},#headers{block_fragment=H1}},
-              {#frame_header{length=8,type=?CONTINUATION,stream_id=3},#continuation{block_fragment=H2}},
-              {#frame_header{length=8,type=?HEADERS,stream_id=3},#headers{block_fragment=H1}},
-              {#frame_header{length=8,type=?CONTINUATION,flags=?FLAG_END_HEADERS,stream_id=3},#continuation{block_fragment=H3}}
-    ],
+    Frames =
+        [
+         {#frame_header{length=8,type=?HEADERS,stream_id=3},
+          http2_frame_headers:new(H1)},
+         {#frame_header{length=8,type=?CONTINUATION,stream_id=3},
+          http2_frame_continuation:new(H2)},
+         {#frame_header{length=8,type=?HEADERS,stream_id=3},
+          http2_frame_headers:new(H1)},
+         {#frame_header{length=8,type=?CONTINUATION,flags=?FLAG_END_HEADERS,stream_id=3},
+          http2_frame_continuation:new(H3)}
+        ],
     http2c:send_unaltered_frames(Client, Frames),
 
     Resp = http2c:wait_for_n_frames(Client, 3, 0),
@@ -114,9 +122,9 @@ bad_frame_wrong_type_between_continuations(_Config) ->
     ?assertEqual(0, length(Resp)),
     Resp2 = http2c:wait_for_n_frames(Client, 0, 1),
     1 = length(Resp2),
-
-    [{_GoAwayH, GoAway}] = Resp2,
-    ?PROTOCOL_ERROR = GoAway#goaway.error_code,
+    [{GoAwayH, GoAway}] = Resp2,
+    ?assertEqual(?GOAWAY, GoAwayH#frame_header.type),
+    ?assertEqual(?PROTOCOL_ERROR, http2_frame_goaway:error_code(GoAway)),
     ok.
 
 bad_frame_wrong_stream_between_continuations(_Config) ->
@@ -137,12 +145,17 @@ bad_frame_wrong_stream_between_continuations(_Config) ->
 
     <<H1:8/binary,H2:8/binary,H3/binary>> = HeadersBin,
 
-    Frames = [
-              {#frame_header{length=8,type=?HEADERS,stream_id=3},#headers{block_fragment=H1}},
-              {#frame_header{length=8,type=?CONTINUATION,stream_id=3},#continuation{block_fragment=H2}},
-              {#frame_header{length=8,type=?HEADERS,stream_id=5},#headers{block_fragment=H1}},
-              {#frame_header{length=8,type=?CONTINUATION,flags=?FLAG_END_HEADERS,stream_id=3},#continuation{block_fragment=H3}}
-    ],
+    Frames =
+        [
+         {#frame_header{length=8,type=?HEADERS,stream_id=3},
+          http2_frame_headers:new(H1)},
+         {#frame_header{length=8,type=?CONTINUATION,stream_id=3},
+          http2_frame_continuation:new(H2)},
+         {#frame_header{length=8,type=?HEADERS,stream_id=5},
+          http2_frame_headers:new(H1)},
+         {#frame_header{length=8,type=?CONTINUATION,flags=?FLAG_END_HEADERS,stream_id=3},
+          http2_frame_continuation:new(H3)}
+        ],
     http2c:send_unaltered_frames(Client, Frames),
 
     Resp = http2c:wait_for_n_frames(Client, 3, 0),
@@ -151,9 +164,8 @@ bad_frame_wrong_stream_between_continuations(_Config) ->
     ?assertEqual(0, length(Resp)),
 
     Resp2 = http2c:wait_for_n_frames(Client, 0, 1),
-
     1 = length(Resp2),
-
-    [{_GoAwayH, GoAway}] = Resp2,
-    ?PROTOCOL_ERROR = GoAway#goaway.error_code,
+    [{GoAwayH, GoAway}] = Resp2,
+    ?assertEqual(?GOAWAY, GoAwayH#frame_header.type),
+    ?assertEqual(?PROTOCOL_ERROR, http2_frame_goaway:error_code(GoAway)),
     ok.

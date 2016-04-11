@@ -4,40 +4,78 @@
 
 -behaviour(http2_frame).
 
--export([
+-export(
+   [
     format/1,
     from_frames/1,
+    new/1,
+    new/2,
     read_binary/2,
     to_frames/5,
     to_binary/1
   ]).
 
--spec format(headers()) -> iodata().
+-record(headers,
+        {
+          priority = undefined :: http2_frame_priority:payload() | undefined,
+          block_fragment :: binary()
+        }).
+-type payload() :: #headers{}.
+-export_type([payload/0]).
+
+-spec format(payload()) -> iodata().
 format(Payload) ->
     io_lib:format("[Headers: ~p]", [Payload]).
 
--spec read_binary(binary(), frame_header()) ->
+-spec new(binary()) -> payload().
+new(BlockFragment) ->
+    #headers{block_fragment=BlockFragment}.
+
+-spec new(http2_frame_priority:payload(),
+          binary()) ->
+                 payload().
+new(Priority, BlockFragment) ->
+    #headers{
+       priority=Priority,
+       block_fragment=BlockFragment
+      }.
+
+-spec read_binary(binary(),
+                  frame_header()) ->
                          {ok, payload(), binary()}
-                       | {error, error_code()}.
+                       | {error, stream_id(), error_code(), binary()}.
+read_binary(_,
+            #frame_header{
+               stream_id=0
+              }) ->
+    {error, 0, ?PROTOCOL_ERROR, <<>>};
 read_binary(Bin, H = #frame_header{length=L}) ->
     <<PayloadBin:L/binary,Rem/bits>> = Bin,
     case http2_padding:read_possibly_padded_payload(PayloadBin, H) of
         {error, Code} ->
-            {error, Code};
+            {error, 0, Code, Rem};
         Data ->
-            {Priority, HeaderFragment} =
+            {Priority, PSID, HeaderFragment} =
                 case is_priority(H) of
                     true ->
-                        http2_frame_priority:read_priority(Data);
+                        {P, PRem} = http2_frame_priority:read_priority(Data),
+                        PStream = http2_frame_priority:stream_id(P),
+                        {P, PStream, PRem};
                     false ->
-                        {undefined, Data}
+                        {undefined, undefined, Data}
                 end,
 
-            Payload = #headers{
-                         priority=Priority,
-                         block_fragment=HeaderFragment
-                        },
-            {ok, Payload, Rem}
+            case PSID =:= H#frame_header.stream_id of
+                true ->
+                    {error, PSID, ?PROTOCOL_ERROR, Rem};
+                false ->
+
+                    Payload = #headers{
+                                 priority=Priority,
+                                 block_fragment=HeaderFragment
+                                },
+                    {ok, Payload, Rem}
+            end
     end.
 
 is_priority(#frame_header{flags=F}) when ?IS_FLAG(F, ?FLAG_PRIORITY) ->
@@ -50,7 +88,7 @@ is_priority(_) ->
                 EncodeContext :: hpack:context(),
                 MaxFrameSize  :: pos_integer(),
                 EndStream     :: boolean()) ->
-                       {[frame()], hpack:context()}.
+                       {[http2_frame:frame()], hpack:context()}.
 to_frames(StreamId, Headers, EncodeContext, MaxFrameSize, EndStream) ->
     {ok, {HeadersBin, NewContext}} = hpack:encode(Headers, EncodeContext),
 
@@ -61,7 +99,7 @@ to_frames(StreamId, Headers, EncodeContext, MaxFrameSize, EndStream) ->
 
     {Frames, NewContext}.
 
--spec to_binary(headers()) -> iodata().
+-spec to_binary(payload()) -> iodata().
 to_binary(#headers{
              priority=P,
              block_fragment=BF
@@ -73,15 +111,17 @@ to_binary(#headers{
             [http2_frame_priority:to_binary(P), BF]
     end.
 
--spec from_frames([frame()], binary()) -> binary().
+-spec from_frames([http2_frame:frame()], binary()) -> binary().
 from_frames([{#frame_header{type=?HEADERS},#headers{block_fragment=BF}}|Continuations])->
     from_frames(Continuations, BF);
-from_frames([{#frame_header{type=?PUSH_PROMISE},#push_promise{block_fragment=BF}}|Continuations])->
+from_frames([{#frame_header{type=?PUSH_PROMISE},PP}|Continuations])->
+    BF = http2_frame_push_promise:block_fragment(PP),
     from_frames(Continuations, BF).
 
 from_frames([], Acc) ->
     Acc;
-from_frames([{#frame_header{type=?CONTINUATION},#continuation{block_fragment=BF}}|Continuations], Acc) ->
+from_frames([{#frame_header{type=?CONTINUATION},Cont}|Continuations], Acc) ->
+    BF = http2_frame_continuation:block_fragment(Cont),
     from_frames(Continuations, <<Acc/binary,BF/binary>>).
 
 -spec split(Binary::binary(),
@@ -109,7 +149,7 @@ split(Binary, MaxFrameSize, Acc) ->
 -spec build_frames(StreamId :: stream_id(),
                    Chunks::[binary()],
                    EndStream::boolean()) ->
-                          [frame()].
+                          [http2_frame:frame()].
 build_frames(StreamId, [FirstChunk|Rest], EndStream) ->
     Flag = case EndStream of
                true ->
@@ -137,8 +177,8 @@ build_frames(StreamId, [FirstChunk|Rest], EndStream) ->
 
 -spec build_frames_(StreamId::stream_id(),
                     Chunks::[binary()],
-                    Acc::[frame()])->
-                           [frame()].
+                    Acc::[http2_frame:frame()])->
+                           [http2_frame:frame()].
 build_frames_(_StreamId, [], Acc) ->
     Acc;
 build_frames_(StreamId, [NextChunk|Rest], Acc) ->
@@ -149,8 +189,6 @@ build_frames_(StreamId, [NextChunk|Rest], Acc) ->
          flags=0,
          length=byte_size(NextChunk)
         },
-      #continuation{
-         block_fragment=NextChunk
-        }
+      http2_frame_continuation:new(NextChunk)
      },
     build_frames_(StreamId, Rest, [NextFrame|Acc]).

@@ -4,19 +4,51 @@
 
 -behaviour(http2_frame).
 
--export([
+-export(
+   [
+    block_fragment/1,
     format/1,
+    new/2,
+    promised_stream_id/1,
     read_binary/2,
     to_binary/1,
     to_frame/4
     ]).
 
--spec format(push_promise()) -> iodata().
+-record(push_promise, {
+          promised_stream_id :: stream_id(),
+          block_fragment :: binary()
+}).
+-type payload() :: #push_promise{}.
+-export_type([payload/0]).
+
+-spec block_fragment(payload()) -> binary().
+block_fragment(#push_promise{block_fragment=BF}) ->
+    BF.
+
+-spec promised_stream_id(payload()) -> stream_id().
+promised_stream_id(#push_promise{promised_stream_id=PSID}) ->
+    PSID.
+
+-spec format(payload()) -> iodata().
 format(Payload) ->
     io_lib:format("[Headers: ~p]", [Payload]).
 
+-spec new(stream_id(), binary()) -> payload().
+new(StreamId, Bin) ->
+    #push_promise{
+       promised_stream_id=StreamId,
+       block_fragment=Bin
+      }.
+
 -spec read_binary(binary(), frame_header()) ->
-    {ok, payload(), binary()} | {error, term()}.
+                         {ok, payload(), binary()}
+                       | {error, stream_id(), error_code(), binary()}.
+read_binary(_,
+            #frame_header{
+               stream_id=0
+               }) ->
+    {error, 0, ?PROTOCOL_ERROR, <<>>};
 read_binary(Bin, H=#frame_header{length=L}) ->
     <<PayloadBin:L/binary,Rem/binary>> = Bin,
     Data = http2_padding:read_possibly_padded_payload(PayloadBin, H),
@@ -28,7 +60,7 @@ read_binary(Bin, H=#frame_header{length=L}) ->
     {ok, Payload, Rem}.
 
 -spec to_frame(pos_integer(), pos_integer(), hpack:headers(), hpack:context()) ->
-                      {{frame_header(), push_promise()}, hpack:context()}.
+                      {{frame_header(), payload()}, hpack:context()}.
 %% Maybe break this up into continuations like the data frame
 to_frame(StreamId, PStreamId, Headers, EncodeContext) ->
     {ok, {HeadersToSend, NewContext}} = hpack:encode(Headers, EncodeContext),
@@ -45,7 +77,7 @@ to_frame(StreamId, PStreamId, Headers, EncodeContext) ->
         }},
     NewContext}.
 
--spec to_binary(push_promise()) -> iodata().
+-spec to_binary(payload()) -> iodata().
 to_binary(#push_promise{
              promised_stream_id=PSID,
              block_fragment=BF

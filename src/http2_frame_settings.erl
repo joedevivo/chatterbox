@@ -4,19 +4,30 @@
 
 -behaviour(http2_frame).
 
--export([
-         format/1,
-         read_binary/2,
-         send/1,
-         send/2,
-         ack/0,
-         ack/1,
-         to_binary/1,
-         overlay/2,
-         validate/1
-        ]).
+-export(
+   [
+    format/1,
+    read_binary/2,
+    send/1,
+    send/2,
+    ack/0,
+    ack/1,
+    to_binary/1,
+    overlay/2,
+    validate/1
+   ]).
 
--spec format(settings()|binary()|{settings, [proplists:property()]}) -> iodata().
+%%TODO
+-type payload() :: #settings{} | {settings, proplist()}.
+
+-type name() :: binary().
+-type property() :: {name(), any()}.
+-type proplist() :: [property()].
+
+-export_type([payload/0, name/0, property/0, proplist/0]).
+
+
+-spec format(payload()|binary()|{settings, [proplists:property()]}) -> iodata().
 format(<<>>) -> "Ack!";
 format(#settings{
         header_table_size        = HTS,
@@ -52,14 +63,25 @@ format({settings, PList}) ->
     io_lib:format("~p", [L]).
 
 -spec read_binary(binary(), frame_header()) ->
-    {ok, payload(), binary()} |
-    {error, term()}.
-read_binary(Bin, _Header = #frame_header{length=0}) ->
+                         {ok, payload(), binary()}
+                       | {error, stream_id(), error_code(), binary()}.
+read_binary(Bin,
+            #frame_header{
+               length=0,
+               stream_id=0
+              }) ->
     {ok, {settings, []}, Bin};
-read_binary(Bin, _Header = #frame_header{length=Length}) ->
+read_binary(Bin,
+            #frame_header{
+               length=Length,
+               stream_id=0
+              }) ->
     <<SettingsBin:Length/binary,Rem/bits>> = Bin,
     Settings = parse_settings(SettingsBin),
-    {ok, {settings, Settings}, Rem}.
+    {ok, {settings, Settings}, Rem};
+read_binary(_, _) ->
+    {error, 0, ?PROTOCOL_ERROR, <<>>}.
+
 
 -spec parse_settings(binary()) -> [proplists:property()].
 parse_settings(Bin) ->
@@ -81,7 +103,7 @@ parse_settings(<<0,6,Val:4/binary,T/binary>>, S)->
 parse_settings(<<>>, Settings) ->
     Settings.
 
--spec overlay(settings(), {settings, [proplists:property()]}) -> settings().
+-spec overlay(payload(), {settings, [proplists:property()]}) -> payload().
 overlay(S, {settings, [{?SETTINGS_HEADER_TABLE_SIZE, Val}|PList]}) ->
     overlay(S#settings{header_table_size=Val}, {settings, PList});
 overlay(S, {settings, [{?SETTINGS_ENABLE_PUSH, Val}|PList]}) ->
@@ -97,7 +119,7 @@ overlay(S, {settings, [{?SETTINGS_MAX_HEADER_LIST_SIZE, Val}|PList]}) ->
 overlay(S, {settings, []}) ->
     S.
 
--spec send(settings()) -> binary().
+-spec send(payload()) -> binary().
 send(Settings) ->
     List = http2_settings:to_proplist(Settings),
     Payload = make_payload(List),
@@ -105,7 +127,7 @@ send(Settings) ->
     Header = <<L:24,?SETTINGS:8,16#0:8,0:1,0:31>>,
     <<Header/binary, Payload/binary>>.
 
--spec send(settings(), settings()) -> binary().
+-spec send(payload(), payload()) -> binary().
 send(PrevSettings, NewSettings) ->
     Diff = http2_settings:diff(PrevSettings, NewSettings),
     Payload = make_payload(Diff),
@@ -113,7 +135,7 @@ send(PrevSettings, NewSettings) ->
     Header = <<L:24,?SETTINGS:8,16#0:8,0:1,0:31>>,
     <<Header/binary, Payload/binary>>.
 
--spec make_payload(settings_proplist()) -> binary().
+-spec make_payload(proplist()) -> binary().
 make_payload(Diff) ->
     make_payload_(lists:reverse(Diff), <<>>).
 
@@ -132,11 +154,11 @@ ack() ->
 ack({Transport,Socket}) ->
     Transport:send(Socket, <<0:24,4:8,1:8,0:1,0:31>>).
 
--spec to_binary(settings()) -> iodata().
+-spec to_binary(payload()) -> iodata().
 to_binary(#settings{}=Settings) ->
     [to_binary(S, Settings) || S <- ?SETTING_NAMES].
 
--spec to_binary(binary(), settings()) -> binary().
+-spec to_binary(binary(), payload()) -> binary().
 to_binary(?SETTINGS_HEADER_TABLE_SIZE, #settings{header_table_size=undefined}) ->
     <<>>;
 to_binary(?SETTINGS_HEADER_TABLE_SIZE, #settings{header_table_size=HTS}) ->

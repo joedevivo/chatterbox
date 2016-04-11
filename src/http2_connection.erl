@@ -63,7 +63,7 @@
 -record(continuation_state, {
           stream_id                 :: stream_id(),
           promised_id = undefined   :: undefined | stream_id(),
-          frames      = queue:new() :: queue:queue(frame()),
+          frames      = queue:new() :: queue:queue(http2_frame:frame()),
           type                      :: headers | push_promise | trailers,
           end_stream  = false       :: boolean(),
           end_headers = false       :: boolean()
@@ -275,7 +275,7 @@ stop(Pid) ->
 listen(timeout, State) ->
     go_away(?PROTOCOL_ERROR, State).
 
--spec handshake(timeout|{frame, frame()}, connection()) ->
+-spec handshake(timeout|{frame, http2_frame:frame()}, connection()) ->
                     {next_state,
                      handshake|connected|closing,
                      connection()}.
@@ -335,7 +335,9 @@ closing(Message, Conn) ->
 %% route_frame's job needs to be "now that we've read a frame off the
 %% wire, do connection based things to it and/or forward it to the
 %% http2 stream processor (http2_stream:recv_frame)
--spec route_frame(frame() | {error, term()}, connection()) ->
+-spec route_frame(
+        http2_frame:frame() | {error, term()},
+        connection()) ->
     {next_state,
      connected | continuation | closing ,
      connection()}.
@@ -346,76 +348,6 @@ route_frame({#frame_header{length=L}, _},
               }=Conn)
     when L > MFS ->
     go_away(?FRAME_SIZE_ERROR, Conn);
-%% Some types have fixed lengths and there's nothing we can do about
-%% it except Frame Size error
-route_frame({#frame_header{
-                length=L,
-                type=T}, _Payload},
-            #connection{}=Conn)
-  when (T == ?PRIORITY      andalso L =/= 5) orelse
-       (T == ?RST_STREAM    andalso L =/= 4) orelse
-       (T == ?PING          andalso L =/= 8) orelse
-       (T == ?WINDOW_UPDATE andalso L =/= 4) ->
-    go_away(?FRAME_SIZE_ERROR, Conn);
-
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%%
-%% Protocol Errors
-%%
-
-%% Not allowed on Stream 0:
-%% - DATA
-%% - HEADERS
-%% - PRIORITY
-%% - RST_STREAM
-%% - PUSH_PROMISE
-%% - CONTINUATION
-route_frame({#frame_header{
-                stream_id=0,
-                type=Type
-                },_Payload},
-            #connection{} = Conn)
-  when Type == ?DATA;
-       Type == ?HEADERS;
-       Type == ?PRIORITY;
-       Type == ?RST_STREAM;
-       Type == ?PUSH_PROMISE;
-       Type == ?CONTINUATION ->
-    lager:error("[~p] ~p frame not allowed on stream 0",
-                [Conn#connection.type, ?FT(Type)]),
-    go_away(?PROTOCOL_ERROR, Conn);
-
-%% Only allowed on stream 0
-route_frame({#frame_header{
-                stream_id=StreamId,
-                type=Type
-                },_Payload},
-            #connection{} = Conn)
-  when StreamId > 0 andalso (
-       Type == ?SETTINGS orelse
-       Type == ?PING orelse
-       Type == ?GOAWAY) ->
-    lager:error("[~p] ~p frame only allowed on stream 0",
-                [Conn#connection.type, ?FT(Type)]),
-    go_away(?PROTOCOL_ERROR, Conn);
-
-route_frame({#frame_header{
-                type=?WINDOW_UPDATE,
-                stream_id=StreamId
-               },
-             #window_update{
-                window_size_increment=WSI
-                }},
-            #connection{} = Conn)
-  when WSI < 1 ->
-    case StreamId of
-        0 ->
-            go_away(?PROTOCOL_ERROR, Conn);
-        _ ->
-            Stream = get_stream(StreamId, Conn#connection.streams),
-            http2_stream:rst_stream(Stream#stream.pid, ?PROTOCOL_ERROR)
-    end;
-
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Connection Level Frames
@@ -586,11 +518,6 @@ route_frame({#frame_header{type=?HEADERS}=FH, _Payload},
   when Conn#connection.type == server,
        FH#frame_header.stream_id rem 2 == 0 ->
     go_away(?PROTOCOL_ERROR, Conn);
-route_frame({#frame_header{stream_id=StreamId, type=?HEADERS}=FH, #headers{priority=P}},
-            #connection{}=Conn)
-  when ?IS_FLAG(FH#frame_header.flags, ?FLAG_PRIORITY),
-       P#priority.stream_id == FH#frame_header.stream_id ->
-    rst_stream(StreamId, ?PROTOCOL_ERROR, Conn);
 route_frame({#frame_header{type=?HEADERS}=FH, _Payload}=Frame,
             #connection{}=Conn) ->
     StreamId = FH#frame_header.stream_id,
@@ -643,6 +570,7 @@ route_frame({#frame_header{type=?HEADERS}=FH, _Payload}=Frame,
           },
 
     maybe_hpack(ContinuationState, NewConn);
+
 route_frame(F={H=#frame_header{
                     stream_id=StreamId,
                     type=?CONTINUATION
@@ -667,10 +595,6 @@ route_frame({H, _Payload},
     when H#frame_header.type == ?PRIORITY,
          H#frame_header.stream_id == 0 ->
     go_away(?PROTOCOL_ERROR, Conn);
-route_frame({#frame_header{type=?PRIORITY, stream_id=StreamId}, #priority{}=P},
-            #connection{}=Conn)
-  when StreamId == P#priority.stream_id ->
-    rst_stream(StreamId, ?PROTOCOL_ERROR, Conn);
 route_frame({H, _Payload},
             #connection{} = Conn)
     when H#frame_header.type == ?PRIORITY ->
@@ -683,10 +607,9 @@ route_frame(
       stream_id=StreamId,
       type=?RST_STREAM
       },
-   #rst_stream{
-      error_code=EC
-      }},
+   Payload},
   #connection{} = Conn) ->
+    EC = http2_frame_rst_stream:error_code(Payload),
     lager:debug("[~p] Received RST_STREAM (~p) for Stream ~p",
                 [Conn#connection.type, EC, StreamId]),
     Streams = Conn#connection.streams,
@@ -700,12 +623,10 @@ route_frame(
 route_frame({H=#frame_header{
                   stream_id=StreamId
                  },
-             #push_promise{
-                promised_stream_id=PSID
-                }}=Frame,
+             Payload}=Frame,
             #connection{}=Conn)
     when H#frame_header.type == ?PUSH_PROMISE ->
-
+    PSID = http2_frame_push_promise:promised_stream_id(Payload),
     lager:debug("[~p] Received PUSH_PROMISE Frame on Stream ~p for Stream ~p",
                 [Conn#connection.type, StreamId, PSID]),
 
@@ -725,14 +646,11 @@ route_frame({H=#frame_header{
                       end_headers=?IS_FLAG(H#frame_header.flags, ?FLAG_END_HEADERS),
                       promised_id=PSID
                      },
-
     maybe_hpack(Continuation,
                 Conn#connection{
                   streams = [New|Streams]
                  });
-
 %% PING
-
 %% If not stream 0, then connection error
 route_frame({H, _Payload},
             #connection{} = Conn)
@@ -768,16 +686,18 @@ route_frame({H=#frame_header{stream_id=0}, _Payload},
     lager:debug("[~p] Received GOAWAY Frame for Stream 0",
                [Conn#connection.type]),
     go_away(?NO_ERROR, Conn);
+
+%% Window Update
 route_frame(
   {#frame_header{
       stream_id=0,
       type=?WINDOW_UPDATE
      },
-   #window_update{window_size_increment=WSI}},
+   Payload},
   #connection{
      send_window_size=SWS
     }=Conn) ->
-
+    WSI = http2_frame_window_update:size_increment(Payload),
     lager:debug("[~p] Stream 0 Window Update: ~p",
                 [Conn#connection.type, WSI]),
     NewSendWindow = SWS+WSI,
@@ -805,12 +725,12 @@ route_frame(
     end;
 route_frame(
   {#frame_header{type=?WINDOW_UPDATE}=FH,
-   #window_update{window_size_increment=WSI}},
+   Payload},
   #connection{}=Conn
  ) ->
     StreamId = FH#frame_header.stream_id,
     Streams = Conn#connection.streams,
-
+    WSI = http2_frame_window_update:size_increment(Payload),
     lager:debug("[~p] Received WINDOW_UPDATE Frame for Stream ~p",
                 [Conn#connection.type, StreamId]),
 
@@ -933,9 +853,7 @@ s_send_what_we_can(SWS, MFS, Stream) ->
                      type=?DATA,
                      length=QueueSize
                     },
-                  #data{
-                     data=Stream#stream.queued_data %% Full Body
-                    }},
+                  http2_frame_data:new(Stream#stream.queued_data)}, %% Full Body
                  QueueSize,
                  Stream#stream{
                    queued_data=done,
@@ -947,9 +865,7 @@ s_send_what_we_can(SWS, MFS, Stream) ->
                      type=?DATA,
                      length=MaxToSend
                     },
-                  #data{
-                     data=BinToSend
-                    }},
+                  http2_frame_data:new(BinToSend)},
                  MaxToSend,
                  Stream#stream{
                    queued_data=Rest,
@@ -1244,10 +1160,7 @@ go_away(ErrorCode,
         #connection{
            next_available_stream_id=NAS
           }=Conn) ->
-    GoAway = #goaway{
-                last_stream_id=NAS, %% maybe not the best idea.
-                error_code=ErrorCode
-               },
+    GoAway = http2_frame_goaway:new(NAS, ErrorCode),
     GoAwayBin = http2_frame:to_binary({#frame_header{
                                           stream_id=0
                                          }, GoAway}),
@@ -1264,7 +1177,7 @@ go_away(ErrorCode,
 rst_stream(StreamId, ErrorCode, Conn) ->
     case get_stream(StreamId, Conn#connection.streams) of
         false ->
-            RstStream = #rst_stream{error_code=ErrorCode},
+            RstStream = http2_frame_rst_stream:new(ErrorCode),
             RstStreamBin = http2_frame:to_binary(
                              {#frame_header{
                                  stream_id=StreamId
@@ -1426,18 +1339,22 @@ handle_socket_data(Data,
             gen_fsm:send_event(self(), {frame, Frame}),
             handle_socket_data(Rem, StateName, NewConn);
         %% Not enough bytes left to make a header :(
-        {error, not_enough_header, Bin} ->
+        {not_enough_header, Bin} ->
             %% This is a situation where more bytes should come soon,
             %% so let's switch back to active, once
             active_once(Socket),
             {next_state, StateName, NewConn#connection{buffer={binary, Bin}}};
         %% Not enough bytes to make a payload
-        {error, not_enough_payload, Header, Bin} ->
+        {not_enough_payload, Header, Bin} ->
             %% This too
             active_once(Socket),
             {next_state, StateName, NewConn#connection{buffer={frame, Header, Bin}}};
-        {error, Code} ->
-            go_away(Code, Conn)
+        {error, 0, Code, _Rem} ->
+            %% Remaining Bytes don't matter, we're closing up shop.
+            go_away(Code, NewConn);
+        {error, StreamId, Code, Rem} ->
+            rst_stream(StreamId, Code, NewConn),
+            handle_socket_data(Rem, StateName, NewConn)
     end.
 
 handle_socket_passive(StateName, Conn) ->

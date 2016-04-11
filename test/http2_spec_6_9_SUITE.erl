@@ -64,8 +64,8 @@ send_window_update(_Config) ->
        {#frame_header{
            stream_id=1
           },
-        #window_update{
-           window_size_increment=1}}
+        http2_frame_window_update:new(1)
+       }
       ]
      ),
 
@@ -90,15 +90,16 @@ send_window_update_with_zero(_Config) ->
            length=24,
            stream_id=0
           },
-        #window_update{window_size_increment=0}}
+        http2_frame_window_update:new(0)
+       }
       ]),
 
     Resp = http2c:wait_for_n_frames(Client, 0, 1),
     ct:pal("Resp: ~p", [Resp]),
     ?assertEqual(1, length(Resp)),
-    [{_H, GoAway}] = Resp,
-    ?PROTOCOL_ERROR = GoAway#goaway.error_code,
-
+    [{GoAwayH, GoAway}] = Resp,
+    ?assertEqual(?GOAWAY, GoAwayH#frame_header.type),
+    ?assertEqual(?PROTOCOL_ERROR, http2_frame_goaway:error_code(GoAway)),
     ok.
 
 send_window_update_with_zero_on_stream(_Config) ->
@@ -130,14 +131,16 @@ send_window_update_with_zero_on_stream(_Config) ->
            length=24,
            stream_id=1
           },
-        #window_update{window_size_increment=0}}
+        http2_frame_window_update:new(0)
+       }
       ]),
 
     Resp = http2c:wait_for_n_frames(Client, 1, 1),
     ct:pal("Resp: ~p", [Resp]),
     ?assertEqual(1, length(Resp)),
-    [{_H, RstStream}] = Resp,
-    ?PROTOCOL_ERROR = RstStream#rst_stream.error_code,
+    [{RstStreamH, RstStream}] = Resp,
+    ?assertEqual(?RST_STREAM, RstStreamH#frame_header.type),
+    ?assertEqual(?PROTOCOL_ERROR, http2_frame_rst_stream:error_code(RstStream)),
     ok.
 
 send_window_updates_greater_than_max(_Config) ->
@@ -148,15 +151,17 @@ send_window_updates_greater_than_max(_Config) ->
             length=24,
             stream_id=0
            },
-         #window_update{window_size_increment=2147483647}},
+         http2_frame_window_update:new(2147483647)
+        },
 
     http2c:send_unaltered_frames(Client, [ F, F ]),
 
     Resp = http2c:wait_for_n_frames(Client, 0, 1),
     ct:pal("Resp: ~p", [Resp]),
     ?assertEqual(1, length(Resp)),
-    [{_GoAwayH, GoAway}] = Resp,
-    ?FLOW_CONTROL_ERROR = GoAway#goaway.error_code,
+    [{GoAwayH, GoAway}] = Resp,
+    ?assertEqual(?GOAWAY, GoAwayH#frame_header.type),
+    ?assertEqual(?FLOW_CONTROL_ERROR, http2_frame_goaway:error_code(GoAway)),
     ok.
 
 send_window_updates_greater_than_max_on_stream(_Config) ->
@@ -185,7 +190,8 @@ send_window_updates_greater_than_max_on_stream(_Config) ->
             length=24,
             stream_id=1
            },
-         #window_update{window_size_increment=2147483647}},
+         http2_frame_window_update:new(2147483647)
+         },
 
     http2c:send_unaltered_frames(
       Client,
@@ -194,8 +200,9 @@ send_window_updates_greater_than_max_on_stream(_Config) ->
     Resp = http2c:wait_for_n_frames(Client, 1, 1),
     ct:pal("Resp: ~p", [Resp]),
     ?assertEqual(1, length(Resp)),
-    [{_H, RstStream}] = Resp,
-    ?FLOW_CONTROL_ERROR = RstStream#rst_stream.error_code,
+    [{RstStreamH, RstStream}] = Resp,
+    ?assertEqual(?RST_STREAM, RstStreamH#frame_header.type),
+    ?assertEqual(?FLOW_CONTROL_ERROR, http2_frame_rst_stream:error_code(RstStream)),
     ok.
 
 send_settings_initial_window_size_greater_than_max(_Config) ->
@@ -207,5 +214,7 @@ send_settings_initial_window_size_greater_than_max(_Config) ->
     ct:pal("Resp: ~p", [Resp]),
     ?assertEqual(1, length(Resp)),
     [{_GoAwayH, GoAway}] = Resp,
-    ?FLOW_CONTROL_ERROR = GoAway#goaway.error_code,
+    [{GoAwayH, GoAway}] = Resp,
+    ?assertEqual(?GOAWAY, GoAwayH#frame_header.type),
+    ?assertEqual(?FLOW_CONTROL_ERROR, http2_frame_goaway:error_code(GoAway)),
     ok.
