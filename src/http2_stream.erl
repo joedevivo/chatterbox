@@ -14,7 +14,6 @@
          recv_frame/2,
          stream_id/0,
          connection/0,
-         get_response/1,
          notify_pid/1,
          send_window_update/1,
          send_connection_window_update/1,
@@ -40,8 +39,7 @@
          open/2,
          half_closed_local/2,
          half_closed_remote/2,
-         closed/2,
-         closed/3
+         closed/2
         ]).
 
 -type stream_option_name() ::
@@ -176,12 +174,6 @@ stream_id() ->
 -spec connection() -> pid().
 connection() ->
     gen_fsm:sync_send_all_state_event(self(), connection).
-
--spec get_response(pid()) ->
-                          {ok, {hpack:headers(), iodata()}}
-                              | {error, term()}.
-get_response(Pid) ->
-    gen_fsm:sync_send_event(Pid, get_response).
 
 -spec notify_pid(pid()) ->
                           {ok, pid()}
@@ -455,15 +447,12 @@ half_closed_remote(
     }=Stream) ->
     ok = sock:send(Socket, http2_frame:to_binary(F)),
 
-    NextState =
-        case ?IS_FLAG(Flags, ?FLAG_END_STREAM) of
-            true ->
-                 closed;
-            _ ->
-                half_closed_remote
-        end,
-
-    {next_state, NextState, Stream};
+    case ?IS_FLAG(Flags, ?FLAG_END_STREAM) of
+        true ->
+            {next_state, closed, Stream, 0};
+        _ ->
+            {next_state, half_closed_remote, Stream}
+    end;
 half_closed_remote(_,
        #stream_state{}=Stream) ->
     rst_stream_(?STREAM_CLOSED, Stream).
@@ -513,7 +502,7 @@ half_closed_local(
              Stream#stream_state{
                incoming_frames=queue:new(),
                response_body = Data
-              }};
+              }, 0};
         _ ->
             {next_state,
              half_closed_local,
@@ -525,20 +514,17 @@ half_closed_local(_,
        #stream_state{}=Stream) ->
     rst_stream_(?STREAM_CLOSED, Stream).
 
-
-
+closed(timeout,
+       #stream_state{}=Stream) ->
+    gen_fsm:send_all_state_event(Stream#stream_state.connection,
+                                 {stream_finished,
+                                  Stream#stream_state.stream_id,
+                                  Stream#stream_state.response_headers,
+                                  Stream#stream_state.response_body}),
+    {stop, normal, Stream};
 closed(_,
        #stream_state{}=Stream) ->
     rst_stream_(?STREAM_CLOSED, Stream).
-
-closed(get_response,
-       _From,
-       #stream_state{
-          response_headers=H,
-          response_body=B
-         }=Stream
-       ) ->
-    {reply, {ok, {H, B}}, closed, Stream}.
 
 handle_event({send_window_update, 0},
              StateName,

@@ -4,6 +4,7 @@
 
 -include("http2.hrl").
 
+%% Start/Stop API
 -export([
          start_client_link/5,
          start_ssl_upgrade_link/5,
@@ -13,6 +14,7 @@
          stop/1
         ]).
 
+%% HTTP Operations
 -export([
          send_headers/3,
          send_headers/4,
@@ -30,15 +32,17 @@
         ]).
 
 %% gen_fsm callbacks
--export([
+-export(
+   [
     init/1,
     handle_event/3,
     handle_sync_event/4,
     handle_info/3,
     code_change/4,
     terminate/3
-]).
+   ]).
 
+%% gen_fsm states
 -export([
          listen/2,
          handshake/2,
@@ -69,14 +73,15 @@
           end_headers = false       :: boolean()
 }).
 
-
 -record(stream, {
-          id :: stream_id(),
-          pid :: pid(),
-          send_window_size :: non_neg_integer(),
-          recv_window_size :: non_neg_integer(),
-          queued_data :: undefined | done | binary(),
-          body_complete = false :: boolean()
+          id                    :: stream_id(),
+          pid                   :: undefined | pid(),
+          send_window_size      :: non_neg_integer(),
+          recv_window_size      :: non_neg_integer(),
+          queued_data           :: undefined | done | binary(),
+          body_complete = false :: boolean(),
+          response_headers      :: undefined | hpack:headers(),
+          response_body         :: undefined | binary()
          }).
 -type stream() :: #stream{}.
 
@@ -95,7 +100,6 @@
           next_available_stream_id = 2 :: stream_id(),
           streams = [] :: [stream()],
           stream_callback_mod = application:get_env(chatterbox, stream_callback_mod, chatterbox_static_stream) :: module(),
-          content_handler = application:get_env(chatterbox, content_handler, chatterbox_static_content_handler) :: module(),
           buffer = empty :: empty | {binary, binary()} | {frame, frame_header(), binary()},
           continuation = undefined :: undefined | #continuation_state{},
           flow_control = auto :: auto | manual
@@ -227,8 +231,6 @@ send_body(Pid, StreamId, Body) ->
 send_body(Pid, StreamId, Body, Opts) ->
     gen_fsm:send_all_state_event(Pid, {send_body, StreamId, Body, Opts}),
     ok.
-
-
 
 -spec get_peer(pid()) ->
     {ok, {inet:ip_address(), inet:port_number()}} | {error, term()}.
@@ -526,50 +528,43 @@ route_frame({#frame_header{type=?HEADERS}=FH, _Payload}=Frame,
     lager:debug("[~p] Received HEADERS Frame for Stream ~p",
                 [Conn#connection.type, StreamId]),
 
-    %% Four things could be happening here.
+    ActiveStreamCount = active_stream_count(Streams),
 
-    %% If we're a server, these are either request headers or request
-    %% trailers
+    case ActiveStreamCount < Conn#connection.recv_settings#settings.max_concurrent_streams of
+        false ->
+            rst_stream(StreamId, ?REFUSED_STREAM, Conn);
+        true ->
+            %% Four things could be happening here.
 
-    %% If we're a client, these are either headers in response to a
-    %% client request, or headers in response to a push promise
+            %% If we're a server, these are either request headers or request
+            %% trailers
 
-    {ContinuationType, NewConn} =
-        case {get_stream(StreamId, Streams), Conn#connection.type} of
-            {false, server} ->
-                NewStream = new_stream_(StreamId, Conn),
-                {headers, Conn#connection{streams=[NewStream|Streams]}};
-            {_Stream, server} ->
-                {trailers, Conn};
-            _ ->
-                {headers, Conn}
-        end,
-    %% If there's an END_HEADERS flag, the headers were only one
-    %% frame.
+            %% If we're a client, these are either headers in response to a
+            %% client request, or headers in response to a push promise
 
-    %% If not, we have to wait for all the CONTINUATIONS to roll in.
+            {ContinuationType, NewConn} =
+                case {get_stream(StreamId, Streams), Conn#connection.type} of
+                    {false, server} ->
+                        NewStream = new_stream_(StreamId, Conn),
+                        {headers, Conn#connection{streams=[NewStream|Streams]}};
+                    {_Stream, server} ->
+                        {trailers, Conn};
+                    _ ->
+                        {headers, Conn}
+                end,
 
-    %% If there's an END_STREAM flag set AND END_HEADERS, we're done
-    %% with the request.
-
-    %% If there's and END_STREAM and no END_HEADERS, we'll be done
-    %% once those CONTINUATIONS arrive
-
-    %% So what do we do? We construct a #continuation record that
-    %% covers a whole bunch of things and is run through a function
-    %% when every HEADERS, PUSH_PROMISE, or CONTINUATION rolls
-    %% in. Let's give it a whirl.
-
-    ContinuationState =
-        #continuation_state{
-           type = ContinuationType,
-           frames = queue:from_list([Frame]),
-           end_stream = ?IS_FLAG(FH#frame_header.flags, ?FLAG_END_STREAM),
-           end_headers = ?IS_FLAG(FH#frame_header.flags, ?FLAG_END_HEADERS),
-           stream_id = StreamId
-          },
-
-    maybe_hpack(ContinuationState, NewConn);
+            ContinuationState =
+                #continuation_state{
+                   type = ContinuationType,
+                   frames = queue:from_list([Frame]),
+                   end_stream = ?IS_FLAG(FH#frame_header.flags, ?FLAG_END_STREAM),
+                   end_headers = ?IS_FLAG(FH#frame_header.flags, ?FLAG_END_HEADERS),
+                   stream_id = StreamId
+                  },
+            %% maybe_hpack/2 uses this #continuation_state to figure
+            %% out what to do, which might include hpack
+            maybe_hpack(ContinuationState, NewConn)
+    end;
 
 route_frame(F={H=#frame_header{
                     stream_id=StreamId,
@@ -883,6 +878,23 @@ s_send_what_we_can(SWS, MFS, Stream) ->
             {0, NewS}
     end.
 
+handle_event({stream_finished,
+              StreamId,
+              Headers,
+              Body}, StateName, Conn) ->
+    Stream = get_stream(StreamId, Conn#connection.streams),
+    NewStream =
+        Stream#stream{
+          pid = undefined,
+          response_headers = Headers,
+          response_body = Body
+         },
+    NewConn =
+        Conn#connection{
+          streams = replace_stream(NewStream, Conn#connection.streams)
+         },
+
+    {next_state, StateName, NewConn};
 handle_event({send_window_update, 0},
              StateName, Conn) ->
     {next_state, StateName, Conn};
@@ -1017,8 +1029,7 @@ handle_sync_event(streams, _F, StateName,
 handle_sync_event({get_response, StreamId}, _F, StateName,
                   #connection{}=Conn) ->
     Stream = get_stream(StreamId, Conn#connection.streams),
-    Reply = http2_stream:get_response(Stream#stream.pid),
-
+    Reply = {ok, {Stream#stream.response_headers, Stream#stream.response_body}},
     {reply, Reply, StateName, Conn};
 handle_sync_event({new_stream, NotifyPid}, _F, StateName,
                   #connection{
@@ -1393,6 +1404,17 @@ replace_stream(Stream, Streams) ->
 sort_streams(Streams) ->
     lists:keysort(2, Streams).
 
+-spec active_stream_count([stream()]) -> non_neg_integer().
+active_stream_count(Streams) ->
+    lists:foldl(
+      fun(#stream{pid=undefined}, Acc) ->
+              Acc;
+         (_, Acc) ->
+              Acc + 1
+      end,
+      0,
+      Streams).
+
 %-spec delete_stream(stream(), [stream()]) -> [stream()].
 %delete_stream(S, Streams) ->
 %    lists:keydelete(S#stream.id, 2, Streams).
@@ -1421,8 +1443,13 @@ new_stream_(StreamId, NotifyPid, Conn) ->
     lager:debug("NewStream ~p", [NewStream]),
     NewStream.
 
+
+%% maybe_hpack will decode headers if it can, or tell the connection
+%% to wait for CONTINUATION frames if it can't.
 -spec maybe_hpack(#continuation_state{}, connection()) ->
                          {next_state, atom(), connection()}.
+%% If there's an END_HEADERS flag, we have a complete headers binary
+%% to decode, let's do this!
 maybe_hpack(Continuation, Conn)
   when Continuation#continuation_state.end_headers ->
     Stream = get_stream(Continuation#continuation_state.stream_id,
@@ -1458,6 +1485,7 @@ maybe_hpack(Continuation, Conn)
                continuation=undefined
               }}
     end;
+%% If not, we have to wait for all the CONTINUATIONS to roll in.
 maybe_hpack(Continuation, Conn) ->
     {next_state, continuation,
      Conn#connection{
