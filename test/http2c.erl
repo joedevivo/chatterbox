@@ -88,7 +88,8 @@ wait_for_n_frames(_Pid, StreamId, N, Attempts, Acc)
         true ->
             Acc;
         _ ->
-            ?assertEqual(length(Acc), length([])),
+            %% While this assert is good, it always hid the real error
+            %%?assertEqual(length(Acc), length([])),
             []
     end;
 wait_for_n_frames(Pid, StreamId, N, Attempts, Acc) ->

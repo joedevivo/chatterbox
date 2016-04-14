@@ -11,7 +11,8 @@ all() ->
      half_closed_remote_sends_headers,
      sends_window_update_to_idle,
      client_sends_even_stream_id,
-     exceeds_max_concurrent_streams
+     exceeds_max_concurrent_streams,
+     total_streams_above_max_concurrent
     ].
 
 init_per_suite(Config) ->
@@ -19,6 +20,13 @@ init_per_suite(Config) ->
     Config.
 
 
+init_per_testcase(total_streams_above_max_concurrent, Config) ->
+    chatterbox_test_buddy:start(
+      [
+       {max_concurrent_streams, 10},
+       {enable_push, 0}
+       |Config]
+     );
 init_per_testcase(exceeds_max_concurrent_streams, Config) ->
     chatterbox_test_buddy:start(
       [
@@ -31,6 +39,79 @@ init_per_testcase(_, Config) ->
 
 end_per_testcase(_, Config) ->
     chatterbox_test_buddy:stop(Config),
+    ok.
+
+total_streams_above_max_concurrent(Config) ->
+    MaxConcurrent = ?config(max_concurrent_streams, Config),
+
+    {ok, Client} = http2c:start_link(),
+    RequestHeaders =
+        [
+         {<<":method">>, <<"GET">>},
+         {<<":path">>, <<"/index.html">>},
+         {<<":scheme">>, <<"https">>},
+         {<<":authority">>, <<"localhost:8080">>},
+         {<<"accept">>, <<"*/*">>},
+         {<<"accept-encoding">>, <<"gzip, deflate">>},
+         {<<"user-agent">>, <<"chattercli/0.0.1 :D">>}
+        ],
+
+    StreamIds = lists:seq(1,MaxConcurrent*2,2),
+
+    %% See Caine/Hackman Theory
+    AStreamTooFar = 1 + MaxConcurrent*2,
+
+    FinalEC =
+        lists:foldl(
+          fun(StreamId, EncodeContext) ->
+                  {H1, NewEC} =
+                      http2_frame_headers:to_frames(
+                        StreamId,
+                        RequestHeaders,
+                        EncodeContext,
+                        16384,
+                        true),
+                  http2c:send_unaltered_frames(Client, H1),
+                  NewEC
+          end,
+          hpack:new_context(),
+          StreamIds
+         ),
+    timer:sleep(100),
+
+    %% We should have a series of responses now, and zero streams
+    %% should be open
+
+    Resp0 = http2c:get_frames(Client,0),
+    ?assertEqual([], Resp0),
+    [ begin
+          [{FH1,_FB1},{FH2,_FB2}] = http2c:get_frames(Client, StreamId),
+          ?assertEqual(StreamId, FH1#frame_header.stream_id),
+          ?assertEqual(?HEADERS, FH1#frame_header.type),
+          ?assertEqual(StreamId, FH2#frame_header.stream_id),
+          ?assertEqual(?DATA, FH2#frame_header.type)
+      end || StreamId <- StreamIds],
+
+    %% Now, open AStreamTooFar
+    {HFinal, _UnusedEC} =
+        http2_frame_headers:to_frames(
+          AStreamTooFar,
+          RequestHeaders,
+          FinalEC,
+          16384,
+          true),
+    http2c:send_unaltered_frames(Client, HFinal),
+
+    %% Response should be a real response, because we haven't exceeded
+    %% anything
+    Response = http2c:wait_for_n_frames(Client, AStreamTooFar, 2),
+    ?assertEqual(2, length(Response)),
+
+    [{RH1,_RB1},{RH2,_RB2}] = Response,
+    ?assertEqual(AStreamTooFar, RH1#frame_header.stream_id),
+    ?assertEqual(?HEADERS, RH1#frame_header.type),
+    ?assertEqual(AStreamTooFar, RH2#frame_header.stream_id),
+    ?assertEqual(?DATA, RH2#frame_header.type),
     ok.
 
 exceeds_max_concurrent_streams(Config) ->
@@ -50,7 +131,6 @@ exceeds_max_concurrent_streams(Config) ->
 
     StreamIds = lists:seq(1,MaxConcurrent*2,2),
 
-    %% See Caine/Hackman Theory
     AStreamTooFar = 1 + MaxConcurrent*2,
 
     FinalEC =
