@@ -4,10 +4,10 @@
 
 -export(
    [
-    active_stream_count/1,
-    new/0,
+    new/1,
     get/2,
-    insert/2,
+    initiate_stream/7,
+    peer_initiated_stream/7,
     replace/2,
     send_what_we_can/4,
     sort/1,
@@ -15,62 +15,273 @@
     update_all_send_windows/2
    ]).
 
--spec new() -> streams().
-new() ->
-    [].
+-spec new(
+        client | server
+       ) -> streams().
+new(client) ->
+    #streams{type=client};
+new(server) ->
+    #streams{type=server}.
+
+-spec initiate_stream(
+        StreamId :: stream_id(),
+        NotifyPid :: pid(),
+        CBMod :: module(),
+        Socket :: sock:socket(),
+        InitialSendWindow :: pos_integer(),
+        InitialRecvWindow :: pos_integer(),
+        Streams :: streams()
+                   ) -> streams()
+                      | {error, term()} .
+initiate_stream(
+  StreamId,
+  NotifyPid,
+  CBMod,
+  Socket,
+  InitialSendWindow,
+  InitialRecvWindow,
+  Streams
+ ) ->
+    case
+        new_stream(
+          StreamId,
+          NotifyPid,
+          CBMod,
+          Socket,
+          InitialSendWindow,
+          InitialRecvWindow,
+          Streams#streams.self_initiated) of
+        {error, Error} ->
+            {error, Error};
+        NewStreamSet ->
+            Streams#streams{
+              self_initiated=NewStreamSet
+             }
+    end.
+
+-spec peer_initiated_stream(
+        StreamId :: stream_id(),
+        NotifyPid :: pid(),
+        CBMod :: module(),
+        Socket :: sock:socket(),
+        InitialSendWindow :: pos_integer(),
+        InitialRecvWindow :: pos_integer(),
+        Streams :: streams()
+                   ) -> streams()
+                      | {error, term()} .
+peer_initiated_stream(
+  StreamId,
+  NotifyPid,
+  CBMod,
+  Socket,
+  InitialSendWindow,
+  InitialRecvWindow,
+  Streams
+ ) ->
+    case
+        new_stream(
+          StreamId,
+          NotifyPid,
+          CBMod,
+          Socket,
+          InitialSendWindow,
+          InitialRecvWindow,
+          Streams#streams.peer_initiated) of
+        {error, Error} ->
+            {error, Error};
+        NewStreamSet ->
+            Streams#streams{
+              peer_initiated=NewStreamSet
+             }
+    end.
+
+new_stream(
+  StreamId,
+  NotifyPid,
+  CBMod,
+  Socket,
+  InitialSendWindow,
+  InitialRecvWindow,
+  StreamSet=#stream_set{max_active=unlimited}
+ ) ->
+    new_stream_(StreamId, NotifyPid, CBMod, Socket, InitialSendWindow, InitialRecvWindow, StreamSet);
+new_stream(
+  _StreamId,
+  _NotifyPid,
+  _CBMod,
+  _Socket,
+  _InitialSendWindow,
+  _InitialRecvWindow,
+  _StreamSet=#stream_set{max_active=Max, active_count=Active}
+ )
+  when Active >= Max ->
+            {error, too_many_active_streams};
+new_stream(
+  StreamId,
+  NotifyPid,
+  CBMod,
+  Socket,
+  InitialSendWindow,
+  InitialRecvWindow,
+  StreamSet
+ ) ->
+    new_stream_(StreamId, NotifyPid, CBMod, Socket, InitialSendWindow, InitialRecvWindow, StreamSet).
+
+new_stream_(
+  StreamId,
+  NotifyPid,
+  CBMod,
+  Socket,
+  InitialSendWindow,
+  InitialRecvWindow,
+  StreamSet
+ ) ->
+    {ok, Pid} = http2_stream:start_link(
+                  [
+                   {stream_id, StreamId},
+                   {connection, self()},
+                   {notify_pid, NotifyPid},
+                   {callback_module, CBMod},
+                   {socket, Socket}
+                  ]),
+    NewStream = #active_stream{
+                   id = StreamId,
+                   pid = Pid,
+                   send_window_size=InitialSendWindow,
+                   recv_window_size=InitialRecvWindow
+                  },
+    lager:debug("NewStream ~p", [NewStream]),
+    StreamSet#stream_set{
+      active_count = StreamSet#stream_set.active_count + 1,
+      active = [NewStream|StreamSet#stream_set.active]
+     }.
 
 -spec get(Id :: stream_id(),
           Streams :: streams()) ->
                  stream() | false.
-get(Id, Streams) ->
-    lists:keyfind(Id, 2, Streams).
+get(Id, #streams{type=client}=Streams)
+  when Id rem 2 =:= 0 ->
+    get_set(Id, Streams#streams.peer_initiated);
+get(Id, #streams{type=client}=Streams)
+  when Id rem 2 =:= 1 ->
+    get_set(Id, Streams#streams.self_initiated);
+get(Id, #streams{type=server}=Streams)
+  when Id rem 2 =:= 0 ->
+    get_set(Id, Streams#streams.self_initiated);
+get(Id, #streams{type=server}=Streams)
+  when Id rem 2 =:= 1 ->
+    get_set(Id, Streams#streams.peer_initiated).
 
--spec insert(Stream :: stream(),
-             Streams :: streams()) ->
-                    streams().
-insert(Stream, Streams) ->
-    [Stream|Streams].
+get_set(Id, StreamSet) ->
+    lists:keyfind(Id, 2, StreamSet#stream_set.active).
 
 -spec replace(Stream :: stream(),
               Streams :: streams()) ->
                      streams().
 replace(Stream, Streams) ->
     StreamId = element(2, Stream),
-    lists:keyreplace(StreamId, 2, Streams, Stream).
+    WhichSet =
+        case {StreamId rem 2, Streams#streams.type} of
+            {0, client} ->
+                #streams.peer_initiated;
+            {1, client} ->
+                #streams.self_initiated;
+            {0, server} ->
+                #streams.self_initiated;
+            {1, server} ->
+                #streams.peer_initiated
+        end,
+
+    StreamSet = element(WhichSet, Streams),
+    NewSet = replace_set(StreamId, Stream, StreamSet),
+
+    case WhichSet of
+        #streams.peer_initiated ->
+            Streams#streams{
+              peer_initiated=NewSet
+             };
+        #streams.self_initiated ->
+            Streams#streams{
+              self_initiated=NewSet
+             }
+    end.
+
+replace_set(StreamId, Stream, StreamSet) ->
+    OldStream = lists:keyfind(StreamId, 2, StreamSet#stream_set.active),
+    OldType = element(1, OldStream),
+    NewType = element(1, Stream),
+
+    NewSet =
+        StreamSet#stream_set{
+          active = lists:keyreplace(StreamId, 2, StreamSet#stream_set.active, Stream)
+         },
+
+    case {OldType, NewType} of
+        {active_stream, active_stream} ->
+            NewSet;
+        {active_stream, closed_stream} ->
+            NewSet#stream_set{
+              active_count=StreamSet#stream_set.active_count-1
+             };
+        {_, _} ->
+            NewSet
+    end.
 
 -spec sort(Streams::streams()) -> streams().
 sort(Streams) ->
-    lists:keysort(2, Streams).
+    Streams#streams{
+      peer_initiated = sort_set(Streams#streams.peer_initiated),
+      self_initiated = sort_set(Streams#streams.self_initiated)
+     }.
 
--spec active_stream_count(streams()) -> non_neg_integer().
-active_stream_count(Streams) ->
-    lists:foldl(
-      fun(#active_stream{pid=undefined}, Acc) ->
-              Acc;
-         (_, Acc) ->
-              Acc + 1
-      end,
-      0,
-      Streams).
+sort_set(StreamSet) ->
+    StreamSet#stream_set{
+      active=lists:keysort(2, StreamSet#stream_set.active)
+     }.
 
 -spec update_all_recv_windows(Delta :: integer(),
                               Streams:: streams()) ->
                                      streams().
 update_all_recv_windows(Delta, Streams) ->
-    [ S#active_stream{
-        recv_window_size=S#active_stream.recv_window_size+Delta
-       }
-      || S <- Streams].
+    Streams#streams{
+      peer_initiated=update_all_recv_windows_set(Delta, Streams#streams.peer_initiated),
+      self_initiated=update_all_recv_windows_set(Delta, Streams#streams.self_initiated)
+     }.
+
+update_all_recv_windows_set(Delta, StreamSet) ->
+    NewActive = lists:map(
+                  fun(#active_stream{}=S) ->
+                          S#active_stream{
+                            recv_window_size=S#active_stream.recv_window_size+Delta
+                           };
+                     (S) -> S
+                  end,
+                  StreamSet#stream_set.active),
+    StreamSet#stream_set{
+      active=NewActive
+     }.
 
 -spec update_all_send_windows(Delta :: integer(),
                               Streams:: streams()) ->
                                      streams().
 update_all_send_windows(Delta, Streams) ->
-    [ S#active_stream{
-        send_window_size=S#active_stream.send_window_size+Delta
-       }
-      || S <- Streams].
+    Streams#streams{
+      peer_initiated=update_all_send_windows_set(Delta, Streams#streams.peer_initiated),
+      self_initiated=update_all_recv_windows_set(Delta, Streams#streams.self_initiated)
+     }.
 
+update_all_send_windows_set(Delta, StreamSet) ->
+    NewActive = lists:map(
+                  fun(#active_stream{}=S) ->
+                          S#active_stream{
+                            send_window_size=S#active_stream.send_window_size+Delta
+                           };
+                     (S) -> S
+                  end,
+                  StreamSet#stream_set.active),
+    StreamSet#stream_set{
+      active=NewActive
+     }.
 
 -spec send_what_we_can(StreamId :: stream_id() | 'all',
                        ConnSendWindowSize :: integer(),
@@ -79,10 +290,25 @@ update_all_send_windows(Delta, Streams) ->
                               {NewConnSendWindowSize :: integer(),
                                NewStreams :: streams()}.
 send_what_we_can(all, ConnSendWindowSize, MaxFrameSize, Streams) ->
-    %% once Streams isn't a list(stream()) anymore, we'll need to pull
-    %% a list out here, and pass it down. That's why the specs below
-    %% say [stream()] and not streams()
-    c_send_what_we_can(ConnSendWindowSize, MaxFrameSize, Streams, []);
+    {AfterPeerWindowSize,
+     NewPeerInitiated} = c_send_what_we_can(
+                           ConnSendWindowSize,
+                           MaxFrameSize,
+                           Streams#streams.peer_initiated#stream_set.active,
+                           []),
+    {AfterAfterWindowSize,
+     NewSelfInitiated} = c_send_what_we_can(
+                           AfterPeerWindowSize,
+                           MaxFrameSize,
+                           Streams#streams.self_initiated#stream_set.active,
+                           []),
+
+    {AfterAfterWindowSize,
+     Streams#streams{
+       peer_initiated=Streams#streams.peer_initiated#stream_set{active=NewPeerInitiated},
+       self_initiated=Streams#streams.self_initiated#stream_set{active=NewSelfInitiated}
+      }
+    };
 send_what_we_can(StreamId, ConnSendWindowSize, MaxFrameSize, Streams) ->
     {NewConnSendWindowSize, NewStream} =
         s_send_what_we_can(ConnSendWindowSize,
@@ -97,8 +323,8 @@ send_what_we_can(StreamId, ConnSendWindowSize, MaxFrameSize, Streams) ->
                          Streams :: [stream()],
                          Acc :: [stream()]
                         ) ->
-                                {non_neg_integer(), streams()}.
-%% If we hit 0, done
+                                {integer(), stream_set()}.
+%% If we hit =< 0, done
 c_send_what_we_can(ConnSendWindowSize, _MFS, Streams, Acc)
   when ConnSendWindowSize =< 0 ->
     {ConnSendWindowSize, lists:reverse(Acc) ++ Streams};
@@ -118,7 +344,7 @@ c_send_what_we_can(SWS, MFS, [S|Streams], Acc) ->
 s_send_what_we_can(SWS, _, #active_stream{queued_data=Data}=S)
   when is_atom(Data) ->
     {SWS, S};
-s_send_what_we_can(SWS, MFS, Stream) ->
+s_send_what_we_can(SWS, MFS, #active_stream{}=Stream) ->
     %% We're coming in here with three numbers we need to look at:
     %% * Connection send window size
     %% * Stream send window size
@@ -199,16 +425,15 @@ s_send_what_we_can(SWS, MFS, Stream) ->
             {SWS - SentBytes, NewS};
         connection ->
             {0, NewS}
-    end.
-
-
-
+    end;
+s_send_what_we_can(SWS, _MFS, NonActiveStream) ->
+    {SWS, NonActiveStream}.
 
 -ifdef(TEST).
 -compile([export_all]).
 basic_streams_structure_test() ->
     %% Constructor:
-    _Streams = new(), %% There will be more to this
+    _Streams = new(client), %% There will be more to this
 
 
     %% When we start, all streams are idle

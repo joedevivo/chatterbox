@@ -10,6 +10,31 @@
           response_headers      :: undefined | hpack:headers(),
           response_body         :: undefined | binary()
          }).
--type stream() :: #active_stream{}.
 
--type streams() :: [#active_stream{}].
+-record(
+   closed_stream, {
+     id               :: stream_id(),
+     response_headers :: hpack:headers(),
+     response_body    :: binary()
+     }).
+
+-type stream() :: #active_stream{}
+                | #closed_stream{}.
+
+
+-record(
+   stream_set, {
+     max_active = unlimited :: unlimited | pos_integer(),
+     active_count = 0 :: non_neg_integer(),
+     active = [] :: [stream()]
+    }).
+-type stream_set() :: #stream_set{}.
+
+-record(
+   streams, {
+     type :: client | server,
+     peer_initiated = #stream_set{} :: stream_set(),
+     self_initiated = #stream_set{} :: stream_set()
+    }
+  ).
+-type streams() :: #streams{}.

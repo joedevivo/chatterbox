@@ -1,6 +1,7 @@
 -module(client_server_SUITE).
 
 -include("http2.hrl").
+-include("../src/h2_streams.hrl").
 
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("common_test/include/ct.hrl").
@@ -112,7 +113,10 @@ basic_push(_Config) ->
 
     ct:pal("Response Headers: ~p", [ResponseHeaders]),
     ct:pal("Response Body: ~p", [ResponseBody]),
-    13 = length(Streams),
+
+
+    1 = length(Streams#streams.self_initiated#stream_set.active),
+    12 = length(Streams#streams.peer_initiated#stream_set.active),
     ok.
 
 get_peer_in_handler(_Config) ->
