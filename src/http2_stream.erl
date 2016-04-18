@@ -521,6 +521,18 @@ half_closed_local(
                incoming_frames=NewQ
               }}
     end;
+
+half_closed_local(recv_es, #stream_state{ stream_id = StreamId, notify_pid = NotifyPid, response_body = Data} = Stream) ->
+    case NotifyPid of
+        undefined -> ok;
+        _         -> NotifyPid ! {'END_STREAM', StreamId}
+    end,
+    {next_state, closed,
+     Stream#stream_state{
+       incoming_frames=queue:new(),
+       response_body = Data
+      }};
+
 half_closed_local(_,
        #stream_state{}=Stream) ->
     rst_stream_(?STREAM_CLOSED, Stream).
