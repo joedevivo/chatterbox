@@ -1,11 +1,11 @@
 -module(http2_stream).
 
 -include("http2.hrl").
+-include("h2_streams.hrl").
 
 %% Public API
 -export([
          start_link/1,
-         recv_h/2,
          send_h/2,
          send_pp/2,
          recv_es/1,
@@ -133,11 +133,6 @@
 start_link(StreamOptions) ->
     gen_fsm:start_link(?MODULE, StreamOptions, []).
 
--spec recv_h(pid(), hpack:headers()) ->
-                    ok | trailers.
-recv_h(Pid, Headers) ->
-    gen_fsm:send_event(Pid, {recv_h, Headers}).
-
 -spec send_h(pid(), hpack:headers()) ->
                     ok.
 send_h(Pid, Headers) ->
@@ -153,8 +148,14 @@ send_pp(Pid, Headers) ->
 recv_pp(Pid, Headers) ->
     gen_fsm:send_event(Pid, {recv_pp, Headers}).
 
--spec recv_es(pid()) -> ok.
-recv_es(Pid) ->
+-spec recv_es(stream()) ->
+                     ok | {rst_stream, error_code()}.
+
+recv_es(#closed_stream{}) ->
+    {rst_stream, ?STREAM_CLOSED};
+recv_es(#active_stream{pid=undefined}) ->
+    {rst_stream, ?STREAM_CLOSED};
+recv_es(#active_stream{pid=Pid}) ->
     gen_fsm:send_event(Pid, recv_es).
 
 -spec recv_frame(pid(), http2_frame:frame()) ->

@@ -149,7 +149,7 @@ exceeds_max_concurrent_streams(Config) ->
           hpack:new_context(),
           StreamIds
          ),
-    timer:sleep(100),
+    timer:sleep(200),
     %% Now Max Streams should be open, but let's make sure we haven't
     %% heard back from anyone
 
@@ -172,7 +172,6 @@ exceeds_max_concurrent_streams(Config) ->
     http2c:send_unaltered_frames(Client, HFinal),
 
     %% Response should be RST_STREAM ?REFUSED_STREAM
-
     Response = http2c:wait_for_n_frames(Client, AStreamTooFar, 1),
     ?assertEqual(1, length(Response)),
     [{RstH, RstP}] = Response,
@@ -233,10 +232,10 @@ half_closed_remote_sends_headers(_Config) ->
 
     http2c:send_unaltered_frames(Client, H2),
 
-    Resp = http2c:wait_for_n_frames(Client, 1, 4),
+    Resp = http2c:wait_for_n_frames(Client, 1, 3),
     ct:pal("Resp: ~p", [Resp]),
-    ?assertEqual(4, length(Resp)),
-    [ {HeadersH, _}, {DataH, _}, {RstStreamH, RstStream}, _] = Resp,
+    ?assertEqual(true, length(Resp) >= 3),
+    [ {HeadersH, _}, {DataH, _}, {RstStreamH, RstStream}|_] = Resp,
     ?assertEqual(?HEADERS, HeadersH#frame_header.type),
     ?assertEqual(?DATA, DataH#frame_header.type),
     ?assertEqual(?RST_STREAM, RstStreamH#frame_header.type),

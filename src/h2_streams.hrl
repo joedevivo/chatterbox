@@ -2,7 +2,7 @@
 -record(
    active_stream, {
           id                    :: stream_id(),
-          pid                   :: undefined | pid(),
+          pid                   :: pid() | undefined,
           send_window_size      :: non_neg_integer(),
           recv_window_size      :: non_neg_integer(),
           queued_data           :: undefined | done | binary(),

@@ -12,7 +12,9 @@
     send_what_we_can/4,
     sort/1,
     update_all_recv_windows/2,
-    update_all_send_windows/2
+    update_all_send_windows/2,
+    update_peer_max_active/2,
+    update_self_max_active/2
    ]).
 
 -spec new(
@@ -283,7 +285,29 @@ update_all_send_windows_set(Delta, StreamSet) ->
       active=NewActive
      }.
 
--spec send_what_we_can(StreamId :: stream_id() | 'all',
+-spec update_peer_max_active(NewMax :: non_neg_integer() | unlimited,
+                             Streams :: streams()) ->
+                                    streams().
+update_peer_max_active(NewMax,
+                       #streams{
+                          peer_initiated=PI
+                         }=Streams) ->
+    Streams#streams{
+      peer_initiated=PI#stream_set{max_active=NewMax}
+     }.
+
+-spec update_self_max_active(NewMax :: non_neg_integer() | unlimited,
+                             Streams :: streams()) ->
+                                    streams().
+update_self_max_active(NewMax,
+                       #streams{
+                          self_initiated=SI
+                         }=Streams) ->
+    Streams#streams{
+      self_initiated=SI#stream_set{max_active=NewMax}
+     }.
+
+-spec send_what_we_can(StreamId :: all | stream_id(),
                        ConnSendWindowSize :: integer(),
                        MaxFrameSize :: non_neg_integer(),
                        Streams :: streams()) ->
@@ -323,7 +347,7 @@ send_what_we_can(StreamId, ConnSendWindowSize, MaxFrameSize, Streams) ->
                          Streams :: [stream()],
                          Acc :: [stream()]
                         ) ->
-                                {integer(), stream_set()}.
+                                {integer(), [stream()]}.
 %% If we hit =< 0, done
 c_send_what_we_can(ConnSendWindowSize, _MFS, Streams, Acc)
   when ConnSendWindowSize =< 0 ->

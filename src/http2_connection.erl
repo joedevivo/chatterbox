@@ -252,7 +252,7 @@ send_promise(Pid, StreamId, NewStreamId, Headers) ->
 get_response(Pid, StreamId) ->
     gen_fsm:sync_send_all_state_event(Pid, {get_response, StreamId}).
 
--spec get_streams(pid()) -> [{stream_id(), pid()}].
+-spec get_streams(pid()) -> streams().
 get_streams(Pid) ->
     gen_fsm:sync_send_all_state_event(Pid, streams).
 
@@ -387,8 +387,16 @@ route_frame({H, Payload},
             %% half_closed_remote. We'll just send the message
             %% everywhere. It's up to them if they need to do
             %% anything.
-            UpdatedStreams =
+            UpdatedStreams1 =
                 h2_streams:update_all_send_windows(Delta, Streams),
+
+            UpdatedStreams2 =
+                case proplists:get_value(?SETTINGS_MAX_CONCURRENT_STREAMS, PList) of
+                    undefined ->
+                        UpdatedStreams1;
+                    NewMax ->
+                        h2_streams:update_peer_max_active(NewMax, UpdatedStreams1)
+                end,
 
             NewEncodeContext = hpack:new_max_table_size(HTS, EncodeContext),
 
@@ -401,7 +409,7 @@ route_frame({H, Payload},
                                       %% the spec says: "The connection flow-control window can only be
                                       %% changed using WINDOW_UPDATE frames.",
                                       encode_context=NewEncodeContext,
-                                      streams=UpdatedStreams
+                                      streams=UpdatedStreams2
                                      }};
         {error, Code} ->
             go_away(Code, Conn)
@@ -425,7 +433,7 @@ route_frame({H, _Payload},
     case queue:out(SS) of
         {{value, {_Ref, NewSettings}}, NewSS} ->
 
-            UpdatedStreams =
+            UpdatedStreams1 =
                 case NewSettings#settings.initial_window_size of
                     undefined ->
                         ok;
@@ -434,10 +442,17 @@ route_frame({H, _Payload},
                         h2_streams:update_all_recv_windows(Delta, Streams)
                 end,
 
+            UpdatedStreams2 =
+                case NewSettings#settings.max_concurrent_streams of
+                    undefined ->
+                        UpdatedStreams1;
+                    NewMax ->
+                        h2_streams:update_peer_max_active(NewMax, UpdatedStreams1)
+                end,
             {next_state,
              connected,
              Conn#connection{
-               streams=UpdatedStreams,
+               streams=UpdatedStreams2,
                settings_sent=NewSS,
                self_settings=NewSettings
                %% Same thing here, section 6.9.2
@@ -742,17 +757,19 @@ route_frame(
             lager:error("[~p] Window update for an idle stream (~p)",
                        [Conn#connection.type, StreamId]),
             go_away(?PROTOCOL_ERROR, Conn);
-        S ->
+        #closed_stream{} = Closed ->
+            rst_stream(Closed, ?STREAM_CLOSED, Conn);
+        #active_stream{} = S ->
             SWS = Conn#connection.send_window_size,
             NewSSWS = S#active_stream.send_window_size+WSI,
 
             case NewSSWS > 2147483647 of
                 true ->
                     lager:error("Sending ~p FLOWCONTROL ERROR because NSW = ~p", [StreamId, NewSSWS]),
-                    http2_stream:rst_stream(S#active_stream.pid, ?FLOW_CONTROL_ERROR),
+                    rst_stream(S, ?FLOW_CONTROL_ERROR, Conn),
                     {next_state, connected,
                      Conn#connection{
-                       %streams = delete_stream(S, Streams)
+                       streams = h2_streams:replace(#closed_stream{id=S#active_stream.id}, Streams)
                       }};
                 false ->
                     lager:debug("Stream ~p send window now: ~p", [StreamId, NewSSWS]),
@@ -788,10 +805,9 @@ handle_event({stream_finished,
               StreamId,
               Headers,
               Body}, StateName, Conn) ->
-    Stream = h2_streams:get(StreamId, Conn#connection.streams),
     NewStream =
-        Stream#active_stream{
-          pid = undefined,
+        #closed_stream{
+          id = StreamId,
           response_headers = Headers,
           response_body = Body
          },
@@ -939,7 +955,13 @@ handle_sync_event(streams, _F, StateName,
 handle_sync_event({get_response, StreamId}, _F, StateName,
                   #connection{}=Conn) ->
     Stream = h2_streams:get(StreamId, Conn#connection.streams),
-    Reply = {ok, {Stream#active_stream.response_headers, Stream#active_stream.response_body}},
+    Reply = case Stream of
+                #closed_stream{} ->
+                    {ok, {Stream#closed_stream.response_headers,
+                          Stream#closed_stream.response_body}};
+                #active_stream{} ->
+                    not_ready
+            end,
     {reply, Reply, StateName, Conn};
 handle_sync_event({new_stream, NotifyPid}, _F, StateName,
                   #connection{
@@ -1101,9 +1123,12 @@ go_away(ErrorCode,
 %% finds one, it delegates sending the rst_stream frame to it, but if
 %% it doesn't, it seems like a waste to spawn one just to kill it
 %% after sending that frame, so we send it from here.
--spec rst_stream(stream_id(), error_code(), connection()) ->
+-spec rst_stream(stream_id() | stream(),
+                 error_code(),
+                 connection()) ->
                         {next_state, connected, connection()}.
-rst_stream(StreamId, ErrorCode, Conn) ->
+rst_stream(StreamId, ErrorCode, Conn)
+  when is_integer(StreamId) ->
     case h2_streams:get(StreamId, Conn#connection.streams) of
         false ->
             RstStream = http2_frame_rst_stream:new(ErrorCode),
@@ -1116,6 +1141,36 @@ rst_stream(StreamId, ErrorCode, Conn) ->
         Stream ->
             http2_stream:rst_stream(Stream#active_stream.pid, ?PROTOCOL_ERROR)
     end,
+    {next_state, connected, Conn};
+rst_stream(#active_stream{
+              pid=Pid,
+              id=StreamId
+             },
+           ErrorCode, Conn) ->
+    case Pid of
+        undefined ->
+            RstStream = http2_frame_rst_stream:new(ErrorCode),
+            RstStreamBin = http2_frame:to_binary(
+                             {#frame_header{
+                                 stream_id=StreamId
+                                },
+                              RstStream}),
+            sock:send(Conn#connection.socket, RstStreamBin);
+        _ ->
+            http2_stream:rst_stream(Pid, ErrorCode)
+    end,
+    {next_state, connected, Conn};
+rst_stream(#closed_stream{id=StreamId},
+           ErrorCode,
+           Conn) ->
+    lager:info("StreamId : ~p, ErrorCode : ~p", [StreamId, ErrorCode]),
+    RstStream = http2_frame_rst_stream:new(ErrorCode),
+    RstStreamBin = http2_frame:to_binary(
+                     {#frame_header{
+                         stream_id=StreamId
+                        },
+                      RstStream}),
+    sock:send(Conn#connection.socket, RstStreamBin),
     {next_state, connected, Conn}.
 
 -spec send_settings(settings(), connection()) -> connection().
@@ -1324,7 +1379,8 @@ maybe_hpack(Continuation, Conn)
         {error, compression_error} ->
             go_away(?COMPRESSION_ERROR, Conn);
         {ok, {Headers, NewDecodeContext}} ->
-
+            lager:info("{type, end_stream}: {~p, ~p}", [Continuation#continuation_state.type,
+                                                        Continuation#continuation_state.end_stream]),
             case {Continuation#continuation_state.type,
                   Continuation#continuation_state.end_stream} of
                 {push_promise, _} ->
@@ -1334,11 +1390,12 @@ maybe_hpack(Continuation, Conn)
                 {trailers, false} ->
                     rst_stream(Stream#active_stream.id, ?PROTOCOL_ERROR, Conn);
                 _ -> %% headers or trailers!
-                    http2_stream:recv_h(Stream#active_stream.pid, Headers)
+                    lager:info("Stream ~p", [Stream]),
+                    recv_h(Stream, Conn, Headers)
             end,
             case Continuation#continuation_state.end_stream of
                 true ->
-                    http2_stream:recv_es(Stream#active_stream.pid);
+                    http2_stream:recv_es(Stream);
                 false ->
                     ok
             end,
@@ -1354,3 +1411,18 @@ maybe_hpack(Continuation, Conn) ->
      Conn#connection{
        continuation = Continuation
       }}.
+
+
+%% Stream API
+-spec recv_h(Stream :: stream(),
+             Conn :: connection(),
+             Headers :: hpack:headers()) ->
+                    ok.
+recv_h(#active_stream{pid=undefined}=Stream,
+       Conn, _Headers) ->
+    rst_stream(Stream, ?STREAM_CLOSED, Conn);
+recv_h(#active_stream{pid=Pid}, _Conn, Headers) ->
+    gen_fsm:send_event(Pid, {recv_h, Headers});
+recv_h(#closed_stream{}=Stream, Conn, _Headers) ->
+    lager:info("3"),
+    rst_stream(Stream, ?STREAM_CLOSED, Conn).
