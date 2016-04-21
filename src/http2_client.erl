@@ -121,7 +121,6 @@ sync_request(CliPid, Headers, Body) ->
     http2_connection:send_body(CliPid,StreamId,Body),
     receive
         {'END_STREAM', StreamId} ->
-            %% TODO: Maybe a race here.
             http2_connection:get_response(CliPid, StreamId)
     after 5000 ->
         {error, timeout}

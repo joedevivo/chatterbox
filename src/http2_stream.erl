@@ -482,9 +482,7 @@ half_closed_local(
        type=?DATA
       },_}=F},
   #stream_state{
-     stream_id=StreamId,
-     incoming_frames=IFQ,
-     notify_pid = NotifyPid
+     incoming_frames=IFQ
      } = Stream) ->
     NewQ = queue:in(F, IFQ),
 
@@ -493,12 +491,6 @@ half_closed_local(
             Data =
                 [ http2_frame_data:data(Payload)
                   || {#frame_header{type=?DATA}, Payload} <- queue:to_list(NewQ)],
-            case NotifyPid of
-                undefined ->
-                    ok;
-                _ ->
-                    NotifyPid ! {'END_STREAM', StreamId}
-            end,
             {next_state, closed,
              Stream#stream_state{
                incoming_frames=queue:new(),
@@ -520,6 +512,7 @@ closed(timeout,
     gen_fsm:send_all_state_event(Stream#stream_state.connection,
                                  {stream_finished,
                                   Stream#stream_state.stream_id,
+                                  Stream#stream_state.notify_pid,
                                   Stream#stream_state.response_headers,
                                   Stream#stream_state.response_body}),
     {stop, normal, Stream};
@@ -577,7 +570,8 @@ terminate(_Reason, _StateName, _State) ->
 -spec rst_stream_(error_code(), state()) ->
                          {next_state,
                           closed,
-                          state()}.
+                          state(),
+                          timeout()}.
 rst_stream_(ErrorCode,
            #stream_state{
               socket=Socket,
@@ -593,7 +587,7 @@ rst_stream_(ErrorCode,
     sock:send(Socket, RstStreamBin),
     {next_state,
      closed,
-     Stream}.
+     Stream, 0}.
 
 check_content_length(Stream) ->
     ContentLength =
