@@ -631,19 +631,26 @@ route_frame(
             %% TODO: RST_STREAM support
             {next_state, connected, Conn}
     end;
+route_frame({H=#frame_header{}, _P},
+            #connection{} =Conn)
+    when H#frame_header.type == ?PUSH_PROMISE,
+         Conn#connection.type == server ->
+    go_away(?PROTOCOL_ERROR, Conn);
 route_frame({H=#frame_header{
                   stream_id=StreamId
                  },
              Payload}=Frame,
             #connection{}=Conn)
-    when H#frame_header.type == ?PUSH_PROMISE ->
+    when H#frame_header.type == ?PUSH_PROMISE,
+         Conn#connection.type == client ->
     PSID = http2_frame_push_promise:promised_stream_id(Payload),
     lager:debug("[~p] Received PUSH_PROMISE Frame on Stream ~p for Stream ~p",
                 [Conn#connection.type, StreamId, PSID]),
 
     Streams = Conn#connection.streams,
+
     Old = h2_streams:get(StreamId, Streams),
-    {ok, NotifyPid} = http2_stream:notify_pid(Old#active_stream.pid),
+    NotifyPid = h2_streams:notify_pid(Old),
 
     NewStreams =
         h2_streams:peer_initiated_stream(
@@ -799,18 +806,22 @@ route_frame(Frame, #connection{}=Conn) ->
 
 handle_event({stream_finished,
               StreamId,
-              NotifyPid,
               Headers,
-              Body}, StateName, Conn) ->
-    NewStream =
-        #closed_stream{
-          id = StreamId,
-          response_headers = Headers,
-          response_body = Body
-         },
+              Body}, StateName,
+             Conn) ->
+    Stream = h2_streams:get(StreamId, Conn#connection.streams),
+    NotifyPid = Stream#active_stream.notify_pid,
+
+    {_NewStream, NewStreams} =
+        h2_streams:close(
+          Stream,
+          Headers,
+          Body,
+          Conn#connection.streams),
+
     NewConn =
         Conn#connection{
-          streams = h2_streams:replace(NewStream, Conn#connection.streams)
+          streams = NewStreams
          },
     case {Conn#connection.type, is_pid(NotifyPid)} of
         {client, true} ->
@@ -1129,25 +1140,6 @@ go_away(ErrorCode,
                  error_code(),
                  connection()) ->
                         {next_state, connected, connection()}.
-%% This clause is for when we have a stream we think is active,
-%% but never had a pid stood up.
-rst_stream(#active_stream{
-              pid=undefined,
-              id=StreamId
-             }=S,
-           ErrorCode, Conn) ->
-    RstStream = http2_frame_rst_stream:new(ErrorCode),
-    RstStreamBin = http2_frame:to_binary(
-                     {#frame_header{
-                         stream_id=StreamId
-                        },
-                      RstStream}),
-    sock:send(Conn#connection.socket, RstStreamBin),
-    {next_state, connected,
-     Conn#connection{
-       streams = h2_streams:replace(#closed_stream{id=S#active_stream.id},
-                                    Conn#connection.streams)
-      }};
 rst_stream(#active_stream{
               pid=Pid
              },
@@ -1411,9 +1403,6 @@ maybe_hpack(Continuation, Conn) ->
              Conn :: connection(),
              Headers :: hpack:headers()) ->
                     ok.
-recv_h(#active_stream{pid=undefined}=Stream,
-       Conn, _Headers) ->
-    rst_stream(Stream, ?STREAM_CLOSED, Conn);
 recv_h(#active_stream{pid=Pid}, _Conn, Headers) ->
     gen_fsm:send_event(Pid, {recv_h, Headers});
 recv_h(#closed_stream{}=Stream, Conn, _Headers) ->

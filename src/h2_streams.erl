@@ -6,11 +6,13 @@
    [
     new/1,
     get/2,
+    close/4,
     initiate_stream/7,
     peer_initiated_stream/7,
     replace/2,
     send_what_we_can/4,
     sort/1,
+    notify_pid/1,
     update_all_recv_windows/2,
     update_all_send_windows/2,
     update_peer_max_active/2,
@@ -142,13 +144,13 @@ new_stream_(
                   [
                    {stream_id, StreamId},
                    {connection, self()},
-                   {notify_pid, NotifyPid},
                    {callback_module, CBMod},
                    {socket, Socket}
                   ]),
     NewStream = #active_stream{
                    id = StreamId,
                    pid = Pid,
+                   notify_pid=NotifyPid,
                    send_window_size=InitialSendWindow,
                    recv_window_size=InitialRecvWindow
                   },
@@ -176,6 +178,45 @@ get(Id, #streams{type=server}=Streams)
 
 get_set(Id, StreamSet) ->
     lists:keyfind(Id, 2, StreamSet#stream_set.active).
+
+close(Closed=#closed_stream{},
+      _Headers,
+      _Body,
+      Streams) ->
+    {Closed, Streams};
+close(_Idle=#idle_stream{id=StreamId},
+      Headers, Body,
+      Streams) ->
+    Closed = #closed_stream{
+                id=StreamId,
+                response_headers=Headers,
+                response_body=Body
+               },
+    {Closed, replace(Closed, Streams)};
+close(#active_stream{
+         id=Id,
+         notify_pid=NotifyPid
+        },
+      Headers,
+      Body,
+      Streams) ->
+    Closed = #closed_stream{
+                id=Id,
+                response_headers=Headers,
+                response_body=Body,
+                notify_pid=NotifyPid
+               },
+    {Closed, replace(Closed, Streams)}.
+
+%% the false clause is here as an artifact of us using a simple
+%% lists:keyfind
+notify_pid(false) -> undefined;
+notify_pid(#idle_stream{}) ->
+    undefined;
+notify_pid(#active_stream{notify_pid=Pid}) ->
+    Pid;
+notify_pid(#closed_stream{notify_pid=Pid}) ->
+    Pid.
 
 -spec replace(Stream :: stream(),
               Streams :: streams()) ->

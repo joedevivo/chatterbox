@@ -14,7 +14,6 @@
          recv_frame/2,
          stream_id/0,
          connection/0,
-         notify_pid/1,
          send_window_update/1,
          send_connection_window_update/1,
          rst_stream/2
@@ -48,7 +47,6 @@
       | initial_send_window_size
       | initial_recv_window_size
       | callback_module
-      | notify_pid
       | socket.
 
 -type stream_option() ::
@@ -57,8 +55,7 @@
         | {socket, sock:socket()}
         | {initial_send_window_size, non_neg_integer()}
         | {initial_recv_window_size, non_neg_integer()}
-        | {callback_module, module()}
-        | {notify_pid, pid()}.
+        | {callback_module, module()}.
 
 -type stream_options() ::
         [stream_option()].
@@ -94,7 +91,6 @@
           response_end_stream = false :: boolean(),
           next_state = undefined :: undefined | stream_state_name(),
           promised_stream = undefined :: undefined | state(),
-          notify_pid = undefined :: undefined | pid(),
           callback_state = undefined :: any(),
           callback_mod = undefined :: module()
          }).
@@ -176,12 +172,6 @@ stream_id() ->
 connection() ->
     gen_fsm:sync_send_all_state_event(self(), connection).
 
--spec notify_pid(pid()) ->
-                          {ok, pid()}
-                              | {error, term()}.
-notify_pid(Pid) ->
-    gen_fsm:sync_send_all_state_event(Pid, notify_pid).
-
 -spec send_window_update(non_neg_integer()) -> ok.
 send_window_update(Size) ->
     gen_fsm:send_all_state_event(self(), {send_window_update, Size}).
@@ -204,7 +194,6 @@ init(StreamOptions) ->
     StreamId = proplists:get_value(stream_id, StreamOptions),
     ConnectionPid = proplists:get_value(connection, StreamOptions),
     CB = proplists:get_value(callback_module, StreamOptions),
-    NotifyPid = proplists:get_value(notify_pid, StreamOptions, ConnectionPid),
     Socket = proplists:get_value(socket, StreamOptions),
 
     %% TODO: Check for CB implementing this behaviour
@@ -215,8 +204,7 @@ init(StreamOptions) ->
                   socket=Socket,
                   stream_id=StreamId,
                   connection=ConnectionPid,
-                  callback_state=CallbackState,
-                  notify_pid=NotifyPid
+                  callback_state=CallbackState
                  }}.
 
 %% IMPORTANT: If we're in an idle state, we can only send/receive
@@ -512,7 +500,6 @@ closed(timeout,
     gen_fsm:send_all_state_event(Stream#stream_state.connection,
                                  {stream_finished,
                                   Stream#stream_state.stream_id,
-                                  Stream#stream_state.notify_pid,
                                   Stream#stream_state.response_headers,
                                   Stream#stream_state.response_body}),
     {stop, normal, Stream};
@@ -546,8 +533,6 @@ handle_event(_E, StateName, State) ->
 
 handle_sync_event({rst_stream, ErrorCode}, _F, StateName, State=#stream_state{}) ->
     {reply, {ok, rst_stream_(ErrorCode, State)}, StateName, State};
-handle_sync_event(notify_pid, _F, StateName, State=#stream_state{notify_pid=NP}) ->
-    {reply, {ok,NP}, StateName, State};
 handle_sync_event(stream_id, _F, StateName, State=#stream_state{stream_id=StreamId}) ->
     {reply, StreamId, StateName, State};
 handle_sync_event(connection, _F, StateName, State=#stream_state{connection=Conn}) ->
