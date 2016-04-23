@@ -13,12 +13,12 @@
         ]).
 
 -record(state, {conn_pid :: pid(),
-                stream_id :: integer(),
+                stream_id :: stream_id(),
                 peer = undefined :: undefined | {inet:ip_addres(),
                                                  inet:port_number()}
                }).
 
--spec init(pid(), integer()) -> {ok, any()}.
+-spec init(pid(), stream_id()) -> {ok, any()}.
 init(ConnPid, StreamId) -> {ok, #state{conn_pid=ConnPid,
                                        stream_id=StreamId}}.
 
