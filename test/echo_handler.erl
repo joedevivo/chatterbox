@@ -13,11 +13,11 @@
         ]).
 
 -record(state, {conn_pid :: pid(),
-                stream_id :: integer(),
+                stream_id :: stream_id(),
                 buffer = <<>> :: binary()
                }).
 
--spec init(pid(), integer()) -> {ok, any()}.
+-spec init(pid(), stream_id()) -> {ok, any()}.
 init(ConnPid, StreamId) -> {ok, #state{conn_pid=ConnPid,
                                        stream_id=StreamId}}.
 
