@@ -12,6 +12,7 @@
     replace/2,
     send_what_we_can/4,
     sort/1,
+    stream_id/1,
     notify_pid/1,
     update_all_recv_windows/2,
     update_all_send_windows/2,
@@ -208,6 +209,22 @@ close(#active_stream{
                },
     {Closed, replace(Closed, Streams)}.
 
+stream_id(false) ->
+    undefined;
+stream_id(#idle_stream{id=SID}) ->
+    SID;
+stream_id(#active_stream{id=SID}) ->
+    SID;
+stream_id(#closed_stream{id=SID}) ->
+    SID.
+
+type(#idle_stream{}) ->
+    idle_stream;
+type(#active_stream{}) ->
+    active_stream;
+type(#closed_stream{}) ->
+    closed_stream.
+
 %% the false clause is here as an artifact of us using a simple
 %% lists:keyfind
 notify_pid(false) -> undefined;
@@ -222,7 +239,7 @@ notify_pid(#closed_stream{notify_pid=Pid}) ->
               Streams :: streams()) ->
                      streams().
 replace(Stream, Streams) ->
-    StreamId = element(2, Stream),
+    StreamId = stream_id(Stream),
     WhichSet =
         case {StreamId rem 2, Streams#streams.type} of
             {0, client} ->
@@ -251,8 +268,8 @@ replace(Stream, Streams) ->
 
 replace_set(StreamId, Stream, StreamSet) ->
     OldStream = lists:keyfind(StreamId, 2, StreamSet#stream_set.active),
-    OldType = element(1, OldStream),
-    NewType = element(1, Stream),
+    OldType = type(OldStream),
+    NewType = type(Stream),
 
     NewSet =
         StreamSet#stream_set{
