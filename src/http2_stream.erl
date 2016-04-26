@@ -9,7 +9,7 @@
          send_pp/2,
          recv_pp/2,
          send_frame/2,
-         recv_frame/2,
+         recv_data/2,
          stream_id/0,
          connection/0,
          send_window_update/1,
@@ -142,10 +142,10 @@ send_pp(Pid, Headers) ->
 recv_pp(Pid, Headers) ->
     gen_fsm:send_event(Pid, {recv_pp, Headers}).
 
--spec recv_frame(pid(), http2_frame:frame()) ->
+-spec recv_data(pid(), http2_frame:frame()) ->
                         ok.
-recv_frame(Pid, Frame) ->
-    gen_fsm:send_event(Pid, {recv_frame, Frame}).
+recv_data(Pid, Frame) ->
+    gen_fsm:send_event(Pid, {recv_data, Frame}).
 
 -spec send_frame(pid(), http2_frame:frame()) ->
                         ok | flow_control.
@@ -311,7 +311,7 @@ open(recv_es,
              Stream}
     end;
 
-open({recv_frame,
+open({recv_data,
       {#frame_header{
           flags=Flags,
           length=L,
@@ -334,7 +334,7 @@ open({recv_frame,
        request_body_size=Stream#stream_state.request_body_size+L,
        callback_state=NewCBState
       }};
-open({recv_frame,
+open({recv_data,
       {#frame_header{
           flags=Flags,
           length=L,
@@ -452,7 +452,7 @@ half_closed_local(
           rst_stream_(Code, Stream)
   end;
 half_closed_local(
-  {recv_frame,
+  {recv_data,
    {#frame_header{
        flags=Flags,
        type=?DATA

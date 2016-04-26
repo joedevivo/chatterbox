@@ -506,7 +506,7 @@ route_frame(F={H=#frame_header{
             ok
     end,
 
-    http2_stream:recv_frame(Stream#active_stream.pid, F),
+    http2_stream:recv_data(Stream#active_stream.pid, F),
 
     {next_state,
      connected,
