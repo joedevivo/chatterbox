@@ -1,14 +1,12 @@
 -module(http2_stream).
 
 -include("http2.hrl").
--include("h2_streams.hrl").
 
 %% Public API
 -export([
          start_link/1,
          send_h/2,
          send_pp/2,
-         recv_es/1,
          recv_pp/2,
          send_frame/2,
          recv_frame/2,
@@ -143,16 +141,6 @@ send_pp(Pid, Headers) ->
                      ok.
 recv_pp(Pid, Headers) ->
     gen_fsm:send_event(Pid, {recv_pp, Headers}).
-
--spec recv_es(stream()) ->
-                     ok | {rst_stream, error_code()}.
-
-recv_es(#closed_stream{}) ->
-    {rst_stream, ?STREAM_CLOSED};
-recv_es(#active_stream{pid=undefined}) ->
-    {rst_stream, ?STREAM_CLOSED};
-recv_es(#active_stream{pid=Pid}) ->
-    gen_fsm:send_event(Pid, recv_es).
 
 -spec recv_frame(pid(), http2_frame:frame()) ->
                         ok.

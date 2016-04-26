@@ -287,6 +287,7 @@ replace_set(StreamId, Stream, StreamSet) ->
             NewSet
     end.
 
+%% TODO: Change sort to send peer_initiated first!
 -spec sort(Streams::streams()) -> streams().
 sort(Streams) ->
     Streams#streams{

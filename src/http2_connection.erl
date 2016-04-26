@@ -759,6 +759,7 @@ route_frame(
     lager:debug("[~p] Received WINDOW_UPDATE Frame for Stream ~p",
                 [Conn#connection.type, StreamId]),
 
+    %% TODO: get outside of this case, use h2_streams:type for this switch
     case h2_streams:get(StreamId, Streams) of
         false ->
             lager:error("[~p] Window update for an idle stream (~p)",
@@ -867,6 +868,7 @@ handle_event({send_headers, StreamId, Headers, Opts},
                                      ),
 
     [ sock:send(Socket, http2_frame:to_binary(Frame)) || Frame <- FramesToSend],
+
     http2_stream:send_h(Stream#active_stream.pid, Headers),
 
     {next_state, StateName,
@@ -1381,7 +1383,7 @@ maybe_hpack(Continuation, Conn)
             end,
             case Continuation#continuation_state.end_stream of
                 true ->
-                    http2_stream:recv_es(Stream);
+                    recv_es(Stream);
                 false ->
                     ok
             end,
@@ -1407,3 +1409,13 @@ recv_h(#active_stream{pid=Pid}, _Conn, Headers) ->
     gen_fsm:send_event(Pid, {recv_h, Headers});
 recv_h(#closed_stream{}=Stream, Conn, _Headers) ->
     rst_stream(Stream, ?STREAM_CLOSED, Conn).
+
+-spec recv_es(Stream :: stream()) ->
+                     ok | {rst_stream, error_code()}.
+
+recv_es(#closed_stream{}) ->
+    {rst_stream, ?STREAM_CLOSED};
+recv_es(#active_stream{pid=undefined}) ->
+    {rst_stream, ?STREAM_CLOSED};
+recv_es(#active_stream{pid=Pid}) ->
+    gen_fsm:send_event(Pid, recv_es).
