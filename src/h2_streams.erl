@@ -12,12 +12,27 @@
     replace/2,
     send_what_we_can/4,
     sort/1,
-    stream_id/1,
-    notify_pid/1,
     update_all_recv_windows/2,
     update_all_send_windows/2,
     update_peer_max_active/2,
     update_self_max_active/2
+   ]).
+
+
+%% Record Encapsulation
+-export(
+   [
+    queued_data/1,
+    update_data_queue/3,
+    decrement_recv_window/2,
+    recv_window_size/1,
+    response/1,
+    send_window_size/1,
+    increment_send_window_size/2,
+    stream_id/1,
+    stream_pid/1,
+    notify_pid/1,
+    type/1
    ]).
 
 -spec new(
@@ -177,7 +192,12 @@ get(Id, #streams{type=server}=Streams)
     get_set(Id, Streams#streams.peer_initiated).
 
 get_set(Id, StreamSet) ->
-    lists:keyfind(Id, 2, StreamSet#stream_set.active).
+    case lists:keyfind(Id, 2, StreamSet#stream_set.active) of
+        false ->
+            false;
+        Stream  ->
+            Stream
+    end.
 
 close(Closed=#closed_stream{},
       _Headers,
@@ -208,6 +228,58 @@ close(#active_stream{
                },
     {Closed, replace(Closed, Streams)}.
 
+queued_data(#active_stream{queued_data=QD}) ->
+    QD;
+queued_data(_) ->
+    undefined.
+
+update_data_queue(
+  NewBody,
+  BodyComplete,
+  #active_stream{} = Stream) ->
+    Stream#active_stream{
+      queued_data=NewBody,
+      body_complete=BodyComplete
+     };
+update_data_queue(_, _, S) ->
+    S.
+
+response(#closed_stream{
+            response_headers=Headers,
+            response_body=Body}) ->
+    {Headers, Body};
+response(_) ->
+    no_response.
+
+recv_window_size(#active_stream{recv_window_size=RWS}) ->
+    RWS;
+recv_window_size(_) ->
+    undefined.
+
+decrement_recv_window(
+  L,
+  #active_stream{recv_window_size=RWS}=Stream
+ ) ->
+    Stream#active_stream{
+      recv_window_size=RWS-L
+     };
+decrement_recv_window(_, S) ->
+    S.
+
+send_window_size(#active_stream{send_window_size=SWS}) ->
+    SWS;
+send_window_size(_) ->
+    undefined.
+
+increment_send_window_size(
+  WSI,
+  #active_stream{send_window_size=SWS}=Stream) ->
+    Stream#active_stream{
+      send_window_size=SWS+WSI
+     };
+increment_send_window_size(_WSI, Stream) ->
+    Stream.
+
 stream_id(false) ->
     undefined;
 stream_id(#idle_stream{id=SID}) ->
@@ -217,6 +289,14 @@ stream_id(#active_stream{id=SID}) ->
 stream_id(#closed_stream{id=SID}) ->
     SID.
 
+stream_pid(#active_stream{pid=Pid}) ->
+    Pid;
+stream_pid(_) ->
+    undefined.
+
+
+type(false) ->
+    idle_stream;
 type(#idle_stream{}) ->
     idle_stream;
 type(#active_stream{}) ->

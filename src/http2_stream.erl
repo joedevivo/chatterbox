@@ -5,11 +5,8 @@
 %% Public API
 -export([
          start_link/4,
-         send_h/2,
          send_pp/2,
-         recv_pp/2,
          send_frame/2,
-         recv_data/2,
          stream_id/0,
          connection/0,
          send_window_update/1,
@@ -112,25 +109,10 @@ start_link(StreamId, Connection, CallbackModule, Socket) ->
                         Socket],
                        []).
 
--spec send_h(pid(), hpack:headers()) ->
-                    ok.
-send_h(Pid, Headers) ->
-    gen_fsm:send_event(Pid, {send_h, Headers}).
-
 -spec send_pp(pid(), hpack:headers()) ->
                      ok.
 send_pp(Pid, Headers) ->
     gen_fsm:send_event(Pid, {send_pp, Headers}).
-
--spec recv_pp(pid(), hpack:headers()) ->
-                     ok.
-recv_pp(Pid, Headers) ->
-    gen_fsm:send_event(Pid, {recv_pp, Headers}).
-
--spec recv_data(pid(), http2_frame:frame()) ->
-                        ok.
-recv_data(Pid, Frame) ->
-    gen_fsm:send_event(Pid, {recv_data, Frame}).
 
 -spec send_frame(pid(), http2_frame:frame()) ->
                         ok | flow_control.
@@ -155,13 +137,6 @@ send_connection_window_update(Size) ->
 
 rst_stream(Pid, Code) ->
     gen_fsm:sync_send_all_state_event(Pid, {rst_stream, Code}).
-
-%% States
-%% - idle
-%% - reserved_local
-%% - open
-%% - half_closed_remote
-%% - closed
 
 init([
       StreamId,
