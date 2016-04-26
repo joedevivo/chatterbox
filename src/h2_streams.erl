@@ -142,12 +142,11 @@ new_stream_(
   StreamSet
  ) ->
     {ok, Pid} = http2_stream:start_link(
-                  [
-                   {stream_id, StreamId},
-                   {connection, self()},
-                   {callback_module, CBMod},
-                   {socket, Socket}
-                  ]),
+                   StreamId,
+                   self(),
+                   CBMod,
+                   Socket
+                  ),
     NewStream = #active_stream{
                    id = StreamId,
                    pid = Pid,

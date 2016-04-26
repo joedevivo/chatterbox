@@ -4,7 +4,7 @@
 
 %% Public API
 -export([
-         start_link/1,
+         start_link/4,
          send_h/2,
          send_pp/2,
          recv_pp/2,
@@ -38,31 +38,6 @@
          half_closed_remote/2,
          closed/2
         ]).
-
--type stream_option_name() ::
-        stream_id
-      | connection
-      | initial_send_window_size
-      | initial_recv_window_size
-      | callback_module
-      | socket.
-
--type stream_option() ::
-          {stream_id, stream_id()}
-        | {connection, pid()}
-        | {socket, sock:socket()}
-        | {initial_send_window_size, non_neg_integer()}
-        | {initial_recv_window_size, non_neg_integer()}
-        | {callback_module, module()}.
-
--type stream_options() ::
-        [stream_option()].
-
--export_type([
-              stream_option_name/0,
-              stream_option/0,
-              stream_options/0
-             ]).
 
 -type stream_state_name() :: 'idle'
                            | 'open'
@@ -122,10 +97,20 @@
     {ok, NewState :: callback_state()}.
 
 %% Public API
--spec start_link(stream_options()) ->
+-spec start_link(
+        StreamId :: stream_id(),
+        Connection :: pid(),
+        CallbackModule :: module(),
+        Socket :: sock:socket()
+                  ) ->
                         {ok, pid()} | ignore | {error, term()}.
-start_link(StreamOptions) ->
-    gen_fsm:start_link(?MODULE, StreamOptions, []).
+start_link(StreamId, Connection, CallbackModule, Socket) ->
+    gen_fsm:start_link(?MODULE,
+                       [StreamId,
+                        Connection,
+                        CallbackModule,
+                        Socket],
+                       []).
 
 -spec send_h(pid(), hpack:headers()) ->
                     ok.
@@ -178,12 +163,12 @@ rst_stream(Pid, Code) ->
 %% - half_closed_remote
 %% - closed
 
-init(StreamOptions) ->
-    StreamId = proplists:get_value(stream_id, StreamOptions),
-    ConnectionPid = proplists:get_value(connection, StreamOptions),
-    CB = proplists:get_value(callback_module, StreamOptions),
-    Socket = proplists:get_value(socket, StreamOptions),
-
+init([
+      StreamId,
+      ConnectionPid,
+      CB,
+      Socket
+     ]) ->
     %% TODO: Check for CB implementing this behaviour
     {ok, CallbackState} = CB:init(ConnectionPid, StreamId),
 
