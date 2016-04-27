@@ -1,7 +1,6 @@
 -module(client_server_SUITE).
 
 -include("http2.hrl").
--include("../src/h2_streams.hrl").
 
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("common_test/include/ct.hrl").
@@ -108,16 +107,40 @@ basic_push(_Config) ->
         ],
     {ok, {ResponseHeaders, ResponseBody}} = http2_client:sync_request(Client, RequestHeaders, <<>>),
 
-    Streams = http2_connection:get_streams(Client),
-    ct:pal("Streams ~p", [Streams]),
-
     ct:pal("Response Headers: ~p", [ResponseHeaders]),
     ct:pal("Response Body: ~p", [ResponseBody]),
 
+    %% Give it time to deliver pushes
+    %% We'll know we're done when we're notified of all the streams ending.
+    wait_for_n_notifications(12),
 
-    1 = length(Streams#streams.self_initiated#stream_set.active),
-    12 = length(Streams#streams.peer_initiated#stream_set.active),
+    Streams = http2_connection:get_streams(Client),
+    ct:pal("Streams ~p", [Streams]),
+    ?assertEqual(0, h2_stream_set:my_active_count(Streams)),
+    ?assertEqual(0, h2_stream_set:their_active_count(Streams)),
+
+    MyActiveStreams = h2_stream_set:my_active_streams(Streams),
+    ?assertEqual(1, length(MyActiveStreams)),
+    ?assertEqual(1, h2_stream_set:stream_id(hd(MyActiveStreams))),
+
+    TheirActiveStreams = h2_stream_set:their_active_streams(Streams),
+    ?assertEqual(12, length(TheirActiveStreams)),
+
+    [ ?assertEqual(closed, h2_stream_set:type(S)) || S <- TheirActiveStreams],
     ok.
+
+wait_for_n_notifications(0) ->
+    ok;
+wait_for_n_notifications(N) ->
+    receive
+        {'END_STREAM', _} ->
+            wait_for_n_notifications(N-1);
+        _ ->
+            wait_for_n_notifications(N)
+    after
+        2000 ->
+            ok
+    end.
 
 get_peer_in_handler(_Config) ->
     {ok, Client} = http2_client:start_link(),

@@ -382,14 +382,19 @@ half_closed_remote(
   #stream_state{
      socket=Socket
     }=Stream) ->
-    ok = sock:send(Socket, http2_frame:to_binary(F)),
-
-    case ?IS_FLAG(Flags, ?FLAG_END_STREAM) of
-        true ->
-            {next_state, closed, Stream, 0};
-        _ ->
-            {next_state, half_closed_remote, Stream}
+    case sock:send(Socket, http2_frame:to_binary(F)) of
+        ok ->
+            case ?IS_FLAG(Flags, ?FLAG_END_STREAM) of
+                true ->
+                    {next_state, closed, Stream, 0};
+                _ ->
+                    {next_state, half_closed_remote, Stream}
+            end;
+        {error,_} ->
+            {next_state, closed, Stream, 0}
     end;
+
+
 half_closed_remote(_,
        #stream_state{}=Stream) ->
     rst_stream_(?STREAM_CLOSED, Stream).
