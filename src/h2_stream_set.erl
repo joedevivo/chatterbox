@@ -328,30 +328,25 @@ get_from_subset(Id, PeerSubset) ->
 %% Can't store idle streams
 upsert(#idle_stream{}, StreamSet) ->
     StreamSet;
-upsert(Stream,
-       StreamSet) ->
+upsert(Stream, StreamSet) ->
     StreamId = stream_id(Stream),
     PeerSubset =
-        get_peer_subset(StreamId,
-                        StreamSet),
+        get_peer_subset(StreamId, StreamSet),
     case
-        upsert_peer_subset(Stream,
-                           PeerSubset)
+        upsert_peer_subset(Stream, PeerSubset)
     of
         {error, Code} ->
             {error, Code};
         NewPeerSubset ->
-            set_peer_subset(StreamId,
-                            StreamSet,
-                            NewPeerSubset)
+            set_peer_subset(StreamId, StreamSet, NewPeerSubset)
     end.
 
 -spec upsert_peer_subset(
         Stream :: closed_stream() | active_stream(),
         PeerSubset :: peer_subset()
                       ) ->
-                                peer_subset()
-                              | {error, error_code()}.
+                    peer_subset()
+                  | {error, error_code()}.
 %% Case 1: We're upserting a closed stream, it contains garbage we
 %% don't care about and it's in the range of streams we're actively
 %% tracking We remove it, and move the lowest_active pointer.
