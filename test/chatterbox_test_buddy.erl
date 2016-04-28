@@ -57,6 +57,18 @@ start(Config) ->
 
     ct:pal("Settings ~p", [Settings]),
     [ok = application:set_env(chatterbox, Key, Value) || {Key, Value} <- Settings ],
+
+    ct:pal("Chatterbox Server Settings: ~p", [chatterbox:settings(server)]),
+
+    %%% ensure client settings defaults
+    application:set_env(chatterbox, client_header_table_size, 4096),
+    application:set_env(chatterbox, client_enable_push, 1),
+    application:set_env(chatterbox, client_max_concurrent_streams, unlimited),
+    application:set_env(chatterbox, client_initial_window_size, 65535),
+    application:set_env(chatterbox, client_max_frame_size, 16384),
+    application:set_env(chatterbox, client_max_header_list_size, unlimited),
+    application:set_env(chatterbox, client_flow_control, auto),
+
     {ok, List} = application:ensure_all_started(chatterbox),
 
     ct:pal("Started: ~p", [List]),

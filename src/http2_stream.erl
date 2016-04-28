@@ -4,21 +4,15 @@
 
 %% Public API
 -export([
-         start_link/1,
-         recv_h/2,
-         send_h/2,
+         start_link/4,
          send_pp/2,
-         recv_es/1,
-         recv_pp/2,
          send_frame/2,
-         recv_frame/2,
          stream_id/0,
          connection/0,
-         get_response/1,
-         notify_pid/1,
          send_window_update/1,
          send_connection_window_update/1,
-         rst_stream/2
+         rst_stream/2,
+         stop/1
         ]).
 
 %% gen_fsm callbacks
@@ -40,36 +34,8 @@
          open/2,
          half_closed_local/2,
          half_closed_remote/2,
-         closed/2,
-         closed/3
+         closed/2
         ]).
-
--type stream_option_name() ::
-        stream_id
-      | connection
-      | initial_send_window_size
-      | initial_recv_window_size
-      | callback_module
-      | notify_pid
-      | socket.
-
--type stream_option() ::
-          {stream_id, stream_id()}
-        | {connection, pid()}
-        | {socket, sock:socket()}
-        | {initial_send_window_size, non_neg_integer()}
-        | {initial_recv_window_size, non_neg_integer()}
-        | {callback_module, module()}
-        | {notify_pid, pid()}.
-
--type stream_options() ::
-        [stream_option()].
-
--export_type([
-              stream_option_name/0,
-              stream_option/0,
-              stream_options/0
-             ]).
 
 -type stream_state_name() :: 'idle'
                            | 'open'
@@ -96,7 +62,6 @@
           response_end_stream = false :: boolean(),
           next_state = undefined :: undefined | stream_state_name(),
           promised_stream = undefined :: undefined | state(),
-          notify_pid = undefined :: undefined | pid(),
           callback_state = undefined :: any(),
           callback_mod = undefined :: module()
          }).
@@ -130,39 +95,25 @@
     {ok, NewState :: callback_state()}.
 
 %% Public API
--spec start_link(stream_options()) ->
+-spec start_link(
+        StreamId :: stream_id(),
+        Connection :: pid(),
+        CallbackModule :: module(),
+        Socket :: sock:socket()
+                  ) ->
                         {ok, pid()} | ignore | {error, term()}.
-start_link(StreamOptions) ->
-    gen_fsm:start_link(?MODULE, StreamOptions, []).
-
--spec recv_h(pid(), hpack:headers()) ->
-                    ok | trailers.
-recv_h(Pid, Headers) ->
-    gen_fsm:send_event(Pid, {recv_h, Headers}).
-
--spec send_h(pid(), hpack:headers()) ->
-                    ok.
-send_h(Pid, Headers) ->
-    gen_fsm:send_event(Pid, {send_h, Headers}).
+start_link(StreamId, Connection, CallbackModule, Socket) ->
+    gen_fsm:start_link(?MODULE,
+                       [StreamId,
+                        Connection,
+                        CallbackModule,
+                        Socket],
+                       []).
 
 -spec send_pp(pid(), hpack:headers()) ->
                      ok.
 send_pp(Pid, Headers) ->
     gen_fsm:send_event(Pid, {send_pp, Headers}).
-
--spec recv_pp(pid(), hpack:headers()) ->
-                     ok.
-recv_pp(Pid, Headers) ->
-    gen_fsm:send_event(Pid, {recv_pp, Headers}).
-
--spec recv_es(pid()) -> ok.
-recv_es(Pid) ->
-    gen_fsm:send_event(Pid, recv_es).
-
--spec recv_frame(pid(), http2_frame:frame()) ->
-                        ok.
-recv_frame(Pid, Frame) ->
-    gen_fsm:send_event(Pid, {recv_frame, Frame}).
 
 -spec send_frame(pid(), http2_frame:frame()) ->
                         ok | flow_control.
@@ -177,18 +128,6 @@ stream_id() ->
 connection() ->
     gen_fsm:sync_send_all_state_event(self(), connection).
 
--spec get_response(pid()) ->
-                          {ok, {hpack:headers(), iodata()}}
-                              | {error, term()}.
-get_response(Pid) ->
-    gen_fsm:sync_send_event(Pid, get_response).
-
--spec notify_pid(pid()) ->
-                          {ok, pid()}
-                              | {error, term()}.
-notify_pid(Pid) ->
-    gen_fsm:sync_send_all_state_event(Pid, notify_pid).
-
 -spec send_window_update(non_neg_integer()) -> ok.
 send_window_update(Size) ->
     gen_fsm:send_all_state_event(self(), {send_window_update, Size}).
@@ -200,20 +139,16 @@ send_connection_window_update(Size) ->
 rst_stream(Pid, Code) ->
     gen_fsm:sync_send_all_state_event(Pid, {rst_stream, Code}).
 
-%% States
-%% - idle
-%% - reserved_local
-%% - open
-%% - half_closed_remote
-%% - closed
+-spec stop(pid()) -> ok.
+stop(Pid) ->
+    gen_fsm:stop(Pid).
 
-init(StreamOptions) ->
-    StreamId = proplists:get_value(stream_id, StreamOptions),
-    ConnectionPid = proplists:get_value(connection, StreamOptions),
-    CB = proplists:get_value(callback_module, StreamOptions),
-    NotifyPid = proplists:get_value(notify_pid, StreamOptions, ConnectionPid),
-    Socket = proplists:get_value(socket, StreamOptions),
-
+init([
+      StreamId,
+      ConnectionPid,
+      CB,
+      Socket
+     ]) ->
     %% TODO: Check for CB implementing this behaviour
     {ok, CallbackState} = CB:init(ConnectionPid, StreamId),
 
@@ -222,8 +157,7 @@ init(StreamOptions) ->
                   socket=Socket,
                   stream_id=StreamId,
                   connection=ConnectionPid,
-                  callback_state=CallbackState,
-                  notify_pid=NotifyPid
+                  callback_state=CallbackState
                  }}.
 
 %% IMPORTANT: If we're in an idle state, we can only send/receive
@@ -342,7 +276,7 @@ open(recv_es,
              Stream}
     end;
 
-open({recv_frame,
+open({recv_data,
       {#frame_header{
           flags=Flags,
           length=L,
@@ -365,7 +299,7 @@ open({recv_frame,
        request_body_size=Stream#stream_state.request_body_size+L,
        callback_state=NewCBState
       }};
-open({recv_frame,
+open({recv_data,
       {#frame_header{
           flags=Flags,
           length=L,
@@ -453,17 +387,19 @@ half_closed_remote(
   #stream_state{
      socket=Socket
     }=Stream) ->
-    ok = sock:send(Socket, http2_frame:to_binary(F)),
+    case sock:send(Socket, http2_frame:to_binary(F)) of
+        ok ->
+            case ?IS_FLAG(Flags, ?FLAG_END_STREAM) of
+                true ->
+                    {next_state, closed, Stream, 0};
+                _ ->
+                    {next_state, half_closed_remote, Stream}
+            end;
+        {error,_} ->
+            {next_state, closed, Stream, 0}
+    end;
 
-    NextState =
-        case ?IS_FLAG(Flags, ?FLAG_END_STREAM) of
-            true ->
-                 closed;
-            _ ->
-                half_closed_remote
-        end,
 
-    {next_state, NextState, Stream};
 half_closed_remote(_,
        #stream_state{}=Stream) ->
     rst_stream_(?STREAM_CLOSED, Stream).
@@ -486,15 +422,13 @@ half_closed_local(
           rst_stream_(Code, Stream)
   end;
 half_closed_local(
-  {recv_frame,
+  {recv_data,
    {#frame_header{
        flags=Flags,
        type=?DATA
       },_}=F},
   #stream_state{
-     stream_id=StreamId,
-     incoming_frames=IFQ,
-     notify_pid = NotifyPid
+     incoming_frames=IFQ
      } = Stream) ->
     NewQ = queue:in(F, IFQ),
 
@@ -503,17 +437,11 @@ half_closed_local(
             Data =
                 [ http2_frame_data:data(Payload)
                   || {#frame_header{type=?DATA}, Payload} <- queue:to_list(NewQ)],
-            case NotifyPid of
-                undefined ->
-                    ok;
-                _ ->
-                    NotifyPid ! {'END_STREAM', StreamId}
-            end,
             {next_state, closed,
              Stream#stream_state{
                incoming_frames=queue:new(),
                response_body = Data
-              }};
+              }, 0};
         _ ->
             {next_state,
              half_closed_local,
@@ -525,20 +453,17 @@ half_closed_local(_,
        #stream_state{}=Stream) ->
     rst_stream_(?STREAM_CLOSED, Stream).
 
-
-
+closed(timeout,
+       #stream_state{}=Stream) ->
+    gen_fsm:send_all_state_event(Stream#stream_state.connection,
+                                 {stream_finished,
+                                  Stream#stream_state.stream_id,
+                                  Stream#stream_state.response_headers,
+                                  Stream#stream_state.response_body}),
+    {stop, normal, Stream};
 closed(_,
        #stream_state{}=Stream) ->
     rst_stream_(?STREAM_CLOSED, Stream).
-
-closed(get_response,
-       _From,
-       #stream_state{
-          response_headers=H,
-          response_body=B
-         }=Stream
-       ) ->
-    {reply, {ok, {H, B}}, closed, Stream}.
 
 handle_event({send_window_update, 0},
              StateName,
@@ -566,8 +491,6 @@ handle_event(_E, StateName, State) ->
 
 handle_sync_event({rst_stream, ErrorCode}, _F, StateName, State=#stream_state{}) ->
     {reply, {ok, rst_stream_(ErrorCode, State)}, StateName, State};
-handle_sync_event(notify_pid, _F, StateName, State=#stream_state{notify_pid=NP}) ->
-    {reply, {ok,NP}, StateName, State};
 handle_sync_event(stream_id, _F, StateName, State=#stream_state{stream_id=StreamId}) ->
     {reply, StreamId, StateName, State};
 handle_sync_event(connection, _F, StateName, State=#stream_state{connection=Conn}) ->
@@ -590,7 +513,8 @@ terminate(_Reason, _StateName, _State) ->
 -spec rst_stream_(error_code(), state()) ->
                          {next_state,
                           closed,
-                          state()}.
+                          state(),
+                          timeout()}.
 rst_stream_(ErrorCode,
            #stream_state{
               socket=Socket,
@@ -606,7 +530,7 @@ rst_stream_(ErrorCode,
     sock:send(Socket, RstStreamBin),
     {next_state,
      closed,
-     Stream}.
+     Stream, 0}.
 
 check_content_length(Stream) ->
     ContentLength =
