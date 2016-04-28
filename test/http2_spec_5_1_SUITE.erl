@@ -231,13 +231,20 @@ half_closed_remote_sends_headers(_Config) ->
 
 
     http2c:send_unaltered_frames(Client, H2),
-
-    Resp = http2c:wait_for_n_frames(Client, 1, 3),
+     Resp = http2c:wait_for_n_frames(Client, 1, 3),
     ct:pal("Resp: ~p", [Resp]),
-    ?assertEqual(true, (length(Resp) >= 3)),
-    [ {HeadersH, _}, {DataH, _}, {RstStreamH, RstStream}|_] = Resp,
-    ?assertEqual(?HEADERS, (HeadersH#frame_header.type)),
-    ?assertEqual(?DATA, (DataH#frame_header.type)),
+    ?assertEqual(true, (length(Resp) >= 1)),
+
+    %% We need to find if one of these things are a RstStream
+    RstStreams =
+        lists:filter(
+          fun({#frame_header{type=?RST_STREAM},_}) ->
+                  true;
+             (_) -> false
+          end,
+          Resp),
+    ?assert(length(RstStreams) > 0),
+    {RstStreamH, RstStream} = hd(RstStreams),
     ?assertEqual(?RST_STREAM, (RstStreamH#frame_header.type)),
     ?assertEqual(?STREAM_CLOSED, (h2_frame_rst_stream:error_code(RstStream))),
     ok.
