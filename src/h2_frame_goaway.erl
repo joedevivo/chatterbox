@@ -1,8 +1,6 @@
--module(http2_frame_goaway).
-
+-module(h2_frame_goaway).
 -include("http2.hrl").
-
--behaviour(http2_frame).
+-behaviour(h2_frame).
 
 -export(
    [

@@ -1,8 +1,6 @@
--module(http2_frame_push_promise).
-
+-module(h2_frame_push_promise).
 -include("http2.hrl").
-
--behaviour(http2_frame).
+-behaviour(h2_frame).
 
 -export(
    [
@@ -51,7 +49,7 @@ read_binary(_,
     {error, 0, ?PROTOCOL_ERROR, <<>>};
 read_binary(Bin, H=#frame_header{length=L}) ->
     <<PayloadBin:L/binary,Rem/binary>> = Bin,
-    Data = http2_padding:read_possibly_padded_payload(PayloadBin, H),
+    Data = h2_padding:read_possibly_padded_payload(PayloadBin, H),
     <<_R:1,Stream:31,BlockFragment/bits>> = Data,
     Payload = #push_promise{
                  promised_stream_id=Stream,

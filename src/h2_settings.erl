@@ -1,5 +1,4 @@
--module(http2_settings).
-
+-module(h2_settings).
 -include("http2.hrl").
 
 -export([

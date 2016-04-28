@@ -1,6 +1,6 @@
 -module(server_connection_receive_window).
 
--behaviour(http2_stream).
+-behaviour(h2_stream).
 
 -export([
          init/2,
@@ -19,7 +19,7 @@ init(_ConnPid, _StreamId) ->
     {ok, #cb_static{}}.
 
 on_receive_request_headers(Headers, State) ->
-    http2_stream:send_window_update(65535),
+    h2_stream:send_window_update(65535),
     ct:pal("on_receive_request_headers(~p, ~p)", [Headers, State]),
     {ok, State#cb_static{req_headers=Headers}}.
 

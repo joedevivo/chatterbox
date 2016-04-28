@@ -1,5 +1,4 @@
--module(http2_client).
-
+-module(h2_client).
 -include("http2.hrl").
 
 %% Today's the day! We need to turn this gen_server into a gen_fsm
@@ -106,33 +105,33 @@ start_link(Transport, Host, Port, SSLOptions) ->
                http -> gen_tcp;
                https -> ssl
            end,
-    http2_connection:start_client_link(NewT, Host, Port, SSLOptions, chatterbox:settings(client)).
+    h2_connection:start_client_link(NewT, Host, Port, SSLOptions, chatterbox:settings(client)).
 
 start_ssl_upgrade_link(Host, Port, InitialMessage, SSLOptions) ->
-    http2_connection:start_ssl_upgrade_link(Host, Port, InitialMessage, SSLOptions, chatterbox:settings(client)).
+    h2_connection:start_ssl_upgrade_link(Host, Port, InitialMessage, SSLOptions, chatterbox:settings(client)).
 
 -spec stop(pid()) -> ok.
 stop(Pid) ->
-    http2_connection:stop(Pid).
+    h2_connection:stop(Pid).
 
 sync_request(CliPid, Headers, Body) ->
-    StreamId = http2_connection:new_stream(CliPid),
-    http2_connection:send_headers(CliPid, StreamId, Headers),
-    http2_connection:send_body(CliPid,StreamId,Body),
+    StreamId = h2_connection:new_stream(CliPid),
+    h2_connection:send_headers(CliPid, StreamId, Headers),
+    h2_connection:send_body(CliPid,StreamId,Body),
     receive
         {'END_STREAM', StreamId} ->
-            http2_connection:get_response(CliPid, StreamId)
+            h2_connection:get_response(CliPid, StreamId)
     after 5000 ->
         {error, timeout}
     end.
 send_request(CliPid, Headers, Body) ->
-    StreamId = http2_connection:new_stream(CliPid),
-    http2_connection:send_headers(CliPid, StreamId, Headers),
-    http2_connection:send_body(CliPid,StreamId,Body),
+    StreamId = h2_connection:new_stream(CliPid),
+    h2_connection:send_headers(CliPid, StreamId, Headers),
+    h2_connection:send_body(CliPid,StreamId,Body),
     {ok, StreamId}.
 
 -spec get_response(pid(), stream_id()) ->
                           {ok, {hpack:header(), iodata()}}
                            | {error, term()}.
 get_response(CliPid, StreamId) ->
-    http2_connection:get_response(CliPid, StreamId).
+    h2_connection:get_response(CliPid, StreamId).

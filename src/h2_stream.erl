@@ -1,5 +1,4 @@
--module(http2_stream).
-
+-module(h2_stream).
 -include("http2.hrl").
 
 %% Public API
@@ -288,7 +287,7 @@ open({recv_data,
         callback_state=CallbackState
        }=Stream)
   when ?NOT_FLAG(Flags, ?FLAG_END_STREAM) ->
-    Bin = http2_frame_data:data(Payload),
+    Bin = h2_frame_data:data(Payload),
     {ok, NewCBState} = CB:on_receive_request_data(Bin, CallbackState),
     {next_state,
      open,
@@ -311,7 +310,7 @@ open({recv_data,
         callback_state=CallbackState
        }=Stream)
   when ?IS_FLAG(Flags, ?FLAG_END_STREAM) ->
-    Bin = http2_frame_data:data(Payload),
+    Bin = h2_frame_data:data(Payload),
     {ok, CallbackState1} = CB:on_receive_request_data(Bin, CallbackState),
     NewStream = Stream#stream_state{
                   incoming_frames=queue:in(F, IFQ),
@@ -354,7 +353,7 @@ open({send_frame,
      #stream_state{
         socket=Socket
        }=Stream) ->
-    sock:send(Socket, http2_frame:to_binary(F)),
+    sock:send(Socket, h2_frame:to_binary(F)),
 
     NextState =
         case ?IS_FLAG(Flags, ?FLAG_END_STREAM) of
@@ -387,7 +386,7 @@ half_closed_remote(
   #stream_state{
      socket=Socket
     }=Stream) ->
-    case sock:send(Socket, http2_frame:to_binary(F)) of
+    case sock:send(Socket, h2_frame:to_binary(F)) of
         ok ->
             case ?IS_FLAG(Flags, ?FLAG_END_STREAM) of
                 true ->
@@ -410,8 +409,7 @@ half_closed_remote(_,
 %% hope!
 half_closed_local(
   {recv_h, Headers},
-  #stream_state{
-    }=Stream) ->
+  #stream_state{}=Stream) ->
   case is_valid_headers(response, Headers) of
       ok ->
           {next_state,
@@ -435,8 +433,8 @@ half_closed_local(
     case ?IS_FLAG(Flags, ?FLAG_END_STREAM) of
         true ->
             Data =
-                [ http2_frame_data:data(Payload)
-                  || {#frame_header{type=?DATA}, Payload} <- queue:to_list(NewQ)],
+                [h2_frame_data:data(Payload)
+                 || {#frame_header{type=?DATA}, Payload} <- queue:to_list(NewQ)],
             {next_state, closed,
              Stream#stream_state{
                incoming_frames=queue:new(),
@@ -486,16 +484,15 @@ handle_event({send_window_update, Size},
                 socket=Socket,
                 stream_id=StreamId
                }=Stream) ->
-    http2_frame_window_update:send(Socket, Size, StreamId),
+    h2_frame_window_update:send(Socket, Size, StreamId),
     {next_state, StateName,
-     Stream#stream_state{
-       }};
+     Stream#stream_state{}};
 handle_event({send_connection_window_update, Size},
              StateName,
              #stream_state{
                 connection=ConnPid
                }=State) ->
-    http2_connection:send_window_update(ConnPid, Size),
+    h2_connection:send_window_update(ConnPid, Size),
     {next_state, StateName, State};
 handle_event(_E, StateName, State) ->
     {next_state, StateName, State}.
@@ -531,13 +528,14 @@ rst_stream_(ErrorCode,
               socket=Socket,
               stream_id=StreamId
               }=Stream
-          ) ->
-    RstStream = http2_frame_rst_stream:new(ErrorCode),
-    RstStreamBin = http2_frame:to_binary(
-                     {#frame_header{
-                         stream_id=StreamId
-                        },
-                      RstStream}),
+          )
+            ->
+    RstStream = h2_frame_rst_stream:new(ErrorCode),
+    RstStreamBin = h2_frame:to_binary(
+                  {#frame_header{
+                      stream_id=StreamId
+                     },
+                   RstStream}),
     sock:send(Socket, RstStreamBin),
     {next_state,
      closed,

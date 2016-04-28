@@ -1,8 +1,6 @@
--module(http2_connection).
-
--behaviour(gen_fsm).
-
+-module(h2_connection).
 -include("http2.hrl").
+-behaviour(gen_fsm).
 
 %% Start/Stop API
 -export([
@@ -290,7 +288,7 @@ connected({frame, Frame},
           #connection{}=Conn
          ) ->
     lager:debug("[~p][connected] {frame, ~p}",
-                [Conn#connection.type, http2_frame:format(Frame)]),
+                [Conn#connection.type, h2_frame:format(Frame)]),
     route_frame(Frame, Conn).
 
 %% The continuation state in entered after receiving a HEADERS frame
@@ -307,7 +305,7 @@ continuation({frame,
                                  }
                }=Conn) ->
     lager:debug("[~p][continuation] [next] ~p",
-                [Conn#connection.type, http2_frame:format(Frame)]),
+                [Conn#connection.type, h2_frame:format(Frame)]),
     route_frame(Frame, Conn);
 continuation(_, Conn) ->
     go_away(?PROTOCOL_ERROR, Conn).
@@ -361,12 +359,12 @@ route_frame({H, Payload},
                encode_context=EncodeContext
               }=Conn)
     when H#frame_header.type == ?SETTINGS,
-         ?NOT_FLAG(H#frame_header.flags, ?FLAG_ACK) ->
+         ?NOT_FLAG((H#frame_header.flags), ?FLAG_ACK) ->
     lager:debug("[~p] Received SETTINGS",
                [Conn#connection.type]),
     %% Need a way of processing settings so I know which ones came in
     %% on this one payload.
-    case http2_frame_settings:validate(Payload) of
+    case h2_frame_settings:validate(Payload) of
         ok ->
             {settings, PList} = Payload,
 
@@ -379,7 +377,7 @@ route_frame({H, Payload},
                         lager:debug("old IWS: ~p new IWS: ~p", [OldIWS, NewIWS]),
                         NewIWS - OldIWS
                 end,
-            NewPeerSettings = http2_frame_settings:overlay(PS, Payload),
+            NewPeerSettings = h2_frame_settings:overlay(PS, Payload),
             %% We've just got connection settings from a peer. He have a
             %% couple of jobs to do here w.r.t. flow control
 
@@ -401,7 +399,7 @@ route_frame({H, Payload},
 
             NewEncodeContext = hpack:new_max_table_size(HTS, EncodeContext),
 
-            socksend(Conn, http2_frame_settings:ack()),
+            socksend(Conn, h2_frame_settings:ack()),
             lager:debug("[~p] Sent Settings ACK",
                         [Conn#connection.type]),
             {next_state, connected, Conn#connection{
@@ -414,7 +412,6 @@ route_frame({H, Payload},
                                      }};
         {error, Code} ->
             go_away(Code, Conn)
-
     end;
 
 %% This is the case where we got an ACK, so dequeue settings we're
@@ -428,7 +425,7 @@ route_frame({H, _Payload},
                                }
               }=Conn)
     when H#frame_header.type == ?SETTINGS,
-         ?IS_FLAG(H#frame_header.flags, ?FLAG_ACK) ->
+         ?IS_FLAG((H#frame_header.flags), ?FLAG_ACK) ->
     lager:debug("[~p] Received SETTINGS ACK",
                [Conn#connection.type]),
     case queue:out(SS) of
@@ -507,8 +504,8 @@ route_frame(F={H=#frame_header{
                     %% Make window size great again
                     lager:info("[~p] Stream ~p WindowUpdate ~p",
                                [Conn#connection.type, StreamId, L]),
-                    http2_frame_window_update:send(Conn#connection.socket,
-                                                   L, StreamId),
+                    h2_frame_window_update:send(Conn#connection.socket,
+                                                L, StreamId),
                     send_window_update(self(), L);
                 _Tried ->
                     ok
@@ -558,8 +555,8 @@ route_frame({#frame_header{type=?HEADERS}=FH, _Payload}=Frame,
                       self(),
                       Conn#connection.stream_callback_mod,
                       Conn#connection.socket,
-                      Conn#connection.peer_settings#settings.initial_window_size,
-                      Conn#connection.self_settings#settings.initial_window_size,
+                      (Conn#connection.peer_settings)#settings.initial_window_size,
+                      (Conn#connection.self_settings)#settings.initial_window_size,
                       Streams) of
                     {error, ErrorCode, NewStream} ->
                         rst_stream(NewStream, ErrorCode, Conn),
@@ -583,8 +580,8 @@ route_frame({#frame_header{type=?HEADERS}=FH, _Payload}=Frame,
                 #continuation_state{
                    type = ContinuationType,
                    frames = queue:from_list([Frame]),
-                   end_stream = ?IS_FLAG(FH#frame_header.flags, ?FLAG_END_STREAM),
-                   end_headers = ?IS_FLAG(FH#frame_header.flags, ?FLAG_END_HEADERS),
+                   end_stream = ?IS_FLAG((FH#frame_header.flags), ?FLAG_END_STREAM),
+                   end_headers = ?IS_FLAG((FH#frame_header.flags), ?FLAG_END_HEADERS),
                    stream_id = StreamId
                   },
             %% maybe_hpack/2 uses this #continuation_state to figure
@@ -607,7 +604,7 @@ route_frame(F={H=#frame_header{
 
     maybe_hpack(Cont#continuation_state{
                   frames=queue:in(F, CFQ),
-                  end_headers=?IS_FLAG(H#frame_header.flags, ?FLAG_END_HEADERS)
+                  end_headers=?IS_FLAG((H#frame_header.flags), ?FLAG_END_HEADERS)
                  },
                 Conn);
 
@@ -630,7 +627,7 @@ route_frame(
       },
    Payload},
   #connection{} = Conn) ->
-    EC = http2_frame_rst_stream:error_code(Payload),
+    EC = h2_frame_rst_stream:error_code(Payload),
     lager:debug("[~p] Received RST_STREAM (~p) for Stream ~p",
                 [Conn#connection.type, EC, StreamId]),
     Streams = Conn#connection.streams,
@@ -654,7 +651,7 @@ route_frame({H=#frame_header{
             #connection{}=Conn)
     when H#frame_header.type == ?PUSH_PROMISE,
          Conn#connection.type == client ->
-    PSID = http2_frame_push_promise:promised_stream_id(Payload),
+    PSID = h2_frame_push_promise:promised_stream_id(Payload),
     lager:debug("[~p] Received PUSH_PROMISE Frame on Stream ~p for Stream ~p",
                 [Conn#connection.type, StreamId, PSID]),
 
@@ -675,15 +672,15 @@ route_frame({H=#frame_header{
           NotifyPid,
           Conn#connection.stream_callback_mod,
           Conn#connection.socket,
-          Conn#connection.peer_settings#settings.initial_window_size,
-          Conn#connection.self_settings#settings.initial_window_size,
+          (Conn#connection.peer_settings)#settings.initial_window_size,
+          (Conn#connection.self_settings)#settings.initial_window_size,
           Streams),
 
     Continuation = #continuation_state{
                       stream_id=StreamId,
                       type=push_promise,
                       frames = queue:in(Frame, queue:new()),
-                      end_headers=?IS_FLAG(H#frame_header.flags, ?FLAG_END_HEADERS),
+                      end_headers=?IS_FLAG((H#frame_header.flags), ?FLAG_END_HEADERS),
                       promised_id=PSID
                      },
     maybe_hpack(Continuation,
@@ -708,16 +705,16 @@ route_frame({H, _Payload},
 route_frame({H, Ping},
             #connection{}=Conn)
     when H#frame_header.type == ?PING,
-         ?NOT_FLAG(#frame_header.flags, ?FLAG_ACK) ->
+         ?NOT_FLAG((#frame_header.flags), ?FLAG_ACK) ->
     lager:debug("[~p] Received PING",
                [Conn#connection.type]),
-    Ack = http2_frame_ping:ack(Ping),
-    socksend(Conn, http2_frame:to_binary(Ack)),
+    Ack = h2_frame_ping:ack(Ping),
+    socksend(Conn, h2_frame:to_binary(Ack)),
     {next_state, connected, Conn};
 route_frame({H, _Payload},
             #connection{}=Conn)
     when H#frame_header.type == ?PING,
-         ?IS_FLAG(H#frame_header.flags, ?FLAG_ACK) ->
+         ?IS_FLAG((H#frame_header.flags), ?FLAG_ACK) ->
     lager:debug("[~p] Received PING ACK",
                [Conn#connection.type]),
     {next_state, connected, Conn};
@@ -738,7 +735,7 @@ route_frame(
   #connection{
      send_window_size=SWS
     }=Conn) ->
-    WSI = http2_frame_window_update:size_increment(Payload),
+    WSI = h2_frame_window_update:size_increment(Payload),
     lager:debug("[~p] Stream 0 Window Update: ~p",
                 [Conn#connection.type, WSI]),
     NewSendWindow = SWS+WSI,
@@ -754,7 +751,7 @@ route_frame(
                 h2_stream_set:send_what_we_can(
                   all,
                   NewSendWindow,
-                  Conn#connection.peer_settings#settings.max_frame_size,
+                  (Conn#connection.peer_settings)#settings.max_frame_size,
                   Streams
                  ),
             lager:debug("[~p] and Connection Send Window now: ~p",
@@ -772,7 +769,7 @@ route_frame(
  ) ->
     StreamId = FH#frame_header.stream_id,
     Streams = Conn#connection.streams,
-    WSI = http2_frame_window_update:size_increment(Payload),
+    WSI = h2_frame_window_update:size_increment(Payload),
     lager:debug("[~p] Received WINDOW_UPDATE Frame for Stream ~p",
                 [Conn#connection.type, StreamId]),
 
@@ -798,7 +795,7 @@ route_frame(
                         = h2_stream_set:send_what_we_can(
                             StreamId,
                             SWS,
-                            Conn#connection.peer_settings#settings.max_frame_size,
+                            (Conn#connection.peer_settings)#settings.max_frame_size,
                             h2_stream_set:upsert(
                               h2_stream_set:increment_send_window_size(WSI, Stream),
                               Streams)
@@ -818,7 +815,7 @@ route_frame(Frame, #connection{}=Conn) ->
     lager:error("[~p] Frame condition not covered by pattern match",
                [Conn#connection.type]),
     lager:error("This is bad and you probably found a bug. Please open a github issue with this output:"),
-    lager:error("OOPS! " ++ http2_frame:format(Frame)),
+    lager:error("OOPS! " ++ h2_frame:format(Frame)),
     lager:error("OOPS! ~p", [Conn]),
     go_away(?PROTOCOL_ERROR, Conn).
 
@@ -868,7 +865,7 @@ handle_event({send_window_update, Size},
                 recv_window_size=CRWS,
                 socket=Socket
                 }=Conn) ->
-    ok = http2_frame_window_update:send(Socket, Size, 0),
+    ok = h2_frame_window_update:send(Socket, Size, 0),
     {next_state,
      StateName,
      Conn#connection{
@@ -890,13 +887,13 @@ handle_event({send_headers, StreamId, Headers, Opts},
     case h2_stream_set:type(Stream) of
         active ->
             {FramesToSend, NewContext} =
-                http2_frame_headers:to_frames(h2_stream_set:stream_id(Stream),
-                                              Headers,
-                                              EncodeContext,
-                                              Conn#connection.peer_settings#settings.max_frame_size,
-                                              StreamComplete
-                                             ),
-            [ sock:send(Socket, http2_frame:to_binary(Frame)) || Frame <- FramesToSend],
+                h2_frame_headers:to_frames(h2_stream_set:stream_id(Stream),
+                                           Headers,
+                                           EncodeContext,
+                                            (Conn#connection.peer_settings)#settings.max_frame_size,
+                                           StreamComplete
+                                          ),
+            [sock:send(Socket, h2_frame:to_binary(Frame)) || Frame <- FramesToSend],
             send_h(Stream, Headers),
             {next_state, StateName,
              Conn#connection{
@@ -930,7 +927,7 @@ handle_event({send_body, StreamId, Body, Opts},
                 h2_stream_set:send_what_we_can(
                   StreamId,
                   Conn#connection.send_window_size,
-                  Conn#connection.peer_settings#settings.max_frame_size,
+                  (Conn#connection.peer_settings)#settings.max_frame_size,
                   h2_stream_set:upsert(
                     h2_stream_set:update_data_queue(NewBody, BodyComplete, Stream),
                     Conn#connection.streams)),
@@ -963,19 +960,19 @@ handle_event({send_promise, StreamId, NewStreamId, Headers},
         active ->
             %% TODO: This could be a series of frames, not just one
             {PromiseFrame, NewContext} =
-                http2_frame_push_promise:to_frame(
-                  StreamId,
-                  NewStreamId,
-                  Headers,
-                  OldContext
-                 ),
+                h2_frame_push_promise:to_frame(
+               StreamId,
+               NewStreamId,
+               Headers,
+               OldContext
+              ),
 
             %% Send the PP Frame
-            Binary = http2_frame:to_binary(PromiseFrame),
+            Binary = h2_frame:to_binary(PromiseFrame),
             socksend(Conn, Binary),
 
             %% Get the promised stream rolling
-            http2_stream:send_pp(h2_stream_set:stream_pid(NewStream), Headers),
+            h2_stream:send_pp(h2_stream_set:stream_pid(NewStream), Headers),
 
             {next_state, StateName,
              Conn#connection{
@@ -1004,7 +1001,7 @@ handle_event({send_bin, Binary}, StateName,
     {next_state, StateName, Conn};
 handle_event({send_frame, Frame}, StateName,
              #connection{} =Conn) ->
-    Binary = http2_frame:to_binary(Frame),
+    Binary = h2_frame:to_binary(Frame),
     socksend(Conn, Binary),
     {next_state, StateName, Conn};
 handle_event(stop, _StateName,
@@ -1184,10 +1181,10 @@ go_away(ErrorCode,
         #connection{
            next_available_stream_id=NAS
           }=Conn) ->
-    GoAway = http2_frame_goaway:new(NAS, ErrorCode),
-    GoAwayBin = http2_frame:to_binary({#frame_header{
-                                          stream_id=0
-                                         }, GoAway}),
+    GoAway = h2_frame_goaway:new(NAS, ErrorCode),
+    GoAwayBin = h2_frame:to_binary({#frame_header{
+                                       stream_id=0
+                                      }, GoAway}),
     socksend(Conn, GoAwayBin),
     gen_fsm:send_event(self(), io_lib:format("GO_AWAY: ErrorCode ~p", [ErrorCode])),
     {next_state, closing, Conn}.
@@ -1210,16 +1207,16 @@ rst_stream(Stream, ErrorCode, Conn) ->
             %% http2_stream's rst_stream will take care of letting us know
             %% this stream is closed and will send us a message to close the
             %% stream somewhere else
-            http2_stream:rst_stream(Pid, ErrorCode),
+            h2_stream:rst_stream(Pid, ErrorCode),
             {next_state, connected, Conn};
         _ ->
             StreamId = h2_stream_set:stream_id(Stream),
-            RstStream = http2_frame_rst_stream:new(ErrorCode),
-            RstStreamBin = http2_frame:to_binary(
-                             {#frame_header{
-                                 stream_id=StreamId
-                                },
-                              RstStream}),
+            RstStream = h2_frame_rst_stream:new(ErrorCode),
+            RstStreamBin = h2_frame:to_binary(
+                          {#frame_header{
+                              stream_id=StreamId
+                             },
+                           RstStream}),
             sock:send(Conn#connection.socket, RstStreamBin),
             {next_state, connected, Conn}
     end.
@@ -1231,7 +1228,7 @@ send_settings(SettingsToSend,
                  settings_sent=SS
                 }=Conn) ->
     Ref = make_ref(),
-    Bin = http2_frame_settings:send(CurrentSettings, SettingsToSend),
+    Bin = h2_frame_settings:send(CurrentSettings, SettingsToSend),
     socksend(Conn, Bin),
     send_ack_timeout({Ref,SettingsToSend}),
     Conn#connection{
@@ -1368,7 +1365,7 @@ handle_socket_data(Data,
     %% further state references don't have one
     NewConn = Conn#connection{buffer=empty},
 
-    case http2_frame:recv(ToParse) of
+    case h2_frame:recv(ToParse) of
         %% We got a full frame, ship it off to the FSM
         {ok, Frame, Rem} ->
             gen_fsm:send_event(self(), {frame, Frame}),
@@ -1426,9 +1423,9 @@ maybe_hpack(Continuation, Conn)
                Continuation#continuation_state.stream_id,
                Conn#connection.streams
               ),
-    HeadersBin = http2_frame_headers:from_frames(
-                   queue:to_list(Continuation#continuation_state.frames)
-                  ),
+    HeadersBin = h2_frame_headers:from_frames(
+                queue:to_list(Continuation#continuation_state.frames)
+               ),
     case hpack:decode(HeadersBin, Conn#connection.decode_context) of
         {error, compression_error} ->
             go_away(?COMPRESSION_ERROR, Conn);

@@ -2,7 +2,7 @@
 
 -include("http2.hrl").
 
--behaviour(http2_stream).
+-behaviour(h2_stream).
 
 -export([
          init/2,
@@ -99,7 +99,7 @@ on_request_end_stream(State=#cb_static{connection_pid=ConnPid,
                                    {<<"content-type">>, MimeType}
                                   ],
 
-                case {MimeType, http2_connection:is_push(ConnPid)} of
+                case {MimeType, h2_connection:is_push(ConnPid)} of
                     {<<"text/html">>, true} ->
                         %% Search Data for resources to push
                         {ok, RE} = re:compile("<link rel=\"stylesheet\" href=\"([^\"]*)|<script src=\"([^\"]*)|src: '([^']*)"),
@@ -113,9 +113,10 @@ on_request_end_stream(State=#cb_static{connection_pid=ConnPid,
                         NewStreams =
                             lists:foldl(
                               fun(R, Acc) ->
-                                      NewStreamId = http2_connection:new_stream(ConnPid),
-                                      PHeaders = generate_push_promise_headers(Headers, <<$/,R/binary>>),
-                                      http2_connection:send_promise(ConnPid, StreamId, NewStreamId, PHeaders),
+                                      NewStreamId = h2_connection:new_stream(ConnPid),
+                                      PHeaders = generate_push_promise_headers(Headers, <<$/,R/binary>>
+                                                                                                       ),
+                                      h2_connection:send_promise(ConnPid, StreamId, NewStreamId, PHeaders),
                                       [{NewStreamId, PHeaders}|Acc]
                               end,
                               [],
@@ -149,11 +150,11 @@ on_request_end_stream(State=#cb_static{connection_pid=ConnPid,
 
     case {Method, HeadersToSend, BodyToSend} of
         {<<"HEAD">>, _, _} ->
-                http2_connection:send_headers(ConnPid, StreamId, HeadersToSend, [{send_end_stream, true}]);
+                h2_connection:send_headers(ConnPid, StreamId, HeadersToSend, [{send_end_stream, true}]);
         %%{<<"GET">>, _, _} ->
         _ ->
-            http2_connection:send_headers(ConnPid, StreamId, HeadersToSend),
-            http2_connection:send_body(ConnPid, StreamId, BodyToSend)
+            h2_connection:send_headers(ConnPid, StreamId, HeadersToSend),
+            h2_connection:send_body(ConnPid, StreamId, BodyToSend)
     end,
 
     {ok, State}.

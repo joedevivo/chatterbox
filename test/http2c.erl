@@ -70,7 +70,7 @@ send_binary(Pid, Binary) ->
 %% ifdef(TEST)
 -spec send_unaltered_frames(pid(), [http2_frame:frame()]) -> ok.
 send_unaltered_frames(Pid, Frames) ->
-    [ send_binary(Pid, http2_frame:to_binary(F)) || F <- Frames],
+    [send_binary(Pid, h2_frame:to_binary(F)) || F <- Frames],
     ok.
 
 get_frames(Pid, StreamId) ->
@@ -136,18 +136,18 @@ init([]) ->
     Transport:send(Socket, <<?PREFACE>>),
 
     %% Settings Handshake
-    {_SSH, ServerSettings} = http2_frame:read({Transport, Socket}, 1000),
-    http2_frame_settings:ack({Transport, Socket}),
+    {_SSH, ServerSettings} = h2_frame:read({Transport, Socket}, 1000),
+    h2_frame_settings:ack({Transport, Socket}),
 
     ClientSettings = chatterbox:settings(client),
-    lager:debug("[client] settings: ~p", [http2_settings:to_proplist(ClientSettings)]),
+    lager:debug("[client] settings: ~p", [h2_settings:to_proplist(ClientSettings)]),
 
-    BinToSend = http2_frame_settings:send(#settings{}, ClientSettings),
+    BinToSend = h2_frame_settings:send(#settings{}, ClientSettings),
     Transport:send(Socket, BinToSend),
 
-    {AH, PAck} = http2_frame:read({Transport, Socket}, 100),
+    {AH, PAck} = h2_frame:read({Transport, Socket}, 100),
     lager:debug("AH: ~p, ~p", [AH, PAck]),
-    Ack = ?IS_FLAG(AH#frame_header.flags, ?FLAG_ACK),
+    Ack = ?IS_FLAG((AH#frame_header.flags), ?FLAG_ACK),
     lager:debug("Ack: ~p", [Ack]),
 
     case Transport of
@@ -158,7 +158,7 @@ init([]) ->
     end,
     {ok, #http2c_state{
             socket = {Transport, Socket},
-            send_settings = http2_frame_settings:overlay(#settings{},  ServerSettings)
+            send_settings = h2_frame_settings:overlay(#settings{}, ServerSettings)
            }}.
 
 %% Handling call messages
@@ -195,10 +195,10 @@ handle_cast(recv, #http2c_state{
                      incoming_frames = Frames
         }=State) ->
     RawHeader = Transport:recv(Socket, 9),
-    {FHeader, <<>>} = http2_frame:read_binary_frame_header(RawHeader),
+    {FHeader, <<>>} = h2_frame:read_binary_frame_header(RawHeader),
     lager:info("http2c recv ~p", [FHeader]),
     RawBody = Transport:recv(Socket, FHeader#frame_header.length),
-    {ok, Payload, <<>>} = http2_frame:read_binary_payload(RawBody, FHeader),
+    {ok, Payload, <<>>} = h2_frame:read_binary_payload(RawBody, FHeader),
     F = {FHeader, Payload},
     gen_server:cast(self(), recv),
     {noreply, State#http2c_state{incoming_frames = Frames ++ [F]}};
@@ -257,11 +257,11 @@ code_change(_OldVsn, State, _Extra) ->
 process_binary(<<>>, undefined, <<>>, Frames) -> {Frames, undefined, <<>>};
 
 process_binary(<<HeaderBin:9/binary,Bin/binary>>, undefined, <<>>, Frames) ->
-    {Header, <<>>} = http2_frame:read_binary_frame_header(HeaderBin),
+    {Header, <<>>} = h2_frame:read_binary_frame_header(HeaderBin),
     L = Header#frame_header.length,
     case byte_size(Bin) >= L of
         true ->
-            {ok, Payload, Rem} = http2_frame:read_binary_payload(Bin, Header),
+            {ok, Payload, Rem} = h2_frame:read_binary_payload(Bin, Header),
             process_binary(Rem, undefined, <<>>, Frames ++ [{Header,Payload}]);
         false ->
             {Frames, Header, Bin}
@@ -271,7 +271,7 @@ process_binary(Bin, Header, <<>>, Frames) ->
     L = Header#frame_header.length,
     case byte_size(Bin) >= L of
         true ->
-            {ok, Payload, Rem} = http2_frame:read_binary_payload(Bin, Header),
+            {ok, Payload, Rem} = h2_frame:read_binary_payload(Bin, Header),
             process_binary(Rem, undefined, <<>>, Frames ++ [{Header,Payload}]);
         false ->
             {Frames, Header, Bin}

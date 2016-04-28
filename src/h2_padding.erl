@@ -1,5 +1,4 @@
--module(http2_padding).
-
+-module(h2_padding).
 -include("http2.hrl").
 
 -export([

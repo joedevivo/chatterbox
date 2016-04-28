@@ -43,10 +43,10 @@ sends_header_frame_that_depends_on_itself(_Config) ->
          flags=?FLAG_END_HEADERS bor ?FLAG_PRIORITY,
          type=?HEADERS
         },
-      http2_frame_headers:new(
-        http2_frame_priority:new(0,1,1),
-        HeadersBin
-       )
+      h2_frame_headers:new(
+     h2_frame_priority:new(0,1,1),
+     HeadersBin
+    )
      },
 
 
@@ -54,10 +54,10 @@ sends_header_frame_that_depends_on_itself(_Config) ->
 
     Resp = http2c:wait_for_n_frames(Client, 1, 1),
     ct:pal("Resp: ~p", [Resp]),
-    ?assertEqual(1, length(Resp)),
+    ?assertEqual(1, (length(Resp))),
     [{RstStreamH, RstStream}] = Resp,
-    ?assertEqual(?RST_STREAM, RstStreamH#frame_header.type),
-    ?assertEqual(?PROTOCOL_ERROR, http2_frame_rst_stream:error_code(RstStream)),
+    ?assertEqual(?RST_STREAM, (RstStreamH#frame_header.type)),
+    ?assertEqual(?PROTOCOL_ERROR, (h2_frame_rst_stream:error_code(RstStream))),
     ok.
 
 sends_priority_frame_that_depends_on_itself(_Config) ->
@@ -69,17 +69,17 @@ sends_priority_frame_that_depends_on_itself(_Config) ->
             type=?PRIORITY,
             length=5
             },
-         http2_frame_priority:new(0,1,0)
+         h2_frame_priority:new(0,1,0)
          },
 
     http2c:send_unaltered_frames(Client, [PriorityFrame]),
 
     Resp = http2c:wait_for_n_frames(Client, 1, 1),
     ct:pal("Resp: ~p", [Resp]),
-    ?assertEqual(1, length(Resp)),
+    ?assertEqual(1, (length(Resp))),
     [{RstStreamH, RstStream}] = Resp,
-    ?assertEqual(?RST_STREAM, RstStreamH#frame_header.type),
-    ?assertEqual(?PROTOCOL_ERROR, http2_frame_rst_stream:error_code(RstStream)),
+    ?assertEqual(?RST_STREAM, (RstStreamH#frame_header.type)),
+    ?assertEqual(?PROTOCOL_ERROR, (h2_frame_rst_stream:error_code(RstStream))),
     ok.
 
 sends_priority_frame_that_depends_on_itself_later(_Config) ->
@@ -104,7 +104,7 @@ sends_priority_frame_that_depends_on_itself_later(_Config) ->
          flags=?FLAG_END_HEADERS,% bor ?FLAG_END_STREAM,
          type=?HEADERS
         },
-      http2_frame_headers:new(HeadersBin)
+      h2_frame_headers:new(HeadersBin)
      },
 
     PriorityFrame =
@@ -113,15 +113,15 @@ sends_priority_frame_that_depends_on_itself_later(_Config) ->
             type=?PRIORITY,
             length=5
             },
-         http2_frame_priority:new(0,1,0)
+         h2_frame_priority:new(0,1,0)
          },
 
     http2c:send_unaltered_frames(Client, [F, PriorityFrame]),
 
     Resp = http2c:wait_for_n_frames(Client, 1, 1),
     ct:pal("Resp: ~p", [Resp]),
-    ?assertEqual(1, length(Resp)),
+    ?assertEqual(1, (length(Resp))),
     [{RstStreamH, RstStream}] = Resp,
-    ?assertEqual(?RST_STREAM, RstStreamH#frame_header.type),
-    ?assertEqual(?PROTOCOL_ERROR, http2_frame_rst_stream:error_code(RstStream)),
+    ?assertEqual(?RST_STREAM, (RstStreamH#frame_header.type)),
+    ?assertEqual(?PROTOCOL_ERROR, (h2_frame_rst_stream:error_code(RstStream))),
     ok.

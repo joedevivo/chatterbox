@@ -2,7 +2,7 @@
 
 -include_lib("chatterbox/include/http2.hrl").
 
--behaviour(http2_stream).
+-behaviour(h2_stream).
 
 -export([
          init/2,
@@ -43,9 +43,8 @@ on_request_end_stream(State=#state{conn_pid=ConnPid,
     ResponseHeaders = [
                        {<<":status">>,<<"200">>}
                       ],
-    http2_connection:send_headers(ConnPid, StreamId, ResponseHeaders),
-    http2_connection:send_body(ConnPid, StreamId, <<"BodyPart1\n">>,
-                               [{send_end_stream, false}]),
-    http2_connection:send_body(ConnPid, StreamId, <<"BodyPart2">>),
+    h2_connection:send_headers(ConnPid, StreamId, ResponseHeaders),
+    h2_connection:send_body(ConnPid, StreamId, <<"BodyPart1\n">>,
+                            [{send_end_stream, false}]),
+    h2_connection:send_body(ConnPid, StreamId, <<"BodyPart2">>),
     {ok, State}.
-

@@ -65,12 +65,12 @@ total_streams_above_max_concurrent(Config) ->
         lists:foldl(
           fun(StreamId, EncodeContext) ->
                   {H1, NewEC} =
-                      http2_frame_headers:to_frames(
-                        StreamId,
-                        RequestHeaders,
-                        EncodeContext,
-                        16384,
-                        true),
+                      h2_frame_headers:to_frames(
+                     StreamId,
+                     RequestHeaders,
+                     EncodeContext,
+                     16384,
+                     true),
                   http2c:send_unaltered_frames(Client, H1),
                   NewEC
           end,
@@ -86,32 +86,32 @@ total_streams_above_max_concurrent(Config) ->
     ?assertEqual([], Resp0),
     [ begin
           [{FH1,_FB1},{FH2,_FB2}] = http2c:get_frames(Client, StreamId),
-          ?assertEqual(StreamId, FH1#frame_header.stream_id),
-          ?assertEqual(?HEADERS, FH1#frame_header.type),
-          ?assertEqual(StreamId, FH2#frame_header.stream_id),
-          ?assertEqual(?DATA, FH2#frame_header.type)
-      end || StreamId <- StreamIds],
+         ?assertEqual(StreamId, (FH1#frame_header.stream_id)),
+         ?assertEqual(?HEADERS, (FH1#frame_header.type)),
+         ?assertEqual(StreamId, (FH2#frame_header.stream_id)),
+         ?assertEqual(?DATA, (FH2#frame_header.type))
+     end || StreamId <- StreamIds],
 
     %% Now, open AStreamTooFar
     {HFinal, _UnusedEC} =
-        http2_frame_headers:to_frames(
-          AStreamTooFar,
-          RequestHeaders,
-          FinalEC,
-          16384,
-          true),
+        h2_frame_headers:to_frames(
+       AStreamTooFar,
+       RequestHeaders,
+       FinalEC,
+       16384,
+       true),
     http2c:send_unaltered_frames(Client, HFinal),
 
     %% Response should be a real response, because we haven't exceeded
     %% anything
     Response = http2c:wait_for_n_frames(Client, AStreamTooFar, 2),
-    ?assertEqual(2, length(Response)),
+    ?assertEqual(2, (length(Response))),
 
     [{RH1,_RB1},{RH2,_RB2}] = Response,
-    ?assertEqual(AStreamTooFar, RH1#frame_header.stream_id),
-    ?assertEqual(?HEADERS, RH1#frame_header.type),
-    ?assertEqual(AStreamTooFar, RH2#frame_header.stream_id),
-    ?assertEqual(?DATA, RH2#frame_header.type),
+    ?assertEqual(AStreamTooFar, (RH1#frame_header.stream_id)),
+    ?assertEqual(?HEADERS, (RH1#frame_header.type)),
+    ?assertEqual(AStreamTooFar, (RH2#frame_header.stream_id)),
+    ?assertEqual(?DATA, (RH2#frame_header.type)),
     ok.
 
 exceeds_max_concurrent_streams(Config) ->
@@ -137,12 +137,12 @@ exceeds_max_concurrent_streams(Config) ->
         lists:foldl(
           fun(StreamId, EncodeContext) ->
                   {H1, NewEC} =
-                      http2_frame_headers:to_frames(
-                        StreamId,
-                        RequestHeaders,
-                        EncodeContext,
-                        16384,
-                        false),
+                      h2_frame_headers:to_frames(
+                     StreamId,
+                     RequestHeaders,
+                     EncodeContext,
+                     16384,
+                     false),
                   http2c:send_unaltered_frames(Client, H1),
                   NewEC
           end,
@@ -163,39 +163,39 @@ exceeds_max_concurrent_streams(Config) ->
     %% Now, open AStreamTooFar
 
     {HFinal, _UnusedEC} =
-        http2_frame_headers:to_frames(
-          AStreamTooFar,
-          RequestHeaders,
-          FinalEC,
-          16384,
-          false),
+        h2_frame_headers:to_frames(
+       AStreamTooFar,
+       RequestHeaders,
+       FinalEC,
+       16384,
+       false),
     http2c:send_unaltered_frames(Client, HFinal),
 
     %% Response should be RST_STREAM ?REFUSED_STREAM
     Response = http2c:wait_for_n_frames(Client, AStreamTooFar, 1),
-    ?assertEqual(1, length(Response)),
+    ?assertEqual(1, (length(Response))),
     [{RstH, RstP}] = Response,
-    ?assertEqual(?RST_STREAM, RstH#frame_header.type),
-    ?assertEqual(?REFUSED_STREAM, http2_frame_rst_stream:error_code(RstP)),
+    ?assertEqual(?RST_STREAM, (RstH#frame_header.type)),
+    ?assertEqual(?REFUSED_STREAM, (h2_frame_rst_stream:error_code(RstP))),
     ok.
 
 sends_rst_stream_to_idle(_Config) ->
     {ok, Client} = http2c:start_link(),
 
-    RstStream = http2_frame_rst_stream:new(?CANCEL),
-    RstStreamBin = http2_frame:to_binary(
-                     {#frame_header{
-                         stream_id=1
-                        },
-                      RstStream}),
+    RstStream = h2_frame_rst_stream:new(?CANCEL),
+    RstStreamBin = h2_frame:to_binary(
+                  {#frame_header{
+                      stream_id=1
+                     },
+                   RstStream}),
 
     http2c:send_binary(Client, RstStreamBin),
 
     Resp = http2c:wait_for_n_frames(Client, 0, 1),
     ct:pal("Resp: ~p", [Resp]),
-    ?assertEqual(1, length(Resp)),
+    ?assertEqual(1, (length(Resp))),
     [{_GoAwayH, GoAway}] = Resp,
-    ?assertEqual(?PROTOCOL_ERROR, http2_frame_goaway:error_code(GoAway)),
+    ?assertEqual(?PROTOCOL_ERROR, (h2_frame_goaway:error_code(GoAway))),
     ok.
 
 half_closed_remote_sends_headers(_Config) ->
@@ -212,53 +212,53 @@ half_closed_remote_sends_headers(_Config) ->
         ],
 
     {H1, EC} =
-        http2_frame_headers:to_frames(1,
-                                      RequestHeaders,
-                                      hpack:new_context(),
-                                      16384,
-                                      true),
+        h2_frame_headers:to_frames(1,
+                                   RequestHeaders,
+                                   hpack:new_context(),
+                                   16384,
+                                   true),
 
     http2c:send_unaltered_frames(Client, H1),
 
     %% The stream should be half closed remote now
 
     {H2, _EC2} =
-        http2_frame_headers:to_frames(1,
-                                      RequestHeaders,
-                                      EC,
-                                      16384,
-                                      true),
+        h2_frame_headers:to_frames(1,
+                                   RequestHeaders,
+                                   EC,
+                                   16384,
+                                   true),
 
 
     http2c:send_unaltered_frames(Client, H2),
 
     Resp = http2c:wait_for_n_frames(Client, 1, 3),
     ct:pal("Resp: ~p", [Resp]),
-    ?assertEqual(true, length(Resp) >= 3),
+    ?assertEqual(true, (length(Resp) >= 3)),
     [ {HeadersH, _}, {DataH, _}, {RstStreamH, RstStream}|_] = Resp,
-    ?assertEqual(?HEADERS, HeadersH#frame_header.type),
-    ?assertEqual(?DATA, DataH#frame_header.type),
-    ?assertEqual(?RST_STREAM, RstStreamH#frame_header.type),
-    ?assertEqual(?STREAM_CLOSED, http2_frame_rst_stream:error_code(RstStream)),
+    ?assertEqual(?HEADERS, (HeadersH#frame_header.type)),
+    ?assertEqual(?DATA, (DataH#frame_header.type)),
+    ?assertEqual(?RST_STREAM, (RstStreamH#frame_header.type)),
+    ?assertEqual(?STREAM_CLOSED, (h2_frame_rst_stream:error_code(RstStream))),
     ok.
 
 sends_window_update_to_idle(_Config) ->
     {ok, Client} = http2c:start_link(),
-    WUBin = http2_frame:to_binary(
-                     {#frame_header{
-                         stream_id=1
-                        },
-                      http2_frame_window_update:new(1)
-                      }),
+    WUBin = h2_frame:to_binary(
+                  {#frame_header{
+                      stream_id=1
+                     },
+                   h2_frame_window_update:new(1)
+                   }),
 
     http2c:send_binary(Client, WUBin),
 
     Resp = http2c:wait_for_n_frames(Client, 0, 1),
     ct:pal("Resp: ~p", [Resp]),
-    ?assertEqual(1, length(Resp)),
+    ?assertEqual(1, (length(Resp))),
     [{GoAwayH, GoAway}] = Resp,
-    ?assertEqual(?GOAWAY, GoAwayH#frame_header.type),
-    ?assertEqual(?PROTOCOL_ERROR, http2_frame_goaway:error_code(GoAway)),
+    ?assertEqual(?GOAWAY, (GoAwayH#frame_header.type)),
+    ?assertEqual(?PROTOCOL_ERROR, (h2_frame_goaway:error_code(GoAway))),
     ok.
 
 client_sends_even_stream_id(_Config) ->
@@ -276,18 +276,18 @@ client_sends_even_stream_id(_Config) ->
         ],
 
     {H, _} =
-        http2_frame_headers:to_frames(2,
-                                      RequestHeaders,
-                                      hpack:new_context(),
-                                      16384,
-                                      false),
+        h2_frame_headers:to_frames(2,
+                                   RequestHeaders,
+                                   hpack:new_context(),
+                                   16384,
+                                   false),
 
     http2c:send_unaltered_frames(Client, H),
 
     Resp = http2c:wait_for_n_frames(Client, 0, 1),
     ct:pal("Resp: ~p", [Resp]),
-    ?assertEqual(1, length(Resp)),
+    ?assertEqual(1, (length(Resp))),
     [{GoAwayH, GoAway}] = Resp,
-    ?assertEqual(?GOAWAY, GoAwayH#frame_header.type),
-    ?assertEqual(?PROTOCOL_ERROR, http2_frame_goaway:error_code(GoAway)),
+    ?assertEqual(?GOAWAY, (GoAwayH#frame_header.type)),
+    ?assertEqual(?PROTOCOL_ERROR, (h2_frame_goaway:error_code(GoAway))),
     ok.

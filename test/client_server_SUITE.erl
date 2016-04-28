@@ -56,7 +56,7 @@ end_per_suite(_Config) ->
 
 complex_request(_Config) ->
     application:set_env(chatterbox, client_initial_window_size, 99999999),
-    {ok, Client} = http2_client:start_link(),
+    {ok, Client} = h2_client:start_link(),
     RequestHeaders =
         [
          {<<":method">>, <<"GET">>},
@@ -67,7 +67,7 @@ complex_request(_Config) ->
          {<<"accept-encoding">>, <<"gzip, deflate">>},
          {<<"user-agent">>, <<"chattercli/0.0.1 :D">>}
         ],
-    {ok, {ResponseHeaders, ResponseBody}} = http2_client:sync_request(Client, RequestHeaders, <<>>),
+    {ok, {ResponseHeaders, ResponseBody}} = h2_client:sync_request(Client, RequestHeaders, <<>>),
 
     ct:pal("Response Headers: ~p", [ResponseHeaders]),
     ct:pal("Response Body: ~p", [ResponseBody]),
@@ -75,7 +75,7 @@ complex_request(_Config) ->
     ok.
 
 upgrade_tcp_connection(_Config) ->
-    {ok, Client} = http2_client:start_ssl_upgrade_link("localhost", 8081, <<>>, []),
+    {ok, Client} = h2_client:start_ssl_upgrade_link("localhost", 8081, <<>>, []),
 
     RequestHeaders =
         [
@@ -87,14 +87,14 @@ upgrade_tcp_connection(_Config) ->
          {<<"accept-encoding">>, <<"gzip, deflate">>},
          {<<"user-agent">>, <<"chattercli/0.0.1 :D">>}
         ],
-    {ok, {ResponseHeaders, ResponseBody}} = http2_client:sync_request(Client, RequestHeaders, <<>>),
+    {ok, {ResponseHeaders, ResponseBody}} = h2_client:sync_request(Client, RequestHeaders, <<>>),
     ct:pal("Response Headers: ~p", [ResponseHeaders]),
     ct:pal("Response Body: ~p", [ResponseBody]),
     ok.
 
 
 basic_push(_Config) ->
-    {ok, Client} = http2_client:start_link(),
+    {ok, Client} = h2_client:start_link(),
     RequestHeaders =
         [
          {<<":method">>, <<"GET">>},
@@ -105,7 +105,7 @@ basic_push(_Config) ->
          {<<"accept-encoding">>, <<"gzip, deflate">>},
          {<<"user-agent">>, <<"chattercli/0.0.1 :D">>}
         ],
-    {ok, {ResponseHeaders, ResponseBody}} = http2_client:sync_request(Client, RequestHeaders, <<>>),
+    {ok, {ResponseHeaders, ResponseBody}} = h2_client:sync_request(Client, RequestHeaders, <<>>),
 
     ct:pal("Response Headers: ~p", [ResponseHeaders]),
     ct:pal("Response Body: ~p", [ResponseBody]),
@@ -114,19 +114,19 @@ basic_push(_Config) ->
     %% We'll know we're done when we're notified of all the streams ending.
     wait_for_n_notifications(12),
 
-    Streams = http2_connection:get_streams(Client),
+    Streams = h2_connection:get_streams(Client),
     ct:pal("Streams ~p", [Streams]),
-    ?assertEqual(0, h2_stream_set:my_active_count(Streams)),
-    ?assertEqual(0, h2_stream_set:their_active_count(Streams)),
+    ?assertEqual(0, (h2_stream_set:my_active_count(Streams))),
+    ?assertEqual(0, (h2_stream_set:their_active_count(Streams))),
 
     MyActiveStreams = h2_stream_set:my_active_streams(Streams),
-    ?assertEqual(1, length(MyActiveStreams)),
-    ?assertEqual(1, h2_stream_set:stream_id(hd(MyActiveStreams))),
+    ?assertEqual(1, (length(MyActiveStreams))),
+    ?assertEqual(1, (h2_stream_set:stream_id(hd(MyActiveStreams)))),
 
     TheirActiveStreams = h2_stream_set:their_active_streams(Streams),
-    ?assertEqual(12, length(TheirActiveStreams)),
+    ?assertEqual(12, (length(TheirActiveStreams))),
 
-    [ ?assertEqual(closed, h2_stream_set:type(S)) || S <- TheirActiveStreams],
+    [?assertEqual(closed, (h2_stream_set:type(S))) || S <- TheirActiveStreams],
     ok.
 
 wait_for_n_notifications(0) ->
@@ -143,7 +143,7 @@ wait_for_n_notifications(N) ->
     end.
 
 get_peer_in_handler(_Config) ->
-    {ok, Client} = http2_client:start_link(),
+    {ok, Client} = h2_client:start_link(),
     RequestHeaders =
         [
          {<<":method">>, <<"GET">>},
@@ -156,13 +156,13 @@ get_peer_in_handler(_Config) ->
         ],
 
 
-    {ok, {ResponseHeaders, ResponseBody}} = http2_client:sync_request(Client, RequestHeaders, <<>>),
+    {ok, {ResponseHeaders, ResponseBody}} = h2_client:sync_request(Client, RequestHeaders, <<>>),
     ct:pal("Response Headers: ~p", [ResponseHeaders]),
     ct:pal("Response Body: ~p", [ResponseBody]),
     ok.
 
 send_body_opts(_Config) ->
-    {ok, Client} = http2_client:start_link(),
+    {ok, Client} = h2_client:start_link(),
     RequestHeaders =
         [
          {<<":method">>, <<"GET">>},
@@ -176,10 +176,10 @@ send_body_opts(_Config) ->
 
     ExpectedResponseBody = <<"BodyPart1\nBodyPart2">>,
 
-    {ok, {ResponseHeaders, ResponseBody}} = http2_client:sync_request(Client, RequestHeaders, <<>>),
+    {ok, {ResponseHeaders, ResponseBody}} = h2_client:sync_request(Client, RequestHeaders, <<>>),
     ct:pal("Response Headers: ~p", [ResponseHeaders]),
     ct:pal("Response Body: ~p", [ResponseBody]),
-    ?assertEqual(ExpectedResponseBody, iolist_to_binary(ResponseBody)),
+    ?assertEqual(ExpectedResponseBody, (iolist_to_binary(ResponseBody))),
     ok.
 
 echo_body(_Config) ->
@@ -203,13 +203,13 @@ echo_body(_Config) ->
                       flags=?FLAG_END_HEADERS,
                       stream_id=3
                      },
-                   http2_frame_headers:new(HeadersBin)
+                   h2_frame_headers:new(HeadersBin)
                   },
 
     http2c:send_unaltered_frames(Client, [HeaderFrame]),
 
     Body = crypto:rand_bytes(128),
-    BodyFrames = http2_frame_data:to_frames(3, Body, #settings{max_frame_size=64}),
+    BodyFrames = h2_frame_data:to_frames(3, Body, #settings{max_frame_size=64}),
     http2c:send_unaltered_frames(Client, BodyFrames),
 
     timer:sleep(300),
@@ -217,8 +217,8 @@ echo_body(_Config) ->
     DataFrames = lists:filter(fun({#frame_header{type=?DATA}, _}) -> true;
                                  (_) -> false end, Frames),
     ResponseData = lists:map(fun({_, DataP}) ->
-                                     http2_frame_data:data(DataP)
+                                     h2_frame_data:data(DataP)
                              end, DataFrames),
     io:format("Body: ~p, response: ~p~n", [Body, ResponseData]),
-    ?assertEqual(Body, iolist_to_binary(ResponseData)),
+    ?assertEqual(Body, (iolist_to_binary(ResponseData))),
     ok.
