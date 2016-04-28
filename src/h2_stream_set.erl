@@ -839,14 +839,22 @@ notify_pid(#active_stream{notify_pid=Pid}) ->
 notify_pid(#closed_stream{notify_pid=Pid}) ->
     Pid.
 
+%% The number of #active_stream records
+-spec my_active_count(stream_set()) -> non_neg_integer().
 my_active_count(SS) ->
     SS#stream_set.mine#peer_subset.active_count.
 
+%% The number of #active_stream records
+-spec their_active_count(stream_set()) -> non_neg_integer().
 their_active_count(SS) ->
     SS#stream_set.theirs#peer_subset.active_count.
 
+%% The list of #active_streams, and un gc'd #closed_streams
+-spec my_active_streams(stream_set()) -> [stream()].
 my_active_streams(SS) ->
     SS#stream_set.mine#peer_subset.active.
 
+%% The list of #active_streams, and un gc'd #closed_streams
+-spec their_active_streams(stream_set()) -> [stream()].
 their_active_streams(SS) ->
     SS#stream_set.theirs#peer_subset.active.

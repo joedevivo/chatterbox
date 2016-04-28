@@ -944,6 +944,8 @@ handle_event({send_body, StreamId, Body, Opts},
             %% Sending DATA frames on an idle stream?  It's a
             %% Connection level protocol error on reciept, but If we
             %% have no active stream what can we even do?
+            lager:info("[~p] tried sending data on idle stream ~p",
+                       [Conn#connection.type, StreamId]),
             {next_state, StateName, Conn};
         closed ->
             {next_state, StateName, Conn}
@@ -1496,6 +1498,8 @@ send_h(Stream, Headers) ->
     case h2_stream_set:pid(Stream) of
         undefined ->
             %% Should this be some kind of error?
+            lager:info("tried sending headers on a non running stream ~p",
+                       [h2_stream_set:stream_id(Stream)]),
             ok;
         Pid ->
             gen_fsm:send_event(Pid, {send_h, Headers})
