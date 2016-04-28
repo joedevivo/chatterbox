@@ -60,7 +60,7 @@
 
 
 %% Streams all have stream_ids. It is the only thing all three types
-%% have.
+%% have. It *MUST* be the first field in *ALL* *_stream{} records.
 
 %% The metadata for an active stream is, unsurprisingly, the most
 %% complex.
@@ -343,11 +343,8 @@ upsert(#idle_stream{}, StreamSet) ->
     StreamSet;
 upsert(Stream, StreamSet) ->
     StreamId = stream_id(Stream),
-    PeerSubset =
-        get_peer_subset(StreamId, StreamSet),
-    case
-        upsert_peer_subset(Stream, PeerSubset)
-    of
+    PeerSubset = get_peer_subset(StreamId, StreamSet),
+    case upsert_peer_subset(Stream, PeerSubset) of
         {error, Code} ->
             {error, Code};
         NewPeerSubset ->
