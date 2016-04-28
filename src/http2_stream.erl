@@ -11,7 +11,8 @@
          connection/0,
          send_window_update/1,
          send_connection_window_update/1,
-         rst_stream/2
+         rst_stream/2,
+         stop/1
         ]).
 
 %% gen_fsm callbacks
@@ -137,6 +138,10 @@ send_connection_window_update(Size) ->
 
 rst_stream(Pid, Code) ->
     gen_fsm:sync_send_all_state_event(Pid, {rst_stream, Code}).
+
+-spec stop(pid()) -> ok.
+stop(Pid) ->
+    gen_fsm:stop(Pid).
 
 init([
       StreamId,

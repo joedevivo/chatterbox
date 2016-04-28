@@ -11,8 +11,11 @@
 -record(
    stream_set,
    {
+     %% Type determines which streams are mine, and which are theirs
      type :: client | server,
+     %% Streams initiated by this peer
      mine :: peer_subset(),
+     %% Streams initiated by the other peer
      theirs :: peer_subset()
    }).
 -type stream_set() :: #stream_set{}.
@@ -236,6 +239,16 @@ new_stream(
             lager:debug("NewStream ~p", [NewStream]),
             case upsert(NewStream, StreamSet) of
                 {error, ?REFUSED_STREAM} ->
+                    %% This should be very rare, if it ever happens at
+                    %% all. The case clause above tests the same
+                    %% condition that upsert/2 checks to return this
+                    %% result. Still, we need this case statement
+                    %% because returning an {error tuple here would be
+                    %% catastrophic
+
+                    %% If this did happen, we need to kill this
+                    %% process, or it will just hang out there.
+                    http2_stream:stop(Pid),
                     {error, ?REFUSED_STREAM, #closed_stream{id=StreamId}};
                 NewStreamSet ->
                     NewStreamSet
