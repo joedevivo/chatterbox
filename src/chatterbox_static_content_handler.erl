@@ -62,8 +62,8 @@ handle(ConnPid, StreamId, Headers, _ReqBody) ->
             ResponseHeaders = [
                                {<<":status">>,<<"403">>}
                               ],
-            http2_connection:send_headers(ConnPid, StreamId, ResponseHeaders),
-            http2_connection:send_body(ConnPid, StreamId, <<"No soup for you!">>),
+            h2_connection:send_headers(ConnPid, StreamId, ResponseHeaders),
+            h2_connection:send_body(ConnPid, StreamId, <<"No soup for you!">>),
             ok;
         {true, false} ->
             Ext = filename:extension(File),
@@ -83,10 +83,10 @@ handle(ConnPid, StreamId, Headers, _ReqBody) ->
                 {<<"content-type">>, MimeType}
             ],
 
-            http2_connection:send_headers(ConnPid, StreamId, ResponseHeaders),
+            h2_connection:send_headers(ConnPid, StreamId, ResponseHeaders),
 
 
-            case {MimeType, http2_connection:is_push(ConnPid)} of
+            case {MimeType, h2_connection:is_push(ConnPid)} of
                 {<<"text/html">>, true} ->
                     %% Search Data for resources to push
                     {ok, RE} = re:compile("<link rel=\"stylesheet\" href=\"([^\"]*)|<script src=\"([^\"]*)|src: '([^']*)"),
@@ -100,9 +100,10 @@ handle(ConnPid, StreamId, Headers, _ReqBody) ->
 
                     NewStreams =
                         lists:foldl(fun(R, Acc) ->
-                                            NewStreamId = http2_connection:new_stream(ConnPid),
-                                            PHeaders = generate_push_promise_headers(Headers, <<$/,R/binary>>),
-                                            http2_connection:send_promise(ConnPid, StreamId, NewStreamId, PHeaders),
+                                            NewStreamId = h2_connection:new_stream(ConnPid),
+                                            PHeaders = generate_push_promise_headers(Headers, <<$/,R/binary>>
+                                                                                                             ),
+                                            h2_connection:send_promise(ConnPid, StreamId, NewStreamId, PHeaders),
                                             [{NewStreamId, PHeaders}|Acc]
                                     end,
                                     [],
@@ -117,14 +118,14 @@ handle(ConnPid, StreamId, Headers, _ReqBody) ->
                 _ ->
                     ok
             end,
-            http2_connection:send_body(ConnPid, StreamId, Data),
+            h2_connection:send_body(ConnPid, StreamId, Data),
             ok;
         {false, false} ->
             ResponseHeaders = [
                                {<<":status">>,<<"404">>}
                               ],
-            http2_connection:send_headers(ConnPid, StreamId, ResponseHeaders),
-            http2_connection:send_body(ConnPid, StreamId, <<"No soup for you!">>),
+            h2_connection:send_headers(ConnPid, StreamId, ResponseHeaders),
+            h2_connection:send_body(ConnPid, StreamId, <<"No soup for you!">>),
             ok
     end,
     ok.

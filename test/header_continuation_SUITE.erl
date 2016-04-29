@@ -40,16 +40,16 @@ basic_continuation(_Config) ->
     Frames =
         [
          {#frame_header{length=8,type=?HEADERS,flags=?FLAG_END_STREAM,stream_id=3},
-          http2_frame_headers:new(H1)},
+          h2_frame_headers:new(H1)},
          {#frame_header{length=8,type=?CONTINUATION,stream_id=3},
-          http2_frame_continuation:new(H2)},
+          h2_frame_continuation:new(H2)},
          {#frame_header{length=8,type=?CONTINUATION,flags=?FLAG_END_HEADERS,stream_id=3},
-          http2_frame_continuation:new(H3)}
+          h2_frame_continuation:new(H3)}
         ],
     http2c:send_unaltered_frames(Client, Frames),
     Resp = http2c:wait_for_n_frames(Client, 3, 2),
     cthr:pal("Resp: ~p", [Resp]),
-    ?assertEqual(2, length(Resp)),
+    ?assertEqual(2, (length(Resp))),
     ok.
 
 
@@ -73,17 +73,17 @@ basic_continuation_end_stream_first(_Config) ->
     Frames =
         [
          {#frame_header{length=8,type=?HEADERS,flags=?FLAG_END_STREAM,stream_id=3},
-          http2_frame_headers:new(H1)},
+          h2_frame_headers:new(H1)},
          {#frame_header{length=8,type=?CONTINUATION,stream_id=3},
-          http2_frame_continuation:new(H2)},
+          h2_frame_continuation:new(H2)},
          {#frame_header{length=8,type=?CONTINUATION,flags=?FLAG_END_HEADERS,stream_id=3},
-          http2_frame_continuation:new(H3)}
+          h2_frame_continuation:new(H3)}
         ],
     http2c:send_unaltered_frames(Client, Frames),
 
     Resp = http2c:wait_for_n_frames(Client, 3, 2),
     cthr:pal("Resp: ~p", [Resp]),
-    ?assertEqual(2, length(Resp)),
+    ?assertEqual(2, (length(Resp))),
     ok.
 
 bad_frame_wrong_type_between_continuations(_Config) ->
@@ -107,24 +107,24 @@ bad_frame_wrong_type_between_continuations(_Config) ->
     Frames =
         [
          {#frame_header{length=8,type=?HEADERS,stream_id=3},
-          http2_frame_headers:new(H1)},
+          h2_frame_headers:new(H1)},
          {#frame_header{length=8,type=?CONTINUATION,stream_id=3},
-          http2_frame_continuation:new(H2)},
+          h2_frame_continuation:new(H2)},
          {#frame_header{length=8,type=?HEADERS,stream_id=3},
-          http2_frame_headers:new(H1)},
+          h2_frame_headers:new(H1)},
          {#frame_header{length=8,type=?CONTINUATION,flags=?FLAG_END_HEADERS,stream_id=3},
-          http2_frame_continuation:new(H3)}
+          h2_frame_continuation:new(H3)}
         ],
     http2c:send_unaltered_frames(Client, Frames),
 
     Resp = http2c:wait_for_n_frames(Client, 3, 0),
     cthr:pal("Resp: ~p", [Resp]),
-    ?assertEqual(0, length(Resp)),
+    ?assertEqual(0, (length(Resp))),
     Resp2 = http2c:wait_for_n_frames(Client, 0, 1),
     1 = length(Resp2),
     [{GoAwayH, GoAway}] = Resp2,
-    ?assertEqual(?GOAWAY, GoAwayH#frame_header.type),
-    ?assertEqual(?PROTOCOL_ERROR, http2_frame_goaway:error_code(GoAway)),
+    ?assertEqual(?GOAWAY, (GoAwayH#frame_header.type)),
+    ?assertEqual(?PROTOCOL_ERROR, (h2_frame_goaway:error_code(GoAway))),
     ok.
 
 bad_frame_wrong_stream_between_continuations(_Config) ->
@@ -148,24 +148,24 @@ bad_frame_wrong_stream_between_continuations(_Config) ->
     Frames =
         [
          {#frame_header{length=8,type=?HEADERS,stream_id=3},
-          http2_frame_headers:new(H1)},
+          h2_frame_headers:new(H1)},
          {#frame_header{length=8,type=?CONTINUATION,stream_id=3},
-          http2_frame_continuation:new(H2)},
+          h2_frame_continuation:new(H2)},
          {#frame_header{length=8,type=?HEADERS,stream_id=5},
-          http2_frame_headers:new(H1)},
+          h2_frame_headers:new(H1)},
          {#frame_header{length=8,type=?CONTINUATION,flags=?FLAG_END_HEADERS,stream_id=3},
-          http2_frame_continuation:new(H3)}
+          h2_frame_continuation:new(H3)}
         ],
     http2c:send_unaltered_frames(Client, Frames),
 
     Resp = http2c:wait_for_n_frames(Client, 3, 0),
     cthr:pal("Resp: ~p", [Resp]),
 
-    ?assertEqual(0, length(Resp)),
+    ?assertEqual(0, (length(Resp))),
 
     Resp2 = http2c:wait_for_n_frames(Client, 0, 1),
     1 = length(Resp2),
     [{GoAwayH, GoAway}] = Resp2,
-    ?assertEqual(?GOAWAY, GoAwayH#frame_header.type),
-    ?assertEqual(?PROTOCOL_ERROR, http2_frame_goaway:error_code(GoAway)),
+    ?assertEqual(?GOAWAY, (GoAwayH#frame_header.type)),
+    ?assertEqual(?PROTOCOL_ERROR, (h2_frame_goaway:error_code(GoAway))),
     ok.

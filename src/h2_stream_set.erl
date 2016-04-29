@@ -223,12 +223,12 @@ new_stream(
         true ->
             {error, ?REFUSED_STREAM, #closed_stream{id=StreamId}};
         false ->
-            {ok, Pid} = http2_stream:start_link(
-                          StreamId,
-                          self(),
-                          CBMod,
-                          Socket
-                         ),
+            {ok, Pid} = h2_stream:start_link(
+                       StreamId,
+                       self(),
+                       CBMod,
+                       Socket
+                      ),
             NewStream = #active_stream{
                            id = StreamId,
                            pid = Pid,
@@ -248,7 +248,7 @@ new_stream(
 
                     %% If this did happen, we need to kill this
                     %% process, or it will just hang out there.
-                    http2_stream:stop(Pid),
+                    h2_stream:stop(Pid),
                     {error, ?REFUSED_STREAM, #closed_stream{id=StreamId}};
                 NewStreamSet ->
                     NewStreamSet
@@ -715,7 +715,7 @@ s_send_what_we_can(SWS, MFS, #active_stream{}=Stream) ->
                      type=?DATA,
                      length=QueueSize
                     },
-                  http2_frame_data:new(Stream#active_stream.queued_data)}, %% Full Body
+                  h2_frame_data:new(Stream#active_stream.queued_data)},  %% Full Body
                  QueueSize,
                  Stream#active_stream{
                    queued_data=done,
@@ -727,14 +727,14 @@ s_send_what_we_can(SWS, MFS, #active_stream{}=Stream) ->
                      type=?DATA,
                      length=MaxToSend
                     },
-                  http2_frame_data:new(BinToSend)},
+                  h2_frame_data:new(BinToSend)},
                  MaxToSend,
                  Stream#active_stream{
                    queued_data=Rest,
                    send_window_size=SSWS-MaxToSend}}
         end,
 
-    _Sent = http2_stream:send_frame(Stream#active_stream.pid, Frame),
+    _Sent = h2_stream:send_frame(Stream#active_stream.pid, Frame),
 
     case ExitStrategy of
         max_frame_size ->

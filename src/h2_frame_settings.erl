@@ -1,8 +1,6 @@
--module(http2_frame_settings).
-
+-module(h2_frame_settings).
 -include("http2.hrl").
-
--behaviour(http2_frame).
+-behaviour(h2_frame).
 
 -export(
    [
@@ -121,7 +119,7 @@ overlay(S, {settings, []}) ->
 
 -spec send(payload()) -> binary().
 send(Settings) ->
-    List = http2_settings:to_proplist(Settings),
+    List = h2_settings:to_proplist(Settings),
     Payload = make_payload(List),
     L = size(Payload),
     Header = <<L:24,?SETTINGS:8,16#0:8,0:1,0:31>>,
@@ -129,7 +127,7 @@ send(Settings) ->
 
 -spec send(payload(), payload()) -> binary().
 send(PrevSettings, NewSettings) ->
-    Diff = http2_settings:diff(PrevSettings, NewSettings),
+    Diff = h2_settings:diff(PrevSettings, NewSettings),
     Payload = make_payload(Diff),
     L = size(Payload),
     Header = <<L:24,?SETTINGS:8,16#0:8,0:1,0:31>>,

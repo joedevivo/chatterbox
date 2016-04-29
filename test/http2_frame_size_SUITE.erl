@@ -39,10 +39,10 @@ send_wrong_size(Type, _Config) ->
     Resp = http2c:wait_for_n_frames(Client, 0, 1),
     ct:pal("Resp: ~p", [Resp]),
 
-    ?assertEqual(1, length(Resp)),
+    ?assertEqual(1, (length(Resp))),
     [{GoAwayH, GoAway}] = Resp,
-    ?assertEqual(?GOAWAY, GoAwayH#frame_header.type),
-    ?assertEqual(?FRAME_SIZE_ERROR, http2_frame_goaway:error_code(GoAway)),
+    ?assertEqual(?GOAWAY, (GoAwayH#frame_header.type)),
+    ?assertEqual(?FRAME_SIZE_ERROR, (h2_frame_goaway:error_code(GoAway))),
     ok.
 
 frame_too_big(_Config) ->
@@ -54,16 +54,16 @@ frame_too_big(_Config) ->
              type=?HEADERS,
              flags=?FLAG_END_HEADERS,
              stream_id=3},
-          http2_frame_headers:new(<<1:131136>>)}
+          h2_frame_headers:new(<<1:131136>>)}
     ],
     http2c:send_unaltered_frames(Client, Frames),
 
     Resp = http2c:wait_for_n_frames(Client, 0, 1),
     ct:pal("Resp: ~p", [Resp]),
-    ?assertEqual(1, length(Resp)),
+    ?assertEqual(1, (length(Resp))),
     [{GoAwayH, GoAway}] = Resp,
-    ?assertEqual(?GOAWAY, GoAwayH#frame_header.type),
-    ?assertEqual(?FRAME_SIZE_ERROR, http2_frame_goaway:error_code(GoAway)),
+    ?assertEqual(?GOAWAY, (GoAwayH#frame_header.type)),
+    ?assertEqual(?FRAME_SIZE_ERROR, (h2_frame_goaway:error_code(GoAway))),
     ok.
 
 euc(_Config) ->
@@ -93,14 +93,14 @@ euc(_Config) ->
 
     Frames = [
               {#frame_header{length=byte_size(HeadersBin1),type=?HEADERS,flags=?FLAG_END_HEADERS,stream_id=3},
-               http2_frame_headers:new(HeadersBin1)},
+               h2_frame_headers:new(HeadersBin1)},
               {#frame_header{length=byte_size(HeadersBin2),type=?HEADERS,flags=?FLAG_END_HEADERS,stream_id=5},
-               http2_frame_headers:new(HeadersBin2)},
+               h2_frame_headers:new(HeadersBin2)},
               {#frame_header{length=byte_size(HeadersBin3),type=?HEADERS,flags=?FLAG_END_HEADERS,stream_id=7},
-               http2_frame_headers:new(HeadersBin3)}
+               h2_frame_headers:new(HeadersBin3)}
     ],
 
     http2c:send_unaltered_frames(Client, Frames),
 
     Resp = http2c:wait_for_n_frames(Client, 0, 0),
-    ?assertEqual(0, length(Resp)).
+    ?assertEqual(0, (length(Resp))).

@@ -1,8 +1,6 @@
--module(http2_frame_ping).
-
+-module(h2_frame_ping).
 -include("http2.hrl").
-
--behaviour(http2_frame).
+-behaviour(h2_frame).
 
 -export(
    [

@@ -1,6 +1,6 @@
--module(http2_frame_data).
-
+-module(h2_frame_data).
 -include("http2.hrl").
+-behaviour(h2_frame).
 
 -export([
          format/1,
@@ -10,8 +10,6 @@
          data/1,
          new/1
         ]).
-
--behaviour(http2_frame).
 
 -record(data, {
     data :: iodata()
@@ -48,7 +46,7 @@ read_binary(Bin, _H=#frame_header{length=0}) ->
 read_binary(Bin, H=#frame_header{length=L}) ->
     lager:debug("read_binary L: ~p, actually: ~p", [L, byte_size(Bin)]),
     <<PayloadBin:L/binary,Rem/bits>> = Bin,
-    case http2_padding:read_possibly_padded_payload(PayloadBin, H) of
+    case h2_padding:read_possibly_padded_payload(PayloadBin, H) of
         {error, Code} ->
             {error, Code};
         Data ->

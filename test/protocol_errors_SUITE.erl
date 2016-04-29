@@ -27,27 +27,27 @@ end_per_testcase(_, Config) ->
 
 no_data_frame_on_zero(Config) ->
     one_frame({#frame_header{length=2,type=?DATA,stream_id=0},
-               http2_frame_data:new(<<1,2>>)}, Config).
+               h2_frame_data:new(<<1,2>>)}, Config).
 
 no_headers_frame_on_zero(Config) ->
     one_frame({#frame_header{length=2,type=?HEADERS,stream_id=0},
-               http2_frame_headers:new(<<1,2>>)}, Config).
+               h2_frame_headers:new(<<1,2>>)}, Config).
 
 no_priority_frame_on_zero(Config) ->
     one_frame({#frame_header{length=5,type=?PRIORITY,stream_id=0},
-               http2_frame_priority:new(0, 1, 1)}, Config).
+               h2_frame_priority:new(0, 1, 1)}, Config).
 
 no_rst_stream_frame_on_zero(Config) ->
     one_frame({#frame_header{length=4,type=?RST_STREAM,stream_id=0},
-               http2_frame_rst_stream:new(?PROTOCOL_ERROR)}, Config).
+               h2_frame_rst_stream:new(?PROTOCOL_ERROR)}, Config).
 
 no_push_promise_frame_on_zero(Config) ->
     one_frame({#frame_header{length=2,type=?PUSH_PROMISE,stream_id=0},
-               http2_frame_push_promise:new(100, <<1,2>>)}, Config).
+               h2_frame_push_promise:new(100, <<1,2>>)}, Config).
 
 no_continuation_frame_on_zero(Config) ->
     one_frame({#frame_header{length=2,type=?CONTINUATION,stream_id=0},
-               http2_frame_continuation:new(<<1,2>>)}, Config).
+               h2_frame_continuation:new(<<1,2>>)}, Config).
 
 no_settings_frame_on_non_zero(Config) ->
     one_frame({#frame_header{length=0,type=?SETTINGS,stream_id=1},
@@ -55,11 +55,11 @@ no_settings_frame_on_non_zero(Config) ->
 
 no_ping_frame_on_non_zero(Config) ->
     one_frame({#frame_header{length=8,type=?PING,stream_id=1},
-               http2_frame_ping:new(<<1:64>>)}, Config).
+               h2_frame_ping:new(<<1:64>>)}, Config).
 
 no_goaway_frame_on_non_zero(Config) ->
     one_frame({#frame_header{length=4,type=?GOAWAY,stream_id=1},
-               http2_frame_goaway:new(5, ?PROTOCOL_ERROR)}, Config).
+               h2_frame_goaway:new(5, ?PROTOCOL_ERROR)}, Config).
 
 
 one_frame(Frame, _Config) ->
@@ -67,8 +67,8 @@ one_frame(Frame, _Config) ->
     http2c:send_unaltered_frames(Client, [Frame]),
     Resp = http2c:wait_for_n_frames(Client, 0, 1),
     ct:pal("Resp: ~p", [Resp]),
-    ?assertEqual(1, length(Resp)),
+    ?assertEqual(1, (length(Resp))),
     [{GoAwayH, GoAway}] = Resp,
-    ?assertEqual(?GOAWAY, GoAwayH#frame_header.type),
-    ?assertEqual(?PROTOCOL_ERROR, http2_frame_goaway:error_code(GoAway)),
+    ?assertEqual(?GOAWAY, (GoAwayH#frame_header.type)),
+    ?assertEqual(?PROTOCOL_ERROR, (h2_frame_goaway:error_code(GoAway))),
     ok.

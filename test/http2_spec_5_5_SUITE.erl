@@ -37,13 +37,13 @@ sends_unknown_extension_frame(_Config) ->
            stream_id=0,
            length=8
           },
-        http2_frame_ping:new(Data)
+        h2_frame_ping:new(Data)
        }
       ]),
 
     Resp = http2c:wait_for_n_frames(Client, 0, 1),
     ct:pal("Resp: ~p", [Resp]),
-    ?assertEqual(1, length(Resp)),
+    ?assertEqual(1, (length(Resp))),
     [{PingH, _PingBody}] = Resp,
-    ?assertEqual(?PING, PingH#frame_header.type),
+    ?assertEqual(?PING, (PingH#frame_header.type)),
     ok.

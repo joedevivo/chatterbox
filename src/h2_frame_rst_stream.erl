@@ -1,5 +1,7 @@
--module(http2_frame_rst_stream).
+-module(h2_frame_rst_stream).
 -include("http2.hrl").
+-behaviour(h2_frame).
+
 -export([
          new/1,
          error_code/1,
@@ -13,8 +15,6 @@
 }).
 -type payload() :: #rst_stream{}.
 -export_type([payload/0]).
-
--behaviour(http2_frame).
 
 -spec new(error_code()) -> payload().
 new(ErrorCode) ->

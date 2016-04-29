@@ -60,10 +60,10 @@ exceed_server_connection_receive_window(_Config) ->
     Resp = http2c:wait_for_n_frames(Client, 0, 1),
     ct:pal("Resp: ~p", [Resp]),
 
-    ?assertEqual(1 , length(Resp)),
+    ?assertEqual(1, (length(Resp))),
     [{GoAwayH, GoAway}] = Resp,
-    ?assertEqual(?GOAWAY, GoAwayH#frame_header.type),
-    ?assertEqual(?FLOW_CONTROL_ERROR, http2_frame_goaway:error_code(GoAway)),
+    ?assertEqual(?GOAWAY, (GoAwayH#frame_header.type)),
+    ?assertEqual(?FLOW_CONTROL_ERROR, (h2_frame_goaway:error_code(GoAway))),
     ok.
 
 exceed_server_stream_receive_window(_Config) ->
@@ -75,16 +75,16 @@ exceed_server_stream_receive_window(_Config) ->
     %% now challenge that
 
     {WUH, _} = WindowUpdate,
-    ?assertEqual(?WINDOW_UPDATE, WUH#frame_header.type),
+    ?assertEqual(?WINDOW_UPDATE, (WUH#frame_header.type)),
 
     %% Check for RST_STREAM
     Resp = http2c:wait_for_n_frames(Client, 3, 1),
     ct:pal("Resp: ~p", [Resp]),
 
-    ?assertEqual(1, length(Resp)),
+    ?assertEqual(1, (length(Resp))),
     [{RstStreamH, RstStream}] = Resp,
-    ?assertEqual(?RST_STREAM, RstStreamH#frame_header.type),
-    ?assertEqual(?FLOW_CONTROL_ERROR, http2_frame_rst_stream:error_code(RstStream)),
+    ?assertEqual(?RST_STREAM, (RstStreamH#frame_header.type)),
+    ?assertEqual(?FLOW_CONTROL_ERROR, (h2_frame_rst_stream:error_code(RstStream))),
     ok.
 
 server_buffer_response(_Config) ->
@@ -100,7 +100,7 @@ server_buffer_response(_Config) ->
                         type=?HEADERS,
                         flags=?FLAG_END_HEADERS bor ?FLAG_END_STREAM,
                         stream_id=3},
-          http2_frame_headers:new(HeadersBin)
+          h2_frame_headers:new(HeadersBin)
          },
     http2c:send_unaltered_frames(Client, [HF]),
 
@@ -126,7 +126,7 @@ data_frame_size(Frames) ->
     DataFrames = lists:filter(fun({#frame_header{type=?DATA}, _}) -> true;
                                  (_) -> false end, Frames),
     lists:foldl(fun({_FH, DataP}, Acc) ->
-                        Data = http2_frame_data:data(DataP),
+                        Data = h2_frame_data:data(DataP),
                         Acc + byte_size(Data) end,
                 0, DataFrames).
 
@@ -135,7 +135,7 @@ send_window_update(Client, Size) ->
                                  [{#frame_header{length=4,
                                                  type=?WINDOW_UPDATE,
                                                  stream_id=3},
-                                   http2_frame_window_update:new(Size)
+                                   h2_frame_window_update:new(Size)
                                   }
                                  ]).
 send_n_bytes(N) ->
@@ -162,7 +162,7 @@ send_n_bytes(N) ->
                       flags=?FLAG_END_HEADERS,
                       stream_id=3
                      },
-                   http2_frame_headers:new(HeadersBin)
+                   h2_frame_headers:new(HeadersBin)
                   },
 
     http2c:send_unaltered_frames(Client, [HeaderFrame]),
@@ -172,7 +172,7 @@ send_n_bytes(N) ->
 
     %% So now, send N bytes and we should get some desired error.
     Data = crypto:rand_bytes(N),
-    Frames = http2_frame_data:to_frames(3, Data, #settings{}),
+    Frames = h2_frame_data:to_frames(3, Data, #settings{}),
 
     http2c:send_unaltered_frames(Client, Frames),
 

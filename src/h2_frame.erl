@@ -1,4 +1,4 @@
--module(http2_frame).
+-module(h2_frame).
 
 -include("http2.hrl").
 
@@ -150,25 +150,25 @@ read_payload({Transport, Socket}, Header=#frame_header{length=L}, Timeout) ->
                                | {error, error_code()}
                                | {error, stream_id(), error_code(), binary()}.
 read_binary_payload(Bin, Header = #frame_header{type=?DATA}) ->
-    http2_frame_data:read_binary(Bin, Header);
+    h2_frame_data:read_binary(Bin, Header);
 read_binary_payload(Bin, Header = #frame_header{type=?HEADERS}) ->
-    http2_frame_headers:read_binary(Bin, Header);
+    h2_frame_headers:read_binary(Bin, Header);
 read_binary_payload(Bin, Header = #frame_header{type=?PRIORITY}) ->
-    http2_frame_priority:read_binary(Bin, Header);
+    h2_frame_priority:read_binary(Bin, Header);
 read_binary_payload(Bin, Header = #frame_header{type=?RST_STREAM}) ->
-    http2_frame_rst_stream:read_binary(Bin, Header);
+    h2_frame_rst_stream:read_binary(Bin, Header);
 read_binary_payload(Bin, Header = #frame_header{type=?SETTINGS}) ->
-    http2_frame_settings:read_binary(Bin, Header);
+    h2_frame_settings:read_binary(Bin, Header);
 read_binary_payload(Bin, Header = #frame_header{type=?PUSH_PROMISE}) ->
-    http2_frame_push_promise:read_binary(Bin, Header);
+    h2_frame_push_promise:read_binary(Bin, Header);
 read_binary_payload(Bin, Header = #frame_header{type=?PING}) ->
-    http2_frame_ping:read_binary(Bin, Header);
+    h2_frame_ping:read_binary(Bin, Header);
 read_binary_payload(Bin, Header = #frame_header{type=?GOAWAY}) ->
-    http2_frame_goaway:read_binary(Bin, Header);
+    h2_frame_goaway:read_binary(Bin, Header);
 read_binary_payload(Bin, Header = #frame_header{type=?WINDOW_UPDATE}) ->
-    http2_frame_window_update:read_binary(Bin, Header);
+    h2_frame_window_update:read_binary(Bin, Header);
 read_binary_payload(Bin, Header = #frame_header{type=?CONTINUATION}) ->
-    http2_frame_continuation:read_binary(Bin, Header);
+    h2_frame_continuation:read_binary(Bin, Header);
 read_binary_payload(Bin, Header) ->
     read_unsupported_frame_binary(Bin, Header).
 
@@ -182,25 +182,25 @@ read_unsupported_frame_binary(Bin,
 
 -spec format_payload(frame()) -> iodata().
 format_payload({#frame_header{type=?DATA}, P}) ->
-    http2_frame_data:format(P);
+    h2_frame_data:format(P);
 format_payload({#frame_header{type=?HEADERS}, P}) ->
-    http2_frame_headers:format(P);
+    h2_frame_headers:format(P);
 format_payload({#frame_header{type=?PRIORITY}, P}) ->
-    http2_frame_priority:format(P);
+    h2_frame_priority:format(P);
 format_payload({#frame_header{type=?RST_STREAM}, P}) ->
-    http2_frame_rst_stream:format(P);
+    h2_frame_rst_stream:format(P);
 format_payload({#frame_header{type=?SETTINGS}, P}) ->
-    http2_frame_settings:format(P);
+    h2_frame_settings:format(P);
 format_payload({#frame_header{type=?PUSH_PROMISE}, P}) ->
-    http2_frame_push_promise:format(P);
+    h2_frame_push_promise:format(P);
 format_payload({#frame_header{type=?PING}, P}) ->
-    http2_frame_ping:format(P);
+    h2_frame_ping:format(P);
 format_payload({#frame_header{type=?GOAWAY}, P}) ->
-    http2_frame_goaway:format(P);
+    h2_frame_goaway:format(P);
 format_payload({#frame_header{type=?WINDOW_UPDATE}, P}) ->
-    http2_frame_window_update:format(P);
+    h2_frame_window_update:format(P);
 format_payload({#frame_header{type=?CONTINUATION}, P}) ->
-    http2_frame_continuation:format(P);
+    h2_frame_continuation:format(P);
 format_payload({_, _P}) ->
     "Unsupported Frame".
 
@@ -238,16 +238,16 @@ payload_to_binary(P) ->
 
     Bin =
         case Type of
-            ?DATA -> http2_frame_data:to_binary(P);
-            ?HEADERS -> http2_frame_headers:to_binary(P);
-            ?PRIORITY -> http2_frame_priority:to_binary(P);
-            ?RST_STREAM -> http2_frame_rst_stream:to_binary(P);
-            ?SETTINGS ->  http2_frame_settings:to_binary(P);
-            ?PUSH_PROMISE -> http2_frame_push_promise:to_binary(P);
-            ?PING -> http2_frame_ping:to_binary(P);
-            ?GOAWAY -> http2_frame_goaway:to_binary(P);
-            ?WINDOW_UPDATE -> http2_frame_window_update:to_binary(P);
-            ?CONTINUATION -> http2_frame_continuation:to_binary(P)
+            ?DATA -> h2_frame_data:to_binary(P);
+            ?HEADERS -> h2_frame_headers:to_binary(P);
+            ?PRIORITY -> h2_frame_priority:to_binary(P);
+            ?RST_STREAM -> h2_frame_rst_stream:to_binary(P);
+            ?SETTINGS -> h2_frame_settings:to_binary(P);
+            ?PUSH_PROMISE -> h2_frame_push_promise:to_binary(P);
+            ?PING -> h2_frame_ping:to_binary(P);
+            ?GOAWAY -> h2_frame_goaway:to_binary(P);
+            ?WINDOW_UPDATE -> h2_frame_window_update:to_binary(P);
+            ?CONTINUATION -> h2_frame_continuation:to_binary(P)
         end,
     {Type, Bin}.
 

@@ -13,13 +13,9 @@ implementation of [RFC-7541](https://tools.ietf.org/html/rfc7541).
 
 Chatterbox is a `rebar3` jam. Get into it! rebar3.org
 
-## Setting up Firefox go to the URL `about:config` and search for the
-setting `network.http.spdy.enforce.tls.profile` and toggle it to
-`false`
-
 ## HTTP/2 Connections
 
-Chatterbox provides a module `http2_connection` which models (you
+Chatterbox provides a module `h2_connection` which models (you
 guessed it!) an HTTP/2 connection. This gen_fsm can represent either
 side of an HTTP/2 connection (i.e. a client *or* server). Really, the
 only difference is in how you start the connection.
@@ -50,7 +46,13 @@ RootDir = "/path/to/content",
 
 application:set_env(
         chatterbox,
-        {chatterbox_static_content_handler, [{root_dir, RootDir}]}),
+        stream_callback_mod,
+        chatterbox_static_stream),
+
+application:set_env(
+        chatterbox,
+        chatterbox_static_stream,
+        [{root_dir, RootDir}]),
 
 {ok, _RanchPid} =
     ranch:start_listener(
@@ -81,14 +83,14 @@ Then it should be as easy as pointing Firefox to
 
 ### Client Side Connections
 
-We'll start up http2_connection a little
-differently. `http2_client:start_link/*` will take care of the
+We'll start up h2_connection a little
+differently. `h2_client:start_link/*` will take care of the
 differences.
 
 Here's how to use it!
 
 ```erlang
-{ok, Pid} = http2_client:start_link(),
+{ok, Pid} = h2_client:start_link(),
 
 RequestHeaders = [
            {<<":method">>, <<"GET">>},
@@ -103,14 +105,14 @@ RequestHeaders = [
 RequestBody = <<>>,
 
 {ok, {ResponseHeaders, ResponseBody}}
-    = http2_client:sync_request(Pid, RequestHeaders, RequestBody).
+    = h2_client:sync_request(Pid, RequestHeaders, RequestBody).
 ```
 
 But wait! There's more. If you want to be smart about multiplexing,
 you can make an async request on a stream like this!
 
 ``` erlang
-{ok, StreamId} = http2_client:send_request(Pid, RequestHeaders, <<>>).
+{ok, StreamId} = h2_client:send_request(Pid, RequestHeaders, <<>>).
 ```
 
 Now you can just hang around and wait. I'm pretty sure (read:
@@ -123,14 +125,14 @@ So you can use a receive block, like this
 ```erlang
 receive
     {'END_STREAM', StreamId} ->
-        {ok, {ResponseHeaders, ResponseBody}} = http2_client:get_response(Pid, StreamId)
+        {ok, {ResponseHeaders, ResponseBody}} = h2_client:get_response(Pid, StreamId)
 end,
 ```
 
 Or you can manually check for a response by calling
 
 ```erlang
-http2_client:get_response(Pid, StreamId),
+h2_client:get_response(Pid, StreamId),
 ```
 
 which will return an `{error, stream_not_finished}` if

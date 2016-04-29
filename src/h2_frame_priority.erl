@@ -1,6 +1,6 @@
--module(http2_frame_priority).
-
+-module(h2_frame_priority).
 -include("http2.hrl").
+-behaviour(h2_frame).
 
 -export(
    [
@@ -19,8 +19,6 @@
   }).
 -type payload() :: #priority{}.
 -export_type([payload/0]).
-
--behaviour(http2_frame).
 
 -spec format(payload()) -> iodata().
 format(Payload) ->

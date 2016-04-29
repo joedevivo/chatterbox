@@ -31,10 +31,10 @@ sends_invalid_push_setting(_Config) ->
 
     Resp = http2c:wait_for_n_frames(Client, 0, 1),
     ct:pal("Resp: ~p", [Resp]),
-    ?assertEqual(1, length(Resp)),
+    ?assertEqual(1, (length(Resp))),
     [{GoAwayH, GoAway}] = Resp,
-    ?assertEqual(?GOAWAY, GoAwayH#frame_header.type),
-    ?assertEqual(?PROTOCOL_ERROR, http2_frame_goaway:error_code(GoAway)),
+    ?assertEqual(?GOAWAY, (GoAwayH#frame_header.type)),
+    ?assertEqual(?PROTOCOL_ERROR, (h2_frame_goaway:error_code(GoAway))),
     ok.
 
 sends_value_above_max_flow_control_window_size(_Config) ->
@@ -45,10 +45,10 @@ sends_value_above_max_flow_control_window_size(_Config) ->
 
     Resp = http2c:wait_for_n_frames(Client, 0, 1),
     ct:pal("Resp: ~p", [Resp]),
-    ?assertEqual(1, length(Resp)),
+    ?assertEqual(1, (length(Resp))),
     [{GoAwayH, GoAway}] = Resp,
-    ?assertEqual(?GOAWAY, GoAwayH#frame_header.type),
-    ?assertEqual(?FLOW_CONTROL_ERROR, http2_frame_goaway:error_code(GoAway)),
+    ?assertEqual(?GOAWAY, (GoAwayH#frame_header.type)),
+    ?assertEqual(?FLOW_CONTROL_ERROR, (h2_frame_goaway:error_code(GoAway))),
     ok.
 
 sends_max_frame_size_too_small(_Config) ->
@@ -59,11 +59,11 @@ sends_max_frame_size_too_small(_Config) ->
 
     Resp = http2c:wait_for_n_frames(Client, 0, 1),
     ct:pal("Resp: ~p", [Resp]),
-    ?assertEqual(1, length(Resp)),
-    [{GoAwayH, GoAway}] = Resp,
-    ?assertEqual(?GOAWAY, GoAwayH#frame_header.type),
-    ?assertEqual(?PROTOCOL_ERROR, http2_frame_goaway:error_code(GoAway)),
-    ok.
+        ?assertEqual(1, (length(Resp))),
+        [{GoAwayH, GoAway}] = Resp,
+        ?assertEqual(?GOAWAY, (GoAwayH#frame_header.type)),
+        ?assertEqual(?PROTOCOL_ERROR, (h2_frame_goaway:error_code(GoAway))),
+        ok.
 
 sends_max_frame_size_too_big(_Config) ->
         {ok, Client} = http2c:start_link(),
@@ -73,8 +73,8 @@ sends_max_frame_size_too_big(_Config) ->
 
     Resp = http2c:wait_for_n_frames(Client, 0, 1),
     ct:pal("Resp: ~p", [Resp]),
-    ?assertEqual(1, length(Resp)),
-    [{GoAwayH, GoAway}] = Resp,
-    ?assertEqual(?GOAWAY, GoAwayH#frame_header.type),
-    ?assertEqual(?PROTOCOL_ERROR, http2_frame_goaway:error_code(GoAway)),
-    ok.
+        ?assertEqual(1, (length(Resp))),
+        [{GoAwayH, GoAway}] = Resp,
+        ?assertEqual(?GOAWAY, (GoAwayH#frame_header.type)),
+        ?assertEqual(?PROTOCOL_ERROR, (h2_frame_goaway:error_code(GoAway))),
+        ok.

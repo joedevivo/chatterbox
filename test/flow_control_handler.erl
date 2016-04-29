@@ -4,7 +4,7 @@
 
 -define(SEND_BYTES, 68).
 
--behaviour(http2_stream).
+-behaviour(h2_stream).
 
 -export([
          init/2,
@@ -46,10 +46,9 @@ on_request_end_stream(State=#state{conn_pid=ConnPid,
     ResponseHeaders = [
                        {<<":status">>,<<"200">>}
                       ],
-    http2_connection:send_headers(ConnPid, StreamId, ResponseHeaders),
-    http2_connection:send_body(ConnPid, StreamId, crypto:rand_bytes(?SEND_BYTES),
-                               [{send_end_stream, false}]),
+    h2_connection:send_headers(ConnPid, StreamId, ResponseHeaders),
+    h2_connection:send_body(ConnPid, StreamId, crypto:rand_bytes(?SEND_BYTES),
+                            [{send_end_stream, false}]),
     timer:sleep(200),
-    http2_connection:send_body(ConnPid, StreamId, crypto:rand_bytes(?SEND_BYTES)),
+    h2_connection:send_body(ConnPid, StreamId, crypto:rand_bytes(?SEND_BYTES)),
     {ok, State}.
-

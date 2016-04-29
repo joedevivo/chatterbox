@@ -35,8 +35,8 @@ init([]) ->
     {ok, ListenSocket} = gen_tcp:listen(Port, Options),
     Restart = {simple_one_for_one, 60, 3600},
     Children = [{socket,
-                {http2_connection, start_server_link, [{Transport, ListenSocket}, SSLOptions, Http2Settings]},
-                temporary, 1000, worker, [http2_socket]}],
+                {h2_connection, start_server_link, [{Transport, ListenSocket}, SSLOptions, Http2Settings]},
+                temporary, 1000, worker, [h2_connection]}],
     {ok, {Restart, Children}}.
 
 start_socket() ->

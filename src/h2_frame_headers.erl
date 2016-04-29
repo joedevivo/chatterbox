@@ -1,8 +1,6 @@
--module(http2_frame_headers).
-
+-module(h2_frame_headers).
 -include("http2.hrl").
-
--behaviour(http2_frame).
+-behaviour(h2_frame).
 
 -export(
    [
@@ -51,15 +49,15 @@ read_binary(_,
     {error, 0, ?PROTOCOL_ERROR, <<>>};
 read_binary(Bin, H = #frame_header{length=L}) ->
     <<PayloadBin:L/binary,Rem/bits>> = Bin,
-    case http2_padding:read_possibly_padded_payload(PayloadBin, H) of
+    case h2_padding:read_possibly_padded_payload(PayloadBin, H) of
         {error, Code} ->
             {error, 0, Code, Rem};
         Data ->
             {Priority, PSID, HeaderFragment} =
                 case is_priority(H) of
                     true ->
-                        {P, PRem} = http2_frame_priority:read_priority(Data),
-                        PStream = http2_frame_priority:stream_id(P),
+                        {P, PRem} = h2_frame_priority:read_priority(Data),
+                        PStream = h2_frame_priority:stream_id(P),
                         {P, PStream, PRem};
                     false ->
                         {undefined, undefined, Data}
@@ -108,20 +106,20 @@ to_binary(#headers{
         undefined ->
             BF;
         _ ->
-            [http2_frame_priority:to_binary(P), BF]
+            [h2_frame_priority:to_binary(P), BF]
     end.
 
 -spec from_frames([http2_frame:frame()], binary()) -> binary().
 from_frames([{#frame_header{type=?HEADERS},#headers{block_fragment=BF}}|Continuations])->
     from_frames(Continuations, BF);
 from_frames([{#frame_header{type=?PUSH_PROMISE},PP}|Continuations])->
-    BF = http2_frame_push_promise:block_fragment(PP),
+    BF = h2_frame_push_promise:block_fragment(PP),
     from_frames(Continuations, BF).
 
 from_frames([], Acc) ->
     Acc;
 from_frames([{#frame_header{type=?CONTINUATION},Cont}|Continuations], Acc) ->
-    BF = http2_frame_continuation:block_fragment(Cont),
+    BF = h2_frame_continuation:block_fragment(Cont),
     from_frames(Continuations, <<Acc/binary,BF/binary>>).
 
 -spec split(Binary::binary(),
@@ -189,6 +187,6 @@ build_frames_(StreamId, [NextChunk|Rest], Acc) ->
          flags=0,
          length=byte_size(NextChunk)
         },
-      http2_frame_continuation:new(NextChunk)
+      h2_frame_continuation:new(NextChunk)
      },
     build_frames_(StreamId, Rest, [NextFrame|Acc]).

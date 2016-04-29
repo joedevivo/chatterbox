@@ -42,7 +42,7 @@ times_out_on_no_ack_of_server_settings(Config) ->
 
     %% Now send client settings so the problem becomes that we do not ack
     ClientSettings = #settings{},
-    Bin = http2_frame_settings:send(#settings{}, ClientSettings),
+    Bin = h2_frame_settings:send(#settings{}, ClientSettings),
     Transport:send(Socket, Bin),
 
     %% Settings Frame
@@ -61,9 +61,9 @@ times_out_on_no_ack_of_server_settings(Config) ->
     ct:pal("waiting for timeout, should arrive in 5000ms"),
     {ok, GoAwayBin} = Transport:recv(Socket, 0, 6000),
     ct:pal("GoAwayBin: ~p", [GoAwayBin]),
-    [{GoAwayH, GoAway}] = http2_frame:from_binary(GoAwayBin),
-    ?assertEqual(?GOAWAY, GoAwayH#frame_header.type),
-    ?assertEqual(?SETTINGS_TIMEOUT, http2_frame_goaway:error_code(GoAway)),
+    [{GoAwayH, GoAway}] = h2_frame:from_binary(GoAwayBin),
+    ?assertEqual(?GOAWAY, (GoAwayH#frame_header.type)),
+    ?assertEqual(?SETTINGS_TIMEOUT, (h2_frame_goaway:error_code(GoAway))),
     ok.
 
 protocol_error_on_never_send_client_settings(Config) ->
@@ -97,9 +97,9 @@ protocol_error_on_never_send_client_settings(Config) ->
     {ok, GoAwayBin} = Transport:recv(Socket, 0, 6000),
 
     ct:pal("GoAwayBin: ~p", [GoAwayBin]),
-    [{GoAwayH, GoAway}] = http2_frame:from_binary(GoAwayBin),
-    ?assertEqual(?GOAWAY, GoAwayH#frame_header.type),
-    ?assertEqual(?SETTINGS_TIMEOUT, http2_frame_goaway:error_code(GoAway)),
+    [{GoAwayH, GoAway}] = h2_frame:from_binary(GoAwayBin),
+    ?assertEqual(?GOAWAY, (GoAwayH#frame_header.type)),
+    ?assertEqual(?SETTINGS_TIMEOUT, (h2_frame_goaway:error_code(GoAway))),
     ok.
 
 default_setting_honored_before_ack(_Config) ->
