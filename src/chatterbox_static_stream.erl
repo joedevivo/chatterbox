@@ -38,8 +38,6 @@ on_receive_request_data(Bin, State)->
 on_request_end_stream(State=#cb_static{connection_pid=ConnPid,
                                        stream_id=StreamId}) ->
     lager:info("on_request_end_stream(~p)", [State]),
-    %StreamId = http2_stream:stream_id(),
-    %ConnPid = http2_stream:connection(),
     Headers = State#cb_static.req_headers,
 
     Method = proplists:get_value(<<":method">>, Headers),
