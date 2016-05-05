@@ -86,7 +86,7 @@
           next_available_stream_id = 2 :: stream_id(),
           streams :: h2_stream_set:stream_set(),
           stream_callback_mod = application:get_env(chatterbox, stream_callback_mod, chatterbox_static_stream) :: module(),
-          buffer = empty :: empty | {binary, binary()} | {frame, frame_header(), binary()},
+          buffer = empty :: empty | {binary, binary()} | {frame, h2_frame:header(), binary()},
           continuation = undefined :: undefined | #continuation_state{},
           flow_control = auto :: auto | manual
 }).
@@ -1351,7 +1351,7 @@ handle_socket_data(Data,
     end,
     %% What is buffer?
     %% empty - nothing, yay
-    %% {frame, frame_header(), binary()} - Frame Header processed, Payload not big enough
+    %% {frame, h2_frame:header(), binary()} - Frame Header processed, Payload not big enough
     %% {binary, binary()} - If we're here, it must mean that Bin was too small to even be a header
     ToParse = case Buffer of
         empty ->

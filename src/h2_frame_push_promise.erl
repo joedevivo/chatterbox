@@ -18,7 +18,8 @@
           block_fragment :: binary()
 }).
 -type payload() :: #push_promise{}.
--export_type([payload/0]).
+-type frame() :: {h2_frame:header(), payload()}.
+-export_type([payload/0, frame/0]).
 
 -spec block_fragment(payload()) -> binary().
 block_fragment(#push_promise{block_fragment=BF}) ->
@@ -39,7 +40,7 @@ new(StreamId, Bin) ->
        block_fragment=Bin
       }.
 
--spec read_binary(binary(), frame_header()) ->
+-spec read_binary(binary(), h2_frame:header()) ->
                          {ok, payload(), binary()}
                        | {error, stream_id(), error_code(), binary()}.
 read_binary(_,
@@ -58,7 +59,7 @@ read_binary(Bin, H=#frame_header{length=L}) ->
     {ok, Payload, Rem}.
 
 -spec to_frame(pos_integer(), pos_integer(), hpack:headers(), hpack:context()) ->
-                      {{frame_header(), payload()}, hpack:context()}.
+                      {{h2_frame:header(), payload()}, hpack:context()}.
 %% Maybe break this up into continuations like the data frame
 to_frame(StreamId, PStreamId, Headers, EncodeContext) ->
     {ok, {HeadersToSend, NewContext}} = hpack:encode(Headers, EncodeContext),

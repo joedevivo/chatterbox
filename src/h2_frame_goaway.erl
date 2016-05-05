@@ -17,7 +17,8 @@
           additional_debug_data = <<>> :: binary()
 }).
 -type payload() :: #goaway{}.
--export_type([payload/0]).
+-type frame() :: {h2_frame:header(), payload()}.
+-export_type([payload/0, frame/0]).
 
 -spec error_code(payload()) -> error_code().
 error_code(#goaway{error_code=EC}) ->
@@ -35,7 +36,7 @@ new(StreamId, ErrorCode) ->
        error_code = ErrorCode
       }.
 
--spec read_binary(binary(), frame_header()) ->
+-spec read_binary(binary(), h2_frame:header()) ->
                          {ok, payload(), binary()}
                        | {error, stream_id(), error_code(), binary()}.
 read_binary(Bin,

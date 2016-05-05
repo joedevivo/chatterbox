@@ -15,7 +15,8 @@
           block_fragment :: binary()
 }).
 -type payload() :: #continuation{}.
--export_type([payload/0]).
+-type frame() :: {h2_frame:header(), payload()}.
+-export_type([payload/0, frame/0]).
 
 -spec block_fragment(payload()) -> binary().
 block_fragment(#continuation{block_fragment=BF}) ->
@@ -26,7 +27,7 @@ new(Bin) ->
     #continuation{
        block_fragment=Bin
       }.
--spec read_binary(binary(), frame_header()) ->
+-spec read_binary(binary(), h2_frame:header()) ->
                          {ok, payload(), binary()}
                        | {error, stream_id(), error_code(), binary()}.
 read_binary(_,

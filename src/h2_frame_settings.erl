@@ -17,15 +17,19 @@
 
 %%TODO
 -type payload() :: #settings{} | {settings, proplist()}.
+-type frame() :: {h2_frame:header(), payload()}.
 
 -type name() :: binary().
 -type property() :: {name(), any()}.
 -type proplist() :: [property()].
 
--export_type([payload/0, name/0, property/0, proplist/0]).
+-export_type([payload/0, name/0, property/0, proplist/0, frame/0]).
 
 
--spec format(payload()|binary()|{settings, [proplists:property()]}) -> iodata().
+-spec format(payload()
+           | binary()
+           | {settings, [proplists:property()]}
+            ) -> iodata().
 format(<<>>) -> "Ack!";
 format(#settings{
         header_table_size        = HTS,
@@ -60,7 +64,7 @@ format({settings, PList}) ->
               PList),
     io_lib:format("~p", [L]).
 
--spec read_binary(binary(), frame_header()) ->
+-spec read_binary(binary(), h2_frame:header()) ->
                          {ok, payload(), binary()}
                        | {error, stream_id(), error_code(), binary()}.
 read_binary(Bin,

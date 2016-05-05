@@ -16,7 +16,8 @@
           window_size_increment :: non_neg_integer()
          }).
 -type payload() :: #window_update{}.
--export_type([payload/0]).
+-type frame() :: {h2_frame:header(), payload()}.
+-export_type([payload/0, frame/0]).
 
 -spec format(payload()) -> iodata().
 format(Payload) ->
@@ -28,7 +29,7 @@ new(Increment) ->
 
 
 -spec read_binary(Bin::binary(),
-                      Header::frame_header()) ->
+                  Header::h2_frame:header()) ->
                          {ok, payload(), binary()}
                        | {error, stream_id(), error_code(), binary()}.
 read_binary(_,

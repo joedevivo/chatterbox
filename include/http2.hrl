@@ -20,7 +20,7 @@
                     | ?GOAWAY
                     | ?WINDOW_UPDATE
                     | ?CONTINUATION
-                    | integer(). %% boo!
+                    | integer(). %% Currently unsupported future frame types
 
 -define(FT, fun(?DATA) -> "DATA";
                (?HEADERS) -> "HEADERS";
@@ -90,7 +90,6 @@
     flags = 0   :: non_neg_integer(),
     stream_id   :: stream_id()
     }).
--type frame_header() :: #frame_header{}.
 
 -type transport() :: gen_tcp | ssl.
 -type socket() :: {gen_tcp, inet:socket()|undefined} | {ssl, ssl:sslsocket()|undefined}.

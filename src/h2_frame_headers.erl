@@ -19,7 +19,8 @@
           block_fragment :: binary()
         }).
 -type payload() :: #headers{}.
--export_type([payload/0]).
+-type frame() :: {h2_frame:header(), payload()}.
+-export_type([payload/0, frame/0]).
 
 -spec format(payload()) -> iodata().
 format(Payload) ->
@@ -39,7 +40,7 @@ new(Priority, BlockFragment) ->
       }.
 
 -spec read_binary(binary(),
-                  frame_header()) ->
+                  h2_frame:header()) ->
                          {ok, payload(), binary()}
                        | {error, stream_id(), error_code(), binary()}.
 read_binary(_,
