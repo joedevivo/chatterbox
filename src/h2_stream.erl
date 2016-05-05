@@ -5,7 +5,7 @@
 -export([
          start_link/4,
          send_pp/2,
-         send_frame/2,
+         send_data/2,
          stream_id/0,
          connection/0,
          send_window_update/1,
@@ -114,10 +114,11 @@ start_link(StreamId, Connection, CallbackModule, Socket) ->
 send_pp(Pid, Headers) ->
     gen_fsm:send_event(Pid, {send_pp, Headers}).
 
--spec send_frame(pid(), http2_frame:frame()) ->
+%% This can only send data frames
+-spec send_data(pid(), http2_frame:frame()) ->
                         ok | flow_control.
-send_frame(Pid, Frame) ->
-    gen_fsm:send_event(Pid, {send_frame, Frame}).
+send_data(Pid, Frame) ->
+    gen_fsm:send_event(Pid, {send_data, Frame}).
 
 -spec stream_id() -> stream_id().
 stream_id() ->
@@ -345,7 +346,7 @@ open({recv_h, Trailers},
         {error, Code} ->
             rst_stream_(Code, Stream)
     end;
-open({send_frame,
+open({send_data,
       {#frame_header{
           type=?DATA,
           flags=Flags
@@ -363,6 +364,14 @@ open({send_frame,
                 open
         end,
     {next_state, NextState, Stream};
+open(
+  {send_h, Headers},
+  #stream_state{}=Stream) ->
+    {next_state,
+     open,
+     Stream#stream_state{
+       response_headers=Headers
+      }};
 open(Msg, Stream) ->
     lager:warning("Some unexpected message in open state. ~p, ~p", [Msg, Stream]),
     {next_state, open, Stream}.
@@ -376,7 +385,7 @@ half_closed_remote(
        response_headers=Headers
       }};
 half_closed_remote(
-                  {send_frame,
+                  {send_data,
                    {
                      #frame_header{
                         flags=Flags,

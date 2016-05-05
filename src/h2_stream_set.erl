@@ -734,7 +734,7 @@ s_send_what_we_can(SWS, MFS, #active_stream{}=Stream) ->
                    send_window_size=SSWS-MaxToSend}}
         end,
 
-    _Sent = h2_stream:send_frame(Stream#active_stream.pid, Frame),
+    _Sent = h2_stream:send_data(Stream#active_stream.pid, Frame),
 
     case ExitStrategy of
         max_frame_size ->
