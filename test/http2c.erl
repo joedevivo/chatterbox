@@ -42,7 +42,7 @@
           encode_context = hpack:new_context() :: hpack:context(),
           next_available_stream_id = 1 :: pos_integer(),
           incoming_frames = [] :: [http2_frame:frame()],
-          working_frame_header = undefined :: undefined | frame_header(),
+          working_frame_header = undefined :: undefined | h2_frame:header(),
           working_frame_payload = <<>> :: binary(),
           working_length = 0 :: non_neg_integer()
 }).
@@ -250,9 +250,9 @@ code_change(_OldVsn, State, _Extra) ->
 %%%===================================================================
 -spec process_binary(
     binary(),
-    frame_header() | undefined,
+    h2_frame:header() | undefined,
     binary(),
-    [http2_frame:frame()]) -> {[http2_frame:frame()], frame_header() | undefined, binary() | undefined}.
+    [http2_frame:frame()]) -> {[http2_frame:frame()], h2_frame:header() | undefined, binary() | undefined}.
 %%OMG probably a monad
 process_binary(<<>>, undefined, <<>>, Frames) -> {Frames, undefined, <<>>};
 

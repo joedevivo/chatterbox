@@ -14,7 +14,8 @@
           error_code :: error_code()
 }).
 -type payload() :: #rst_stream{}.
--export_type([payload/0]).
+-type frame() :: {h2_frame:header(), payload()}.
+-export_type([payload/0, frame/0]).
 
 -spec new(error_code()) -> payload().
 new(ErrorCode) ->
@@ -30,7 +31,7 @@ error_code(#rst_stream{error_code=EC}) ->
 format(Payload) ->
     io_lib:format("[RST Stream: ~p]", [Payload]).
 
--spec read_binary(binary(), frame_header()) ->
+-spec read_binary(binary(), h2_frame:header()) ->
                          {ok, payload(), binary()}
                        | {error, stream_id(), error_code(), binary()}.
 read_binary(_,

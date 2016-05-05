@@ -27,10 +27,11 @@
                  | http2_frame_window_update:payload()
                  | http2_frame_continuation:payload().
 
--type frame() :: {frame_header(),
+-type header() :: #frame_header{}.
+-type frame() :: {header(),
                   payload()}.
 
--export_type([frame/0, payload/0]).
+-export_type([frame/0, header/0, payload/0]).
 
 %% Each frame type should be able to be read off a binary stream. If
 %% the header is good, then it'll know how many more bytes to take off
@@ -38,7 +39,7 @@
 %% the next header, so we should return a tuple that contains the
 %% remainder as well.
 -callback read_binary(Bin::binary(),
-                      Header::frame_header()) ->
+                      Header::header()) ->
     {ok, payload(), Remainder::binary()}
   | {error, stream_id(), error_code(), binary()}.
 
@@ -52,10 +53,10 @@
 %-callback send(port(), payload()) -> ok | {error, term()}.
 
 -spec recv(binary() |
-           {frame_header(), binary()}) ->
+           {header(), binary()}) ->
                   {ok, frame(), binary()}
                 | {not_enough_header, binary()}
-                | {not_enough_payload, frame_header(), binary()}
+                | {not_enough_payload, header(), binary()}
                 | {error, stream_id(), error_code(), binary()}.
 recv(Bin)
   when is_binary(Bin), byte_size(Bin) < 9 ->
@@ -74,7 +75,7 @@ recv({Header, PayloadBin}) ->
         Error -> Error
     end.
 
--spec read(socket()) -> {frame_header(), payload()}.
+-spec read(socket()) -> frame().
 read(Socket) ->
     read(Socket, infinity).
 
@@ -93,7 +94,7 @@ read(Socket, Timeout) ->
 %% something that can handle an unknown number of bytes in a binary
 %% containing an unknown quantity of frames
 
--spec from_binary(binary()) -> [{frame_header(), payload()}].
+-spec from_binary(binary()) -> [frame()].
 from_binary(Bin) ->
     from_binary(Bin, []).
 
@@ -104,7 +105,7 @@ from_binary(Bin, Acc) ->
     {ok, Payload, Rem} = read_binary_payload(PayloadBin, Header),
     from_binary(Rem, [{Header, Payload}|Acc]).
 
--spec format_header(frame_header()) -> iodata().
+-spec format_header(header()) -> iodata().
 format_header(#frame_header{
         length = Length,
         type = Type,
@@ -113,7 +114,7 @@ format_header(#frame_header{
     }) ->
     io_lib:format("[Frame Header: L:~p, T:~p, F:~p, StrId:~p]", [Length, ?FT(Type), Flags, StreamId]).
 
--spec read_header(socket(), timeout()) -> frame_header() | {error, closed|inet:posix()}.
+-spec read_header(socket(), timeout()) -> header() | {error, closed|inet:posix()}.
 read_header({Transport, Socket}, Timeout) ->
     case Transport:recv(Socket, 9, Timeout) of
         {ok, HeaderBytes} ->
@@ -122,7 +123,7 @@ read_header({Transport, Socket}, Timeout) ->
         E -> E
     end.
 
--spec read_binary_frame_header(binary()) -> {frame_header(), binary()}.
+-spec read_binary_frame_header(binary()) -> {header(), binary()}.
 read_binary_frame_header(<<Length:24,Type:8,Flags:8,_R:1,StreamId:31,Rem/bits>>) ->
     Header = #frame_header{
         length = Length,
@@ -132,7 +133,7 @@ read_binary_frame_header(<<Length:24,Type:8,Flags:8,_R:1,StreamId:31,Rem/bits>>)
     },
     {Header, Rem}.
 
--spec read_payload(socket(), frame_header(), timeout()) ->
+-spec read_payload(socket(), header(), timeout()) ->
     {ok, payload()} | {error, closed|inet:posix()}.
 read_payload(_, Header=#frame_header{length=0}, _Timeout) ->
     {ok, FramePayload, <<>>} = read_binary_payload(<<>>, Header),
@@ -145,7 +146,7 @@ read_payload({Transport, Socket}, Header=#frame_header{length=L}, Timeout) ->
         E -> E
     end.
 
--spec read_binary_payload(binary(), frame_header()) ->
+-spec read_binary_payload(binary(), header()) ->
                                  {ok, payload(), binary()}
                                | {error, error_code()}
                                | {error, stream_id(), error_code(), binary()}.
@@ -205,7 +206,6 @@ format_payload({_, _P}) ->
     "Unsupported Frame".
 
 
-
 -spec format(frame()) -> iodata().
 format(error) -> "error";
 format({error, E}) -> io_lib:format("error : ~p",[E]);
@@ -223,7 +223,7 @@ to_binary({Header, Payload}) ->
     HeaderBin = header_to_binary(NewHeader),
     [HeaderBin, PayloadBin].
 
--spec header_to_binary(frame_header()) -> iodata().
+-spec header_to_binary(header()) -> iodata().
 header_to_binary(#frame_header{
         length=L,
         type=T,

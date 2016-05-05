@@ -15,7 +15,8 @@
     data :: iodata()
   }).
 -type payload() :: #data{}.
--export_type([payload/0]).
+-type frame() :: {h2_frame:header(), payload()}.
+-export_type([payload/0, frame/0]).
 
 -spec data(payload()) -> iodata().
 data(#data{data=D}) ->
@@ -36,7 +37,7 @@ format(Payload) ->
 new(Data) ->
     #data{data=Data}.
 
--spec read_binary(binary(), frame_header()) ->
+-spec read_binary(binary(), h2_frame:header()) ->
                          {ok, payload(), binary()}
                        | {error, stream_id(), error_code(), binary()}.
 read_binary(_, #frame_header{stream_id=0}) ->

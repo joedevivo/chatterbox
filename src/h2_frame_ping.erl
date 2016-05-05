@@ -15,7 +15,8 @@
           opaque_data :: binary()
 }).
 -type payload() :: #ping{}.
--export_type([payload/0]).
+-type frame() :: {h2_frame:header(), payload()}.
+-export_type([payload/0, frame/0]).
 
 -spec format(payload()) -> iodata().
 format(Payload) ->
@@ -25,7 +26,7 @@ format(Payload) ->
 new(Bin) ->
     #ping{opaque_data=Bin}.
 
--spec read_binary(binary(), frame_header()) ->
+-spec read_binary(binary(), h2_frame:header()) ->
                          {ok, payload(), binary()}
                        | {error, stream_id(), error_code(), binary()}.
 read_binary(_,
@@ -51,7 +52,7 @@ read_binary(_, _) ->
 to_binary(#ping{opaque_data=D}) ->
     D.
 
--spec ack(payload()) -> {frame_header(), payload()}.
+-spec ack(payload()) -> {h2_frame:header(), payload()}.
 ack(Ping) ->
     {#frame_header{
         length = 8,
