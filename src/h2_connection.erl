@@ -501,6 +501,10 @@ route_frame(F={H=#frame_header{
                     rst_stream(Stream,
                                ?FLOW_CONTROL_ERROR,
                                Conn);
+                %% If flow control is set to auto, and L > 0, send
+                %% window updates back to the peer. If L == 0, we're
+                %% not allowed to send window_updates of size 0, so we
+                %% hit the next clause
                 {false, auto, true} ->
                     %% Make window size great again
                     lager:info("[~p] Stream ~p WindowUpdate ~p",
@@ -512,6 +516,9 @@ route_frame(F={H=#frame_header{
                     {next_state,
                      connected,
                      Conn};
+                %% Either
+                %% {false, auto, true} or
+                %% {false, manual, _DoesntMatter}
                 _Tried ->
                     recv_data(Stream, F),
                     {next_state,
