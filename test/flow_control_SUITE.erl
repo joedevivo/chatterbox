@@ -23,7 +23,7 @@ init_per_testcase(
     PreChatterConfig =
         [
          {stream_callback_mod, server_connection_receive_window},
-         {initial_window_size, 64},
+         {initial_window_size, ?DEFAULT_INITIAL_WINDOW_SIZE * 2},
          {flow_control, manual}
         |Config],
     chatterbox_test_buddy:start(PreChatterConfig);
