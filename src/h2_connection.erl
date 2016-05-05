@@ -482,10 +482,11 @@ route_frame(F={H=#frame_header{
     lager:debug("[~p] Received DATA Frame for Stream ~p",
                 [Conn#connection.type, StreamId]),
     Stream = h2_stream_set:get(StreamId, Streams),
+
     case h2_stream_set:type(Stream) of
         active ->
             case {
-              h2_stream_set:recv_window_size(Stream) =< L,
+              h2_stream_set:recv_window_size(Stream) < L,
               Conn#connection.flow_control,
               L > 0
              } of
@@ -506,20 +507,22 @@ route_frame(F={H=#frame_header{
                                [Conn#connection.type, StreamId, L]),
                     h2_frame_window_update:send(Conn#connection.socket,
                                                 L, StreamId),
-                    send_window_update(self(), L);
+                    send_window_update(self(), L),
+                    recv_data(Stream, F),
+                    {next_state,
+                     connected,
+                     Conn};
                 _Tried ->
-                    ok
-            end,
-            recv_data(Stream, F),
-
-            {next_state,
-             connected,
-             Conn#connection{
-               recv_window_size=CRWS-L,
-               streams=h2_stream_set:upsert(
-                         h2_stream_set:decrement_recv_window(L, Stream),
-                         Streams)
-              }};
+                    recv_data(Stream, F),
+                    {next_state,
+                     connected,
+                     Conn#connection{
+                       recv_window_size=CRWS-L,
+                       streams=h2_stream_set:upsert(
+                                 h2_stream_set:decrement_recv_window(L, Stream),
+                                 Streams)
+                      }}
+            end;
         _ ->
             go_away(?PROTOCOL_ERROR, Conn)
     end;
@@ -772,7 +775,6 @@ route_frame(
     WSI = h2_frame_window_update:size_increment(Payload),
     lager:debug("[~p] Received WINDOW_UPDATE Frame for Stream ~p",
                 [Conn#connection.type, StreamId]),
-
     Stream = h2_stream_set:get(StreamId, Streams),
     case h2_stream_set:type(Stream) of
         idle ->
