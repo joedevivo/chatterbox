@@ -114,6 +114,7 @@ start_link(StreamId, Connection, CallbackModule, Socket) ->
 send_pp(Pid, Headers) ->
     gen_fsm:send_event(Pid, {send_pp, Headers}).
 
+%% This can only send data frames
 -spec send_data(pid(), http2_frame:frame()) ->
                         ok | flow_control.
 send_data(Pid, Frame) ->
