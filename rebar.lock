@@ -1,6 +1,6 @@
 [{<<"goldrush">>,
   {git,"git://github.com/DeadZen/goldrush.git",
-       {ref,"71e63212f12c25827e0c1b4198d37d5d018a7fec"}},
+       {ref,"212299233c7e7eb63a97be2777e1c05ebaa58dbe"}},
   1},
  {<<"hpack">>,
   {git,"git://github.com/joedevivo/hpack.git",
@@ -8,5 +8,5 @@
   0},
  {<<"lager">>,
   {git,"git://github.com/basho/lager.git",
-       {ref,"75970de664c5634c577bdedf29c87f58a16893ca"}},
+       {ref,"1c42c3bffbab49b0f06c9a916b00ca4911ae6a2f"}},
   0}].
