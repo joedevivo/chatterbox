@@ -107,7 +107,7 @@ parse_settings(<<>>, Settings) ->
 
 -spec overlay(payload(), {settings, [proplists:property()]}) -> payload().
 overlay(S, Setting) ->
-	overlay_(S, S, Setting).
+    overlay_(S, S, Setting).
 
 overlay_(OriginalS, S, {settings, [{?SETTINGS_HEADER_TABLE_SIZE, Val}|PList]}) ->
     overlay_(OriginalS, S#settings{header_table_size=Val}, {settings, PList});
