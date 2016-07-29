@@ -122,7 +122,7 @@ overlay_(OriginalS, S, {settings, [{?SETTINGS_MAX_FRAME_SIZE, Val}|PList]}) ->
 overlay_(OriginalS, S, {settings, [{?SETTINGS_MAX_HEADER_LIST_SIZE, Val}|PList]}) ->
     overlay_(OriginalS, S#settings{max_header_list_size=Val}, {settings, PList});
 overlay_(OriginalS, _S, {settings, [{_UnknownOrUnsupportedKey, _Val}|_]}) ->
-	OriginalS;
+    OriginalS;
 overlay_(_OriginalS, S, {settings, []}) ->
     S.
 
