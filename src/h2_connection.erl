@@ -131,7 +131,7 @@ become(Socket) ->
 
 -spec become(socket(), settings()) -> no_return().
 become({Transport, Socket}, Http2Settings) ->
-    ok = Transport:setopts(Socket, [{packet, raw}, binary]),
+    ok = sock:setopts({Transport, Socket}, [{packet, raw}, binary]),
     {_, _, NewState} =
         start_http2_server(Http2Settings,
                            #connection{
@@ -146,7 +146,7 @@ become({Transport, Socket}, Http2Settings) ->
 %% Init callback
 init({client, Transport, Host, Port, SSLOptions, Http2Settings}) ->
     {ok, Socket} = Transport:connect(Host, Port, client_options(Transport, SSLOptions)),
-    ok = Transport:setopts(Socket, [{packet, raw}, binary]),
+    ok = sock:setopts({Transport, Socket}, [{packet, raw}, binary]),
     Transport:send(Socket, <<?PREFACE>>),
     InitialState =
         #connection{
