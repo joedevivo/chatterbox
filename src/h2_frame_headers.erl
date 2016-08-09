@@ -15,7 +15,7 @@
 
 -record(headers,
         {
-          priority = undefined :: http2_frame_priority:payload() | undefined,
+          priority = undefined :: h2_frame_priority:payload() | undefined,
           block_fragment :: binary()
         }).
 -type payload() :: #headers{}.
@@ -30,7 +30,7 @@ format(Payload) ->
 new(BlockFragment) ->
     #headers{block_fragment=BlockFragment}.
 
--spec new(http2_frame_priority:payload(),
+-spec new(h2_frame_priority:payload(),
           binary()) ->
                  payload().
 new(Priority, BlockFragment) ->
@@ -87,7 +87,7 @@ is_priority(_) ->
                 EncodeContext :: hpack:context(),
                 MaxFrameSize  :: pos_integer(),
                 EndStream     :: boolean()) ->
-                       {[http2_frame:frame()], hpack:context()}.
+                       {[h2_frame:frame()], hpack:context()}.
 to_frames(StreamId, Headers, EncodeContext, MaxFrameSize, EndStream) ->
     {ok, {HeadersBin, NewContext}} = hpack:encode(Headers, EncodeContext),
 
@@ -110,7 +110,7 @@ to_binary(#headers{
             [h2_frame_priority:to_binary(P), BF]
     end.
 
--spec from_frames([http2_frame:frame()], binary()) -> binary().
+-spec from_frames([h2_frame:frame()], binary()) -> binary().
 from_frames([{#frame_header{type=?HEADERS},#headers{block_fragment=BF}}|Continuations])->
     from_frames(Continuations, BF);
 from_frames([{#frame_header{type=?PUSH_PROMISE},PP}|Continuations])->
@@ -148,7 +148,7 @@ split(Binary, MaxFrameSize, Acc) ->
 -spec build_frames(StreamId :: stream_id(),
                    Chunks::[binary()],
                    EndStream::boolean()) ->
-                          [http2_frame:frame()].
+                          [h2_frame:frame()].
 build_frames(StreamId, [FirstChunk|Rest], EndStream) ->
     Flag = case EndStream of
                true ->
@@ -176,8 +176,8 @@ build_frames(StreamId, [FirstChunk|Rest], EndStream) ->
 
 -spec build_frames_(StreamId::stream_id(),
                     Chunks::[binary()],
-                    Acc::[http2_frame:frame()])->
-                           [http2_frame:frame()].
+                    Acc::[h2_frame:frame()])->
+                           [h2_frame:frame()].
 build_frames_(_StreamId, [], Acc) ->
     Acc;
 build_frames_(StreamId, [NextChunk|Rest], Acc) ->

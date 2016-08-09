@@ -54,7 +54,7 @@
         ]).
 
 -record(h2_listening_state, {
-          ssl_options   :: [ssl:ssloption()],
+          ssl_options   :: [ssl:ssl_option()],
           listen_socket :: ssl:sslsocket() | inet:socket(),
           transport     :: gen_tcp | ssl,
           listen_ref    :: non_neg_integer(),
@@ -65,7 +65,7 @@
 -record(continuation_state, {
           stream_id                 :: stream_id(),
           promised_id = undefined   :: undefined | stream_id(),
-          frames      = queue:new() :: queue:queue(http2_frame:frame()),
+          frames      = queue:new() :: queue:queue(h2_frame:frame()),
           type                      :: headers | push_promise | trailers,
           end_stream  = false       :: boolean(),
           end_headers = false       :: boolean()
@@ -101,7 +101,7 @@
 -spec start_client_link(gen_tcp | ssl,
                         inet:ip_address() | inet:hostname(),
                         inet:port_number(),
-                        [ssl:ssloption()],
+                        [ssl:ssl_option()],
                         settings()
                        ) ->
                                {ok, pid()} | ignore | {error, term()}.
@@ -111,7 +111,7 @@ start_client_link(Transport, Host, Port, SSLOptions, Http2Settings) ->
 -spec start_ssl_upgrade_link(inet:ip_address() | inet:hostname(),
                              inet:port_number(),
                              binary(),
-                             [ssl:ssloption()],
+                             [ssl:ssl_option()],
                              settings()
                             ) ->
                                     {ok, pid()} | ignore | {error, term()}.
@@ -119,7 +119,7 @@ start_ssl_upgrade_link(Host, Port, InitialMessage, SSLOptions, Http2Settings) ->
     gen_fsm:start_link(?MODULE, {client_ssl_upgrade, Host, Port, InitialMessage, SSLOptions, Http2Settings}, []).
 
 -spec start_server_link(socket(),
-                        [ssl:ssloption()],
+                        [ssl:ssl_option()],
                         #settings{}) ->
                                {ok, pid()} | ignore | {error, term()}.
 start_server_link({Transport, ListenSocket}, SSLOptions, Http2Settings) ->
@@ -268,7 +268,7 @@ stop(Pid) ->
 listen(timeout, State) ->
     go_away(?PROTOCOL_ERROR, State).
 
--spec handshake(timeout|{frame, http2_frame:frame()}, connection()) ->
+-spec handshake(timeout|{frame, h2_frame:frame()}, connection()) ->
                     {next_state,
                      handshake|connected|closing,
                      connection()}.
@@ -327,9 +327,9 @@ closing(Message, Conn) ->
 
 %% route_frame's job needs to be "now that we've read a frame off the
 %% wire, do connection based things to it and/or forward it to the
-%% http2 stream processor (http2_stream:recv_frame)
+%% http2 stream processor (h2_stream:recv_frame)
 -spec route_frame(
-        http2_frame:frame() | {error, term()},
+        h2_frame:frame() | {error, term()},
         connection()) ->
     {next_state,
      connected | continuation | closing ,
@@ -705,7 +705,7 @@ route_frame({H, _Payload},
          H#frame_header.stream_id =/= 0 ->
     go_away(?PROTOCOL_ERROR, Conn);
 %% If length != 8, FRAME_SIZE_ERROR
-%% TODO: I think this case is already covered in http2_frame now
+%% TODO: I think this case is already covered in h2_frame now
 route_frame({H, _Payload},
            #connection{}=Conn)
     when H#frame_header.type == ?PING,
@@ -1213,7 +1213,7 @@ rst_stream(Stream, ErrorCode, Conn) ->
         active ->
             %% Can this ever be undefined?
             Pid = h2_stream_set:stream_pid(Stream),
-            %% http2_stream's rst_stream will take care of letting us know
+            %% h2_stream's rst_stream will take care of letting us know
             %% this stream is closed and will send us a message to close the
             %% stream somewhere else
             h2_stream:rst_stream(Pid, ErrorCode),
@@ -1539,7 +1539,7 @@ recv_pp(Stream, Headers) ->
     end.
 
 -spec recv_data(h2_stream_set:stream(),
-                http2_frame:frame()) ->
+                h2_frame:frame()) ->
                         ok.
 recv_data(Stream, Frame) ->
     case h2_stream_set:pid(Stream) of

@@ -68,7 +68,7 @@ start_link(https,Host) ->
 %% both.
 -spec start_link(http | https,
                  string(),
-                 non_neg_integer() | [ssl:ssloptions()]) ->
+                 non_neg_integer() | [ssl:ssl_option()]) ->
                         {ok, pid()}
                       | ignore
                       | {error, term()}.
@@ -96,7 +96,7 @@ start_link(https, Host, SSLOptions)
 -spec start_link(http | https,
                  string(),
                  non_neg_integer(),
-                 [ssl:ssloption()]) ->
+                 [ssl:ssl_option()]) ->
                         {ok, pid()}
                       | ignore
                       | {error, term()}.

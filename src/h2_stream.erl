@@ -49,7 +49,7 @@
           connection = undefined :: undefined | pid(),
           socket = undefined :: sock:socket(),
           state = idle :: stream_state_name(),
-          incoming_frames = queue:new() :: queue:queue(http2_frame:frame()),
+          incoming_frames = queue:new() :: queue:queue(h2_frame:frame()),
           request_headers = [] :: hpack:headers(),
           request_body :: iodata(),
           request_body_size = 0 :: non_neg_integer(),

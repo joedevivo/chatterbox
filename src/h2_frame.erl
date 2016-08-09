@@ -16,16 +16,16 @@
          header_to_binary/1
 ]).
 
--type payload() :: http2_frame_data:payload()
-                 | http2_frame_headers:payload()
-                 | http2_frame_priority:payload()
-                 | http2_frame_rst_stream:payload()
-                 | http2_frame_settings:payload()
-                 | http2_frame_push_promise:payload()
-                 | http2_frame_ping:payload()
-                 | http2_frame_goaway:payload()
-                 | http2_frame_window_update:payload()
-                 | http2_frame_continuation:payload().
+-type payload() :: h2_frame_data:payload()
+                 | h2_frame_headers:payload()
+                 | h2_frame_priority:payload()
+                 | h2_frame_rst_stream:payload()
+                 | h2_frame_settings:payload()
+                 | h2_frame_push_promise:payload()
+                 | h2_frame_ping:payload()
+                 | h2_frame_goaway:payload()
+                 | h2_frame_window_update:payload()
+                 | h2_frame_continuation:payload().
 
 -type header() :: #frame_header{}.
 -type frame() :: {header(),
