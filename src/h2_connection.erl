@@ -54,7 +54,7 @@
         ]).
 
 -record(h2_listening_state, {
-          ssl_options   :: [ssl:ssloption()],
+          ssl_options   :: [ssl:ssl_option()],
           listen_socket :: ssl:sslsocket() | inet:socket(),
           transport     :: gen_tcp | ssl,
           listen_ref    :: non_neg_integer(),
@@ -101,7 +101,7 @@
 -spec start_client_link(gen_tcp | ssl,
                         inet:ip_address() | inet:hostname(),
                         inet:port_number(),
-                        [ssl:ssloption()],
+                        [ssl:ssl_option()],
                         settings()
                        ) ->
                                {ok, pid()} | ignore | {error, term()}.
@@ -111,7 +111,7 @@ start_client_link(Transport, Host, Port, SSLOptions, Http2Settings) ->
 -spec start_ssl_upgrade_link(inet:ip_address() | inet:hostname(),
                              inet:port_number(),
                              binary(),
-                             [ssl:ssloption()],
+                             [ssl:ssl_option()],
                              settings()
                             ) ->
                                     {ok, pid()} | ignore | {error, term()}.
@@ -119,7 +119,7 @@ start_ssl_upgrade_link(Host, Port, InitialMessage, SSLOptions, Http2Settings) ->
     gen_fsm:start_link(?MODULE, {client_ssl_upgrade, Host, Port, InitialMessage, SSLOptions, Http2Settings}, []).
 
 -spec start_server_link(socket(),
-                        [ssl:ssloption()],
+                        [ssl:ssl_option()],
                         #settings{}) ->
                                {ok, pid()} | ignore | {error, term()}.
 start_server_link({Transport, ListenSocket}, SSLOptions, Http2Settings) ->
