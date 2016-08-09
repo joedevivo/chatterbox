@@ -54,7 +54,7 @@ read_binary(Bin, H=#frame_header{length=L}) ->
             {ok, #data{data=Data}, Rem}
     end.
 
--spec to_frames(stream_id(), iodata(), settings()) -> [http2_frame:frame()].
+-spec to_frames(stream_id(), iodata(), settings()) -> [h2_frame:frame()].
 to_frames(StreamId, IOList, Settings)
   when is_list(IOList) ->
     to_frames(StreamId, iolist_to_binary(IOList), Settings);
