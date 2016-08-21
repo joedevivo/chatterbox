@@ -24,6 +24,7 @@
          send_promise/4,
          get_response/2,
          get_peer/1,
+         get_peercert/1,
          get_streams/1,
          send_window_update/2,
          send_frame/2
@@ -225,6 +226,11 @@ send_body(Pid, StreamId, Body, Opts) ->
     {ok, {inet:ip_address(), inet:port_number()}} | {error, term()}.
 get_peer(Pid) ->
     gen_fsm:sync_send_all_state_event(Pid, get_peer).
+
+-spec get_peercert(pid()) ->
+    {ok, binary()} | {error, term()}.
+get_peercert(Pid) ->
+    gen_fsm:sync_send_all_state_event(Pid, get_peercert).
 
 -spec is_push(pid()) -> boolean().
 is_push(Pid) ->
@@ -1082,6 +1088,18 @@ handle_sync_event(get_peer, _F, StateName,
                           [Transport]),
             {reply, Error, StateName, Conn};
         {ok, _AddrPort}=OK ->
+            {reply, OK, StateName, Conn}
+    end;
+handle_sync_event(get_peercert, _F, StateName,
+                  #connection{
+                     socket={Transport,_}=Socket
+                    }=Conn) ->
+    case sock:peercert(Socket) of
+        {error, _}=Error ->
+            lager:warning("failed to fetch peer cert for ~p socket",
+                          [Transport]),
+            {reply, Error, StateName, Conn};
+        {ok, _Cert}=OK ->
             {reply, OK, StateName, Conn}
     end;
 handle_sync_event(_E, _F, StateName,
