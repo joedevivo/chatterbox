@@ -437,7 +437,6 @@ half_closed_local(
      incoming_frames=IFQ
      } = Stream) ->
     NewQ = queue:in(F, IFQ),
-
     case ?IS_FLAG(Flags, ?FLAG_END_STREAM) of
         true ->
             Data =
@@ -455,6 +454,18 @@ half_closed_local(
                incoming_frames=NewQ
               }}
     end;
+
+half_closed_local(recv_es,
+                  #stream_state{
+                     response_body = undefined,
+                     incoming_frames = Q
+                    } = Stream) ->
+    Data = [h2_frame_data:data(Payload) || {#frame_header{type=?DATA}, Payload} <- queue:to_list(Q)],
+    {next_state, closed,
+     Stream#stream_state{
+       incoming_frames=queue:new(),
+       response_body = Data
+      }, 0};
 
 half_closed_local(recv_es,
                   #stream_state{
