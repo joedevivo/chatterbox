@@ -106,19 +106,24 @@ parse_settings(<<>>, Settings) ->
     Settings.
 
 -spec overlay(payload(), {settings, [proplists:property()]}) -> payload().
-overlay(S, {settings, [{?SETTINGS_HEADER_TABLE_SIZE, Val}|PList]}) ->
-    overlay(S#settings{header_table_size=Val}, {settings, PList});
-overlay(S, {settings, [{?SETTINGS_ENABLE_PUSH, Val}|PList]}) ->
-    overlay(S#settings{enable_push=Val}, {settings, PList});
-overlay(S, {settings, [{?SETTINGS_MAX_CONCURRENT_STREAMS, Val}|PList]}) ->
-    overlay(S#settings{max_concurrent_streams=Val}, {settings, PList});
-overlay(S, {settings, [{?SETTINGS_INITIAL_WINDOW_SIZE, Val}|PList]}) ->
-    overlay(S#settings{initial_window_size=Val}, {settings, PList});
-overlay(S, {settings, [{?SETTINGS_MAX_FRAME_SIZE, Val}|PList]}) ->
-    overlay(S#settings{max_frame_size=Val}, {settings, PList});
-overlay(S, {settings, [{?SETTINGS_MAX_HEADER_LIST_SIZE, Val}|PList]}) ->
-    overlay(S#settings{max_header_list_size=Val}, {settings, PList});
-overlay(S, {settings, []}) ->
+overlay(S, Setting) ->
+    overlay_(S, S, Setting).
+
+overlay_(OriginalS, S, {settings, [{?SETTINGS_HEADER_TABLE_SIZE, Val}|PList]}) ->
+    overlay_(OriginalS, S#settings{header_table_size=Val}, {settings, PList});
+overlay_(OriginalS, S, {settings, [{?SETTINGS_ENABLE_PUSH, Val}|PList]}) ->
+    overlay_(OriginalS, S#settings{enable_push=Val}, {settings, PList});
+overlay_(OriginalS, S, {settings, [{?SETTINGS_MAX_CONCURRENT_STREAMS, Val}|PList]}) ->
+    overlay_(OriginalS, S#settings{max_concurrent_streams=Val}, {settings, PList});
+overlay_(OriginalS, S, {settings, [{?SETTINGS_INITIAL_WINDOW_SIZE, Val}|PList]}) ->
+    overlay_(OriginalS, S#settings{initial_window_size=Val}, {settings, PList});
+overlay_(OriginalS, S, {settings, [{?SETTINGS_MAX_FRAME_SIZE, Val}|PList]}) ->
+    overlay_(OriginalS, S#settings{max_frame_size=Val}, {settings, PList});
+overlay_(OriginalS, S, {settings, [{?SETTINGS_MAX_HEADER_LIST_SIZE, Val}|PList]}) ->
+    overlay_(OriginalS, S#settings{max_header_list_size=Val}, {settings, PList});
+overlay_(OriginalS, _S, {settings, [{_UnknownOrUnsupportedKey, _Val}|_]}) ->
+    OriginalS;
+overlay_(_OriginalS, S, {settings, []}) ->
     S.
 
 -spec send(payload()) -> binary().
