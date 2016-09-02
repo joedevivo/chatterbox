@@ -14,6 +14,7 @@
          recv/3,
          close/1,
          peername/1,
+         peercert/1,
          setopts/2
         ]).
 
@@ -60,6 +61,11 @@ peername({ssl, Socket}) ->
     ssl:peername(Socket);
 peername({gen_tcp, Socket}) ->
     inet:peername(Socket).
+
+peercert({ssl, Socket}) ->
+    ssl:peercert(Socket);
+peercert({gen_tcp, _Socket}) ->
+    {error, unsupported}.
 
 setopts({ssl, Socket}, Opts) ->
     ssl:setopts(Socket, Opts);
