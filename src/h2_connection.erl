@@ -145,56 +145,71 @@ become({Transport, Socket}, Http2Settings) ->
 
 %% Init callback
 init({client, Transport, Host, Port, SSLOptions, Http2Settings}) ->
-    {ok, Socket} = Transport:connect(Host, Port, client_options(Transport, SSLOptions)),
-    ok = sock:setopts({Transport, Socket}, [{packet, raw}, binary]),
-    Transport:send(Socket, <<?PREFACE>>),
-    InitialState =
-        #connection{
-           type = client,
-           streams = h2_stream_set:new(client),
-           socket = {Transport, Socket},
-           next_available_stream_id=1,
-           flow_control=application:get_env(chatterbox, client_flow_control, auto)
-          },
-    {ok,
-     handshake,
-     send_settings(Http2Settings, InitialState),
-     4500};
+    case Transport:connect(Host, Port, client_options(Transport, SSLOptions)) of
+        {ok, Socket} ->
+            ok = sock:setopts({Transport, Socket}, [{packet, raw}, binary]),
+            Transport:send(Socket, <<?PREFACE>>),
+            InitialState =
+                #connection{
+                   type = client,
+                   streams = h2_stream_set:new(client),
+                   socket = {Transport, Socket},
+                   next_available_stream_id=1,
+                   flow_control=application:get_env(chatterbox, client_flow_control, auto)
+                  },
+            {ok,
+             handshake,
+             send_settings(Http2Settings, InitialState),
+             4500};
+        {error, Reason} ->
+            {stop, Reason}
+    end;
 init({client_ssl_upgrade, Host, Port, InitialMessage, SSLOptions, Http2Settings}) ->
-    {ok, TCP} = gen_tcp:connect(Host, Port, [{active, false}]),
-    gen_tcp:send(TCP, InitialMessage),
-    {ok, Socket} = ssl:connect(TCP, client_options(ssl, SSLOptions)),
-
-    active_once({ssl, Socket}),
-    ok = ssl:setopts(Socket, [{packet, raw}, binary]),
-    ssl:send(Socket, <<?PREFACE>>),
-    InitialState =
-        #connection{
-           type = client,
-           streams = h2_stream_set:new(client),
-           socket = {ssl, Socket},
-           next_available_stream_id=1,
-           flow_control=application:get_env(chatterbox, client_flow_control, auto)
-          },
-    {ok,
-     handshake,
-     send_settings(Http2Settings, InitialState),
-     4500};
+    case gen_tcp:connect(Host, Port, [{active, false}]) of
+        {ok, TCP} ->
+            gen_tcp:send(TCP, InitialMessage),
+            case ssl:connect(TCP, client_options(ssl, SSLOptions)) of
+                {ok, Socket} ->
+                    active_once({ssl, Socket}),
+                    ok = ssl:setopts(Socket, [{packet, raw}, binary]),
+                    ssl:send(Socket, <<?PREFACE>>),
+                    InitialState =
+                        #connection{
+                           type = client,
+                           streams = h2_stream_set:new(client),
+                           socket = {ssl, Socket},
+                           next_available_stream_id=1,
+                           flow_control=application:get_env(chatterbox, client_flow_control, auto)
+                          },
+                    {ok,
+                     handshake,
+                     send_settings(Http2Settings, InitialState),
+                     4500};
+                {error, Reason} ->
+                    {stop, Reason}
+            end;
+        {error, Reason} ->
+            {stop, Reason}
+    end;
 init({server, {Transport, ListenSocket}, SSLOptions, Http2Settings}) ->
     %% prim_inet:async_accept is dope. It says just hang out here and
     %% wait for a message that a client has connected. That message
     %% looks like:
     %% {inet_async, ListenSocket, Ref, {ok, ClientSocket}}
-    {ok, Ref} = prim_inet:async_accept(ListenSocket, -1),
-    {ok,
-     listen,
-     #h2_listening_state{
-        ssl_options = SSLOptions,
-        listen_socket = ListenSocket,
-        listen_ref = Ref,
-        transport = Transport,
-        server_settings = Http2Settings
-       }}. %% No timeout here, it's just a listener
+    case prim_inet:async_accept(ListenSocket, -1) of
+        {ok, Ref} ->
+            {ok,
+             listen,
+             #h2_listening_state{
+                ssl_options = SSLOptions,
+                listen_socket = ListenSocket,
+                listen_ref = Ref,
+                transport = Transport,
+                server_settings = Http2Settings
+               }}; %% No timeout here, it's just a listener
+        {error, Reason} ->
+            {stop, Reason}
+    end.
 
 send_frame(Pid, Bin)
   when is_binary(Bin); is_list(Bin) ->
