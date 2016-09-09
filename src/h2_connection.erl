@@ -240,7 +240,7 @@ send_body(Pid, StreamId, Body, Opts) ->
 
 -spec send_request(pid(), hpack:headers(), binary()) -> ok.
 send_request(Pid, Headers, Body) ->
-    gen_fsm:send_all_state_event(Pid, {send_request, self(), Headers, Body}),
+    gen_fsm:sync_send_all_state_event(Pid, {send_request, self(), Headers, Body}, infinity),
     ok.
 
 -spec get_peer(pid()) ->
@@ -990,33 +990,15 @@ handle_event({send_request, NotifyPid, Headers, Body},
             streams=Streams,
             next_available_stream_id=NextId
         }=Conn) ->
-        case
-            h2_stream_set:new_stream(
-                NextId,
-                NotifyPid,
-                Conn#connection.stream_callback_mod,
-                Conn#connection.socket,
-                Conn#connection.peer_settings#settings.initial_window_size,
-                Conn#connection.self_settings#settings.initial_window_size,
-                Streams)
-        of
-            {error, Code, _NewStream} ->
-                lager:warning("[~p] tried to create new_stream ~p, but error ~p",
-                    [Conn#connection.type, NextId, Code]),
-
-                {next_state, StateName, Conn};
-            GoodStreamSet ->
-                lager:debug("[~p] added stream #~p to ~p",
-                    [Conn#connection.type, NextId, GoodStreamSet]),
-
-                send_headers(self(), NextId, Headers),
-                send_body(self(), NextId, Body),
-
-                {next_state, StateName, Conn#connection{
-                    next_available_stream_id=NextId+2,
-                    streams=GoodStreamSet
-                }}
-        end;
+    case send_request(NextId, NotifyPid, Conn, Streams, Headers, Body) of
+        {ok, GoodStreamSet} ->
+            {next_state, StateName, Conn#connection{
+                next_available_stream_id=NextId+2,
+                streams=GoodStreamSet
+            }};
+        {error, _Code} ->
+            {next_state, StateName, Conn}
+    end;
 
 handle_event({send_promise, StreamId, NewStreamId, Headers},
              StateName,
@@ -1156,6 +1138,21 @@ handle_sync_event(get_peercert, _F, StateName,
             {reply, Error, StateName, Conn};
         {ok, _Cert}=OK ->
             {reply, OK, StateName, Conn}
+    end;
+handle_sync_event({send_request, NotifyPid, Headers, Body}, _F,
+        StateName,
+        #connection{
+            streams=Streams,
+            next_available_stream_id=NextId
+        }=Conn) ->
+    case send_request(NextId, NotifyPid, Conn, Streams, Headers, Body) of
+        {ok, GoodStreamSet} ->
+            {reply, ok, StateName, Conn#connection{
+                next_available_stream_id=NextId+2,
+                streams=GoodStreamSet
+            }};
+        {error, Code} ->
+            {reply, {error, Code}, StateName, Conn}
     end;
 handle_sync_event(_E, _F, StateName,
                   #connection{}=Conn) ->
@@ -1623,4 +1620,30 @@ recv_data(Stream, Frame) ->
             ok;
         Pid ->
             gen_fsm:send_event(Pid, {recv_data, Frame})
+    end.
+
+send_request(NextId, NotifyPid, Conn, Streams, Headers, Body) ->
+    case
+        h2_stream_set:new_stream(
+            NextId,
+            NotifyPid,
+            Conn#connection.stream_callback_mod,
+            Conn#connection.socket,
+            Conn#connection.peer_settings#settings.initial_window_size,
+            Conn#connection.self_settings#settings.initial_window_size,
+            Streams)
+    of
+        {error, Code, _NewStream} ->
+            lager:warning("[~p] tried to create new_stream ~p, but error ~p",
+                [Conn#connection.type, NextId, Code]),
+
+            {error, Code};
+        GoodStreamSet ->
+            lager:debug("[~p] added stream #~p to ~p",
+                [Conn#connection.type, NextId, GoodStreamSet]),
+
+            send_headers(self(), NextId, Headers),
+            send_body(self(), NextId, Body),
+
+            {ok, GoodStreamSet}
     end.
