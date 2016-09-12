@@ -225,6 +225,7 @@ new_stream(
         false ->
             {ok, Pid} = h2_stream:start_link(
                        StreamId,
+                       StreamSet#stream_set.type,
                        self(),
                        CBMod,
                        Socket
