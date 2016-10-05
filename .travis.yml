@@ -3,6 +3,8 @@ language: erlang
 otp_release:
   - 18.2.1
 
+before_script: kerl list installations
+
 install: make clean
 
 script: make all
