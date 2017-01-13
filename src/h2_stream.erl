@@ -90,6 +90,11 @@
             CallbackState :: callback_state())->
     {ok, NewState :: callback_state()}.
 
+-callback on_receive_response_data(
+            iodata(),
+            CallbackState :: callback_state())->
+    {ok, NewState :: callback_state()}.
+
 -callback on_request_end_stream(
             CallbackState :: callback_state()) ->
     {ok, NewState :: callback_state()}.

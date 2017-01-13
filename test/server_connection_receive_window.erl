@@ -7,6 +7,7 @@
          on_receive_request_headers/2,
          on_send_push_promise/2,
          on_receive_request_data/2,
+         on_receive_response_data/2,
          on_request_end_stream/1
         ]).
 
@@ -29,6 +30,10 @@ on_send_push_promise(Headers, State) ->
 
 on_receive_request_data(Bin, State)->
     ct:pal("on_receive_request_data(~p, ~p)", [Bin, State]),
+    {ok, State}.
+
+on_receive_response_data(_Bin, State)->
+    ct:pal("on_receive_response_data(Bin!, ~p)", [State]),
     {ok, State}.
 
 on_request_end_stream(State) ->

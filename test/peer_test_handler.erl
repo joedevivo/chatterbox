@@ -9,6 +9,7 @@
          on_receive_request_headers/2,
          on_send_push_promise/2,
          on_receive_request_data/2,
+         on_receive_response_data/2,
          on_request_end_stream/1
         ]).
 
@@ -38,6 +39,9 @@ on_send_push_promise(_Headers, State) -> {ok, State}.
             iodata(),
             CallbackState :: any())-> {ok, NewState :: any()}.
 on_receive_request_data(_Data, State) -> {ok, State}.
+
+on_receive_response_data(_Bin, State)->
+    {ok, State}.
 
 -spec on_request_end_stream(
             CallbackState :: any()) ->
