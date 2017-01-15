@@ -85,8 +85,8 @@
 
 -type stream_id() :: non_neg_integer().
 -record(frame_header, {
-    length      :: non_neg_integer(),
-    type        :: frame_type(),
+    length      :: non_neg_integer() | undefined,
+    type        :: frame_type() | undefined,
     flags = 0   :: non_neg_integer(),
     stream_id   :: stream_id()
     }).
