@@ -110,13 +110,14 @@ to_binary(#headers{
             [h2_frame_priority:to_binary(P), BF]
     end.
 
--spec from_frames([h2_frame:frame()], binary()) -> binary().
+-spec from_frames([h2_frame:frame()]) -> binary().
 from_frames([{#frame_header{type=?HEADERS},#headers{block_fragment=BF}}|Continuations])->
     from_frames(Continuations, BF);
 from_frames([{#frame_header{type=?PUSH_PROMISE},PP}|Continuations])->
     BF = h2_frame_push_promise:block_fragment(PP),
     from_frames(Continuations, BF).
 
+-spec from_frames([h2_frame:frame()], binary()) -> binary().
 from_frames([], Acc) ->
     Acc;
 from_frames([{#frame_header{type=?CONTINUATION},Cont}|Continuations], Acc) ->
