@@ -28,7 +28,7 @@ sends_unknown_extension_frame(_Config) ->
     http2c:send_binary(Client, Bin),
 
     %% It should be ignored, so let's send a ping and get one back
-    Data = crypto:rand_bytes(8),
+    Data = crypto:strong_rand_bytes(8),
     http2c:send_unaltered_frames(
       Client,
       [

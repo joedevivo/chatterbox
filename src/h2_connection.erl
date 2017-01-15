@@ -76,7 +76,7 @@
 -record(connection, {
           type = undefined :: client | server | undefined,
           ssl_options = [],
-          listen_ref :: non_neg_integer(),
+          listen_ref :: non_neg_integer() | undefined,
           socket = undefined :: sock:socket(),
           peer_settings = #settings{} :: settings(),
           self_settings = #settings{} :: settings(),

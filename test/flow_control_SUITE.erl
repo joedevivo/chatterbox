@@ -171,7 +171,7 @@ send_n_bytes(N) ->
     %% window, but not the connections
 
     %% So now, send N bytes and we should get some desired error.
-    Data = crypto:rand_bytes(N),
+    Data = crypto:strong_rand_bytes(N),
     Frames = h2_frame_data:to_frames(3, Data, #settings{}),
 
     http2c:send_unaltered_frames(Client, Frames),

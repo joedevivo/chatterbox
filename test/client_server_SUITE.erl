@@ -208,7 +208,7 @@ echo_body(_Config) ->
 
     http2c:send_unaltered_frames(Client, [HeaderFrame]),
 
-    Body = crypto:rand_bytes(128),
+    Body = crypto:strong_rand_bytes(128),
     BodyFrames = h2_frame_data:to_frames(3, Body, #settings{max_frame_size=64}),
     http2c:send_unaltered_frames(Client, BodyFrames),
 

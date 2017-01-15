@@ -92,11 +92,11 @@
      % The pid to notify about events on this stream
      notify_pid       :: pid() | undefined,
      % The response headers received
-     response_headers :: hpack:headers(),
+     response_headers :: hpack:headers() | undefined,
      % The response body
-     response_body    :: binary(),
+     response_body    :: binary() | undefined,
      % Can this be thrown away?
-     garbage = false  :: boolean()
+     garbage = false  :: boolean() | undefined
      }).
 -type closed_stream() :: #closed_stream{}.
 

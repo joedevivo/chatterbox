@@ -47,8 +47,8 @@ on_request_end_stream(State=#state{conn_pid=ConnPid,
                        {<<":status">>,<<"200">>}
                       ],
     h2_connection:send_headers(ConnPid, StreamId, ResponseHeaders),
-    h2_connection:send_body(ConnPid, StreamId, crypto:rand_bytes(?SEND_BYTES),
+    h2_connection:send_body(ConnPid, StreamId, crypto:strong_rand_bytes(?SEND_BYTES),
                             [{send_end_stream, false}]),
     timer:sleep(200),
-    h2_connection:send_body(ConnPid, StreamId, crypto:rand_bytes(?SEND_BYTES)),
+    h2_connection:send_body(ConnPid, StreamId, crypto:strong_rand_bytes(?SEND_BYTES)),
     {ok, State}.
