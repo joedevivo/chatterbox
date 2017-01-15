@@ -44,6 +44,10 @@
 
     {server_flow_control, auto}
 
-  ]}
+  ]},
+
+  {maintainers, ["Joe DeVivo"]},
+  {licenses, ["MIT"]},
+  {links, [{"Github", "https://github.com/joedevivo/chatterbox"}]}
  ]}.
 %% vim: set filetype=erlang tabstop=2
