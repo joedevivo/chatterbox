@@ -742,7 +742,7 @@ route_frame({H, _Payload},
 route_frame({H, Ping},
             #connection{}=Conn)
     when H#frame_header.type == ?PING,
-         ?NOT_FLAG((#frame_header.flags), ?FLAG_ACK) ->
+         ?NOT_FLAG((H#frame_header.flags), ?FLAG_ACK) ->
     lager:debug("[~p] Received PING",
                [Conn#connection.type]),
     Ack = h2_frame_ping:ack(Ping),
