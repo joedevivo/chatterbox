@@ -257,7 +257,7 @@ get_peercert(Pid) ->
 is_push(Pid) ->
     gen_fsm:sync_send_all_state_event(Pid, is_push).
 
--spec new_stream(pid()) -> stream_id().
+-spec new_stream(pid()) -> stream_id() | {error, error_code()}.
 new_stream(Pid) ->
     new_stream(Pid, self()).
 
@@ -274,7 +274,7 @@ send_promise(Pid, StreamId, NewStreamId, Headers) ->
 
 -spec get_response(pid(), stream_id()) ->
                           {ok, {hpack:headers(), iodata()}}
-                              | {error, term()}.
+                           | not_ready.
 get_response(Pid, StreamId) ->
     gen_fsm:sync_send_all_state_event(Pid, {get_response, StreamId}).
 

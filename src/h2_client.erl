@@ -114,21 +114,35 @@ start_ssl_upgrade_link(Host, Port, InitialMessage, SSLOptions) ->
 stop(Pid) ->
     h2_connection:stop(Pid).
 
+-spec sync_request(CliPid, Headers, Body) -> Result when
+      CliPid :: pid(), Headers :: hpack:headers(), Body :: binary(),
+      Result :: {ok, {hpack:headers(), iodata()}}
+                 | {error, error_code() | timeout}.
 sync_request(CliPid, Headers, Body) ->
-    StreamId = h2_connection:new_stream(CliPid),
-    h2_connection:send_headers(CliPid, StreamId, Headers),
-    h2_connection:send_body(CliPid,StreamId,Body),
-    receive
-        {'END_STREAM', StreamId} ->
-            h2_connection:get_response(CliPid, StreamId)
-    after 5000 ->
-        {error, timeout}
+    case send_request(CliPid, Headers, Body) of
+        {ok, StreamId} ->
+            receive
+                {'END_STREAM', StreamId} ->
+                    h2_connection:get_response(CliPid, StreamId)
+            after 5000 ->
+                      {error, timeout}
+            end;
+        Error ->
+            Error
     end.
+
+-spec send_request(CliPid, Headers, Body) -> Result when
+      CliPid :: pid(), Headers :: hpack:headers(), Body :: binary(),
+      Result :: {ok, stream_id()} | {error, error_code()}.
 send_request(CliPid, Headers, Body) ->
-    StreamId = h2_connection:new_stream(CliPid),
-    h2_connection:send_headers(CliPid, StreamId, Headers),
-    h2_connection:send_body(CliPid,StreamId,Body),
-    {ok, StreamId}.
+    case h2_connection:new_stream(CliPid) of
+        {error, _Code} = Err ->
+            Err;
+        StreamId ->
+            h2_connection:send_headers(CliPid, StreamId, Headers),
+            h2_connection:send_body(CliPid, StreamId, Body),
+            {ok, StreamId}
+    end.
 
 -spec get_response(pid(), stream_id()) ->
                           {ok, {hpack:header(), iodata()}}
