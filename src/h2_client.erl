@@ -146,6 +146,7 @@ send_request(CliPid, Headers, Body) ->
 
 -spec get_response(pid(), stream_id()) ->
                           {ok, {hpack:header(), iodata()}}
+                           | not_ready
                            | {error, term()}.
 get_response(CliPid, StreamId) ->
     h2_connection:get_response(CliPid, StreamId).
