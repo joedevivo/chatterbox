@@ -1117,13 +1117,19 @@ handle_event({call, From}, streams,
 handle_event({call, From}, {get_response, StreamId},
                   #connection{}=Conn) ->
     Stream = h2_stream_set:get(StreamId, Conn#connection.streams),
-    Reply = case h2_stream_set:type(Stream) of
-                closed ->
-                    {ok, h2_stream_set:response(Stream)};
-                active ->
-                    not_ready
-            end,
-    {keep_state, Conn, [{reply, From, Reply}]};
+    {Reply, NewStreams} =
+        case h2_stream_set:type(Stream) of
+            closed ->
+                {_, NewStreams0} =
+                    h2_stream_set:close(
+                      Stream,
+                      garbage,
+                      Conn#connection.streams),
+                {{ok, h2_stream_set:response(Stream)}, NewStreams0};
+            active ->
+                {not_ready, Conn#connection.streams}
+        end,
+    {keep_state, Conn#connection{streams=NewStreams}, [{reply, From, Reply}]};
 handle_event({call, From}, {new_stream, NotifyPid},
                   #connection{
                      streams=Streams,
