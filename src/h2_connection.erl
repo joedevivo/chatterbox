@@ -19,6 +19,7 @@
          send_body/3,
          send_body/4,
          send_request/3,
+         send_ping/1,
          is_push/1,
          new_stream/1,
          new_stream/2,
@@ -90,7 +91,8 @@
           stream_callback_mod = application:get_env(chatterbox, stream_callback_mod, chatterbox_static_stream) :: module(),
           buffer = empty :: empty | {binary, binary()} | {frame, h2_frame:header(), binary()},
           continuation = undefined :: undefined | #continuation_state{},
-          flow_control = auto :: auto | manual
+          flow_control = auto :: auto | manual,
+          pings = #{} :: #{binary() => {pid(), non_neg_integer()}}
 }).
 
 -type connection() :: #connection{}.
@@ -241,6 +243,11 @@ send_body(Pid, StreamId, Body, Opts) ->
 -spec send_request(pid(), hpack:headers(), binary()) -> ok.
 send_request(Pid, Headers, Body) ->
     gen_fsm:sync_send_all_state_event(Pid, {send_request, self(), Headers, Body}, infinity),
+    ok.
+
+-spec send_ping(pid()) -> ok.
+send_ping(Pid) ->
+    gen_fsm:sync_send_all_state_event(Pid, {send_ping, self()}, infinity),
     ok.
 
 -spec get_peer(pid()) ->
@@ -748,12 +755,19 @@ route_frame({H, Ping},
     Ack = h2_frame_ping:ack(Ping),
     socksend(Conn, h2_frame:to_binary(Ack)),
     {next_state, connected, Conn};
-route_frame({H, _Payload},
-            #connection{}=Conn)
+route_frame({H, Payload},
+            #connection{pings = Pings}=Conn)
     when H#frame_header.type == ?PING,
          ?IS_FLAG((H#frame_header.flags), ?FLAG_ACK) ->
-    lager:debug("[~p] Received PING ACK",
-               [Conn#connection.type]),
+    case maps:get(Payload, Pings, undefined) of
+        undefined ->
+            lager:debug("[~p] Received unknown PING ACK",
+                        [Conn#connection.type]);
+        {NotifyPid, _} ->
+            lager:debug("[~p] Received PING ACK",
+                        [Conn#connection.type]),
+            NotifyPid ! {'PONG', self()}
+    end,
     {next_state, connected, Conn};
 route_frame({H=#frame_header{stream_id=0}, _Payload},
             #connection{}=Conn)
@@ -1051,6 +1065,17 @@ handle_event({send_bin, Binary}, StateName,
              #connection{} = Conn) ->
     socksend(Conn, Binary),
     {next_state, StateName, Conn};
+handle_event({send_ping, NotifyPid}, StateName,
+             #connection{pings = Pings} = Conn) ->
+    PingValue = crypto:rand_bytes(8),
+    Frame = h2_frame_ping:new(PingValue),
+    Headers = #frame_header{stream_id = 0, flags = 16#0},
+    Binary = h2_frame:to_binary({Headers, Frame}),
+    socksend(Conn, Binary),
+
+    NextPings = maps:put(PingValue, {NotifyPid, monotonic_time(milli_seconds)}, Pings),
+    NextConn = Conn#connection{pings = NextPings},
+    {next_state, StateName, NextConn};
 handle_event({send_frame, Frame}, StateName,
              #connection{} =Conn) ->
     Binary = h2_frame:to_binary(Frame),
