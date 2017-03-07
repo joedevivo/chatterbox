@@ -768,7 +768,8 @@ route_frame({H, Payload},
                         [Conn#connection.type]),
             NotifyPid ! {'PONG', self()}
     end,
-    {next_state, connected, Conn};
+    NextPings = maps:remove(Payload, Pings),
+    {next_state, connected, Conn#connection{pings = NextPings}};
 route_frame({H=#frame_header{stream_id=0}, _Payload},
             #connection{}=Conn)
     when H#frame_header.type == ?GOAWAY ->
