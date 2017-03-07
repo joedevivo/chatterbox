@@ -1068,13 +1068,13 @@ handle_event({send_bin, Binary}, StateName,
     {next_state, StateName, Conn};
 handle_event({send_ping, NotifyPid}, StateName,
              #connection{pings = Pings} = Conn) ->
-    PingValue = crypto:rand_bytes(8),
+    PingValue = crypto:strong_rand_bytes(8),
     Frame = h2_frame_ping:new(PingValue),
     Headers = #frame_header{stream_id = 0, flags = 16#0},
     Binary = h2_frame:to_binary({Headers, Frame}),
     socksend(Conn, Binary),
 
-    NextPings = maps:put(PingValue, {NotifyPid, monotonic_time(milli_seconds)}, Pings),
+    NextPings = maps:put(PingValue, {NotifyPid, erlang:monotonic_time(milli_seconds)}, Pings),
     NextConn = Conn#connection{pings = NextPings},
     {next_state, StateName, NextConn};
 handle_event({send_frame, Frame}, StateName,
