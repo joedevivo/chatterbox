@@ -22,6 +22,7 @@
          start_ssl_upgrade_link/4,
          stop/1,
          send_request/3,
+         send_ping/1,
          sync_request/3,
          get_response/2
         ]).
@@ -143,6 +144,9 @@ send_request(CliPid, Headers, Body) ->
             h2_connection:send_body(CliPid, StreamId, Body),
             {ok, StreamId}
     end.
+
+send_ping(CliPid) ->
+    h2_connection:send_ping(CliPid).
 
 -spec get_response(pid(), stream_id()) ->
                           {ok, {hpack:header(), iodata()}}
