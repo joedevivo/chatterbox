@@ -964,7 +964,7 @@ handle_event({send_body, StreamId, Body, Opts},
              #connection{}=Conn) ->
     lager:debug("[~p] Send Body Stream ~p",
                 [Conn#connection.type, StreamId]),
-    BodyComplete = proplists:get_value(send_end_stream, Opts, true),
+    BodyComplete = proplists:get_value(send_end_stream, Opts, false),
 
     Stream = h2_stream_set:get(StreamId, Conn#connection.streams),
     case h2_stream_set:type(Stream) of

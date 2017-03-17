@@ -3,7 +3,7 @@
 
 %% Public API
 -export([
-         start_link/4,
+         start_link/5,
          send_pp/2,
          send_data/2,
          stream_id/0,
@@ -46,6 +46,7 @@
 
 -record(stream_state, {
           stream_id = undefined :: stream_id(),
+          type = undefined :: client | server,
           connection = undefined :: undefined | pid(),
           socket = undefined :: sock:socket(),
           state = idle :: stream_state_name(),
@@ -89,6 +90,11 @@
             CallbackState :: callback_state())->
     {ok, NewState :: callback_state()}.
 
+-callback on_receive_response_data(
+            iodata(),
+            CallbackState :: callback_state())->
+    {ok, NewState :: callback_state()}.
+
 -callback on_request_end_stream(
             CallbackState :: callback_state()) ->
     {ok, NewState :: callback_state()}.
@@ -96,14 +102,16 @@
 %% Public API
 -spec start_link(
         StreamId :: stream_id(),
+        server | client,
         Connection :: pid(),
         CallbackModule :: module(),
         Socket :: sock:socket()
                   ) ->
                         {ok, pid()} | ignore | {error, term()}.
-start_link(StreamId, Connection, CallbackModule, Socket) ->
+start_link(StreamId, Type, Connection, CallbackModule, Socket) ->
     gen_fsm:start_link(?MODULE,
                        [StreamId,
+                        Type,
                         Connection,
                         CallbackModule,
                         Socket],
@@ -144,6 +152,7 @@ stop(Pid) ->
 
 init([
       StreamId,
+      Type,
       ConnectionPid,
       CB,
       Socket
@@ -155,6 +164,7 @@ init([
                   callback_mod=CB,
                   socket=Socket,
                   stream_id=StreamId,
+                  type=Type,
                   connection=ConnectionPid,
                   callback_state=CallbackState
                  }}.
@@ -282,13 +292,14 @@ open({recv_data,
           type=?DATA
          }, Payload}=F},
      #stream_state{
+        type=Type,
         incoming_frames=IFQ,
         callback_mod=CB,
         callback_state=CallbackState
        }=Stream)
   when ?NOT_FLAG(Flags, ?FLAG_END_STREAM) ->
     Bin = h2_frame_data:data(Payload),
-    {ok, NewCBState} = CB:on_receive_request_data(Bin, CallbackState),
+    {ok, NewCBState} = handle_data(Type, CB, Bin, CallbackState),
     {next_state,
      open,
      Stream#stream_state{
@@ -307,11 +318,12 @@ open({recv_data,
      #stream_state{
         incoming_frames=IFQ,
         callback_mod=CB,
+        type=Type,
         callback_state=CallbackState
        }=Stream)
   when ?IS_FLAG(Flags, ?FLAG_END_STREAM) ->
     Bin = h2_frame_data:data(Payload),
-    {ok, CallbackState1} = CB:on_receive_request_data(Bin, CallbackState),
+    {ok, CallbackState1} = handle_data(Type, CB, Bin, CallbackState),
     NewStream = Stream#stream_state{
                   incoming_frames=queue:in(F, IFQ),
                   request_body_size=Stream#stream_state.request_body_size+L,
@@ -319,6 +331,10 @@ open({recv_data,
                   callback_state=CallbackState1
                  },
     case check_content_length(NewStream) of
+        undefined ->
+            {next_state,
+             open,
+             NewStream};
         ok ->
             {ok, NewCBState} = CB:on_request_end_stream(CallbackState1),
             {next_state,
@@ -334,7 +350,7 @@ open({recv_data,
 
 %% Trailers
 open({recv_h, Trailers},
-     #stream_state{}=Stream) ->
+     #stream_state{type=server}=Stream) ->
     case is_valid_headers(request, Trailers) of
         ok ->
             {next_state,
@@ -345,6 +361,19 @@ open({recv_h, Trailers},
         {error, Code} ->
             rst_stream_(Code, Stream)
     end;
+open({recv_h, Headers},
+     #stream_state{type=client}=Stream) ->
+    case is_valid_headers(response, Headers) of
+        ok ->
+            {next_state,
+             open,
+             Stream#stream_state{
+               response_headers=Headers
+              }};
+        {error, Code} ->
+            rst_stream_(Code, Stream)
+    end;
+
 open({send_data,
       {#frame_header{
           type=?DATA,
@@ -567,7 +596,7 @@ check_content_length(Stream) ->
 
     case ContentLength of
         undefined ->
-            ok;
+            undefined;
         _Other ->
             try binary_to_integer(ContentLength) of
                 Integer ->
@@ -656,3 +685,8 @@ validate_pseudos(_, DoneWithPseudos, _Found) ->
       DoneWithPseudos)
         andalso
         no_upper_names(DoneWithPseudos).
+
+handle_data(server, CB, Bin, CallbackState) ->
+    CB:on_receive_request_data(Bin, CallbackState);
+handle_data(client, CB, Bin, CallbackState) ->
+    CB:on_receive_response_data(Bin, CallbackState).
