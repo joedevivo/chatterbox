@@ -1085,13 +1085,19 @@ handle_sync_event(streams, _F, StateName,
 handle_sync_event({get_response, StreamId}, _F, StateName,
                   #connection{}=Conn) ->
     Stream = h2_stream_set:get(StreamId, Conn#connection.streams),
-    Reply = case h2_stream_set:type(Stream) of
-                closed ->
-                    {ok, h2_stream_set:response(Stream)};
-                active ->
-                    not_ready
-            end,
-    {reply, Reply, StateName, Conn};
+    {Reply, NewStreams} =
+        case h2_stream_set:type(Stream) of
+            closed ->
+                NewStreams0 =
+                    h2_stream_set:close(
+                      Stream,
+                      garbage,
+                      Conn#connection.streams),
+                {{ok, h2_stream_set:response(Stream)}, NewStreams0};
+            active ->
+                {not_ready, Conn#connection.streams}
+        end,
+    {reply, Reply, StateName, Conn#connection{streams=NewStreams}};
 handle_sync_event({new_stream, NotifyPid}, _F, StateName,
                   #connection{
                      streams=Streams,
