@@ -146,7 +146,9 @@
     my_active_count/1,
     their_active_count/1,
     my_active_streams/1,
-    their_active_streams/1
+    their_active_streams/1,
+    my_max_active/1,
+    their_max_active/1
    ]
   ).
 
@@ -858,3 +860,14 @@ my_active_streams(SS) ->
 -spec their_active_streams(stream_set()) -> [stream()].
 their_active_streams(SS) ->
     SS#stream_set.theirs#peer_subset.active.
+
+%% My MCS (max_active)
+-spec my_max_active(stream_set()) -> non_neg_integer().
+my_max_active(SS) ->
+    SS#stream_set.mine#peer_subset.max_active.
+
+%% Their MCS (max_active)
+-spec their_max_active(stream_set()) -> non_neg_integer().
+their_max_active(SS) ->
+    SS#stream_set.theirs#peer_subset.max_active.
+
