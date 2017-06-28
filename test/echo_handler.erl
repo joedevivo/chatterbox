@@ -5,7 +5,7 @@
 -behaviour(h2_stream).
 
 -export([
-         init/2,
+         init/3,
          on_receive_request_headers/2,
          on_send_push_promise/2,
          on_receive_request_data/2,
@@ -17,9 +17,10 @@
                 buffer = <<>> :: binary()
                }).
 
--spec init(pid(), stream_id()) -> {ok, any()}.
-init(ConnPid, StreamId) -> {ok, #state{conn_pid=ConnPid,
-                                       stream_id=StreamId}}.
+-spec init(pid(), stream_id(), list()) -> {ok, any()}.
+init(ConnPid, StreamId, _Opts) ->
+    {ok, #state{conn_pid=ConnPid,
+                stream_id=StreamId}}.
 
 -spec on_receive_request_headers(
             Headers :: hpack:headers(),

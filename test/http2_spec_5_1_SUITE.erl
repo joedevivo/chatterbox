@@ -19,6 +19,8 @@ init_per_suite(Config) ->
     application:ensure_started(crypto),
     Config.
 
+end_per_suite(_Config) ->
+    ok.
 
 init_per_testcase(total_streams_above_max_concurrent, Config) ->
     chatterbox_test_buddy:start(
