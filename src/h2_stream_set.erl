@@ -122,7 +122,7 @@
 -export(
    [
     new/1,
-    new_stream/7,
+    new_stream/8,
     get/2,
     upsert/2,
     sort/1
@@ -202,6 +202,7 @@ new(server) ->
         StreamId :: stream_id(),
         NotifyPid :: pid(),
         CBMod :: module(),
+        CBOpts :: list(),
         Socket :: sock:socket(),
         InitialSendWindow :: integer(),
         InitialRecvWindow :: integer(),
@@ -212,6 +213,7 @@ new_stream(
           StreamId,
           NotifyPid,
           CBMod,
+          CBOpts,
           Socket,
           InitialSendWindow,
           InitialRecvWindow,
@@ -227,6 +229,7 @@ new_stream(
                        StreamId,
                        self(),
                        CBMod,
+                       CBOpts,
                        Socket
                       ),
             NewStream = #active_stream{

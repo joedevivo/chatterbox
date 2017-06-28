@@ -5,7 +5,7 @@
 -behaviour(h2_stream).
 
 -export([
-         init/2,
+         init/3,
          on_receive_request_headers/2,
          on_send_push_promise/2,
          on_receive_request_data/2,
@@ -18,7 +18,7 @@
         stream_id :: stream_id()
           }).
 
-init(ConnPid, StreamId) ->
+init(ConnPid, StreamId, _) ->
     %% You need to pull settings here from application:env or something
     {ok, #cb_static{connection_pid=ConnPid,
                     stream_id=StreamId}}.

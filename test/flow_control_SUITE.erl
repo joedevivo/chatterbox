@@ -16,6 +16,9 @@ init_per_suite(Config) ->
     application:ensure_started(crypto),
     Config.
 
+end_per_suite(_Config) ->
+    ok.
+
 init_per_testcase(
   exceed_server_connection_receive_window,
   Config) ->

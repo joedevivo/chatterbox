@@ -3,7 +3,7 @@
 -behaviour(h2_stream).
 
 -export([
-         init/2,
+         init/3,
          on_receive_request_headers/2,
          on_send_push_promise/2,
          on_receive_request_data/2,
@@ -14,7 +14,7 @@
         req_headers=[]
           }).
 
-init(_ConnPid, _StreamId) ->
+init(_ConnPid, _StreamId, _Opts) ->
     %% You need to pull settings here from application:env or something
     {ok, #cb_static{}}.
 

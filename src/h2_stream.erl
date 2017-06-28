@@ -3,7 +3,7 @@
 
 %% Public API
 -export([
-         start_link/4,
+         start_link/5,
          send_pp/2,
          send_data/2,
          stream_id/0,
@@ -71,7 +71,9 @@
 
 -callback init(
             Conn :: pid(),
-            StreamId :: stream_id()) ->
+            StreamId :: stream_id(),
+            CallbackOptions :: list()
+           ) ->
   {ok, callback_state()}.
 
 -callback on_receive_request_headers(
@@ -98,14 +100,16 @@
         StreamId :: stream_id(),
         Connection :: pid(),
         CallbackModule :: module(),
+        CallbackOptions :: list(),
         Socket :: sock:socket()
                   ) ->
                         {ok, pid()} | ignore | {error, term()}.
-start_link(StreamId, Connection, CallbackModule, Socket) ->
+start_link(StreamId, Connection, CallbackModule, CallbackOptions, Socket) ->
     gen_fsm:start_link(?MODULE,
                        [StreamId,
                         Connection,
                         CallbackModule,
+                        CallbackOptions,
                         Socket],
                        []).
 
@@ -146,10 +150,11 @@ init([
       StreamId,
       ConnectionPid,
       CB,
+      CBOptions,
       Socket
      ]) ->
     %% TODO: Check for CB implementing this behaviour
-    {ok, CallbackState} = CB:init(ConnectionPid, StreamId),
+    {ok, CallbackState} = CB:init(ConnectionPid, StreamId, CBOptions),
 
     {ok, idle, #stream_state{
                   callback_mod=CB,
