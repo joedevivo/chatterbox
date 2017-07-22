@@ -102,6 +102,8 @@ parse_settings(<<0,5,Val:4/binary,T/binary>>, S) ->
     parse_settings(T, [{?SETTINGS_MAX_FRAME_SIZE, binary:decode_unsigned(Val)}|S]);
 parse_settings(<<0,6,Val:4/binary,T/binary>>, S)->
     parse_settings(T, [{?SETTINGS_MAX_HEADER_LIST_SIZE, binary:decode_unsigned(Val)}|S]);
+parse_settings(<<_:6/binary,T/binary>>, S)->
+    parse_settings(T, S);
 parse_settings(<<>>, Settings) ->
     Settings.
 
