@@ -102,6 +102,11 @@ parse_settings(<<0,5,Val:4/binary,T/binary>>, S) ->
     parse_settings(T, [{?SETTINGS_MAX_FRAME_SIZE, binary:decode_unsigned(Val)}|S]);
 parse_settings(<<0,6,Val:4/binary,T/binary>>, S)->
     parse_settings(T, [{?SETTINGS_MAX_HEADER_LIST_SIZE, binary:decode_unsigned(Val)}|S]);
+% Frame settings in the range 0xf000 and 0xffff are reserved for experimental use. They can
+% be ignored but should not cause parse settings issues.
+parse_settings(<<SettingsCode:2/binary,_:4/binary,T/binary>>, S)
+  when SettingsCode >= 61440; SettingsCode =< 65535 ->
+    parse_settings(T, S); % Ignore settings in the experimental range
 parse_settings(<<>>, Settings) ->
     Settings.
 
