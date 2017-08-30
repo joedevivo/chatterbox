@@ -8,6 +8,7 @@
 all() ->
     [
      sends_invalid_push_setting,
+     sends_unknown_settings_frame,
      sends_value_above_max_flow_control_window_size,
      sends_max_frame_size_too_small,
      sends_max_frame_size_too_big
@@ -35,6 +36,21 @@ sends_invalid_push_setting(_Config) ->
     [{GoAwayH, GoAway}] = Resp,
     ?assertEqual(?GOAWAY, (GoAwayH#frame_header.type)),
     ?assertEqual(?PROTOCOL_ERROR, (h2_frame_goaway:error_code(GoAway))),
+    ok.
+
+sends_unknown_settings_frame(_Config) ->
+    {ok, Client} = http2c:start_link(),
+
+    Bin = <<16#00,16#00,16#06,16#04,16#00,16#00,16#00,16#00,16#00,
+            16#254,16#03,16#00,16#00,16#00,16#01>>,
+    http2c:send_binary(Client, Bin),
+
+    Resp = http2c:wait_for_n_frames(Client, 0, 1),
+    ct:pal("Resp: ~p", [Resp]),
+    ?assertEqual(1, (length(Resp))),
+    [{Header, Payload}] = Resp,
+    ?assertEqual(?SETTINGS, (Header#frame_header.type)),
+    ?assertEqual({settings, []}, (Payload)),
     ok.
 
 sends_value_above_max_flow_control_window_size(_Config) ->
