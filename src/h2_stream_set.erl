@@ -745,7 +745,7 @@ s_send_what_we_can(SWS, MFS, #active_stream{}=Stream) ->
         stream ->
             {SWS - SentBytes, NewS};
         connection ->
-            {0, NewS}
+            {SWS - SentBytes, NewS}
     end;
 s_send_what_we_can(SWS, _MFS, NonActiveStream) ->
     {SWS, NonActiveStream}.
