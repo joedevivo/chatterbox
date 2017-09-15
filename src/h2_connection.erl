@@ -1601,7 +1601,7 @@ recv_h(Stream,
         active ->
             %% If the stream is active, let the process deal with it.
             Pid = h2_stream_set:pid(Stream),
-            gen_fsm:send_event(Pid, {recv_h, Headers});
+            h2_stream:send_event(Pid, {recv_h, Headers});
         closed ->
             %% If the stream is closed, there's no running FSM
             rst_stream(Stream, ?STREAM_CLOSED, Conn);
@@ -1624,7 +1624,7 @@ send_h(Stream, Headers) ->
                        [h2_stream_set:stream_id(Stream)]),
             ok;
         Pid ->
-            gen_fsm:send_event(Pid, {send_h, Headers})
+            h2_stream:send_event(Pid, {send_h, Headers})
     end.
 
 -spec recv_es(Stream :: h2_stream_set:stream(),
@@ -1635,7 +1635,7 @@ recv_es(Stream, Conn) ->
     case h2_stream_set:type(Stream) of
         active ->
             Pid = h2_stream_set:pid(Stream),
-            gen_fsm:send_event(Pid, recv_es);
+            h2_stream:send_event(Pid, recv_es);
         closed ->
             rst_stream(Stream, ?STREAM_CLOSED, Conn);
         idle ->
@@ -1651,7 +1651,7 @@ recv_pp(Stream, Headers) ->
             %% Should this be an error?
             ok;
         Pid ->
-            gen_fsm:send_event(Pid, {recv_pp, Headers})
+            h2_stream:send_event(Pid, {recv_pp, Headers})
     end.
 
 -spec recv_data(h2_stream_set:stream(),
@@ -1665,7 +1665,7 @@ recv_data(Stream, Frame) ->
             %% anyway.
             ok;
         Pid ->
-            gen_fsm:send_event(Pid, {recv_data, Frame})
+            h2_stream:send_event(Pid, {recv_data, Frame})
     end.
 
 send_request(NextId, NotifyPid, Conn, Streams, Headers, Body) ->

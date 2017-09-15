@@ -4,6 +4,7 @@
 %% Public API
 -export([
          start_link/5,
+         send_event/2,
          send_pp/2,
          send_data/2,
          stream_id/0,
@@ -14,26 +15,23 @@
          stop/1
         ]).
 
-%% gen_fsm callbacks
--behaviour(gen_fsm).
--export([
-         init/1,
-         terminate/3,
-         handle_event/3,
-         handle_sync_event/4,
-         handle_info/3,
-         code_change/4
-        ]).
+%% gen_statem callbacks
+-behaviour(gen_statem).
 
-%% gen_fsm states
+-export([init/1,
+         callback_mode/0,
+         terminate/3,
+         code_change/4]).
+
+%% gen_statem states
 -export([
-         idle/2,
-         reserved_local/2,
-         reserved_remote/2,
-         open/2,
-         half_closed_local/2,
-         half_closed_remote/2,
-         closed/2
+         idle/3,
+         reserved_local/3,
+         reserved_remote/3,
+         open/3,
+         half_closed_local/3,
+         half_closed_remote/3,
+         closed/3
         ]).
 
 -type stream_state_name() :: 'idle'
@@ -105,46 +103,49 @@
                   ) ->
                         {ok, pid()} | ignore | {error, term()}.
 start_link(StreamId, Connection, CallbackModule, CallbackOptions, Socket) ->
-    gen_fsm:start_link(?MODULE,
-                       [StreamId,
-                        Connection,
-                        CallbackModule,
-                        CallbackOptions,
-                        Socket],
-                       []).
+    gen_statem:start_link(?MODULE,
+                          [StreamId,
+                           Connection,
+                           CallbackModule,
+                           CallbackOptions,
+                           Socket],
+                          []).
+
+send_event(Pid, Event) ->
+    gen_statem:cast(Pid, Event).
 
 -spec send_pp(pid(), hpack:headers()) ->
                      ok.
 send_pp(Pid, Headers) ->
-    gen_fsm:send_event(Pid, {send_pp, Headers}).
+    gen_statem:cast(Pid, {send_pp, Headers}).
 
 -spec send_data(pid(), h2_frame_data:frame()) ->
                         ok | flow_control.
 send_data(Pid, Frame) ->
-    gen_fsm:send_event(Pid, {send_data, Frame}).
+    gen_statem:cast(Pid, {send_data, Frame}).
 
 -spec stream_id() -> stream_id().
 stream_id() ->
-    gen_fsm:sync_send_all_state_event(self(), stream_id).
+    gen_statem:call(self(), stream_id).
 
 -spec connection() -> pid().
 connection() ->
-    gen_fsm:sync_send_all_state_event(self(), connection).
+    gen_statem:call(self(), connection).
 
 -spec send_window_update(non_neg_integer()) -> ok.
 send_window_update(Size) ->
-    gen_fsm:send_all_state_event(self(), {send_window_update, Size}).
+    gen_statem:cast(self(), {send_window_update, Size}).
 
 -spec send_connection_window_update(non_neg_integer()) -> ok.
 send_connection_window_update(Size) ->
-    gen_fsm:send_all_state_event(self(), {send_connection_window_update, Size}).
+    gen_statem:cast(self(), {send_connection_window_update, Size}).
 
 rst_stream(Pid, Code) ->
-    gen_fsm:sync_send_all_state_event(Pid, {rst_stream, Code}).
+    gen_statem:call(Pid, {rst_stream, Code}).
 
 -spec stop(pid()) -> ok.
 stop(Pid) ->
-    gen_fsm:stop(Pid).
+    gen_statem:stop(Pid).
 
 init([
       StreamId,
@@ -164,6 +165,9 @@ init([
                   callback_state=CallbackState
                  }}.
 
+callback_mode() ->
+    state_functions.
+
 %% IMPORTANT: If we're in an idle state, we can only send/receive
 %% HEADERS frames. The diagram in the spec wants you believe that you
 %% can send or receive PUSH_PROMISES too, but that's a LIE. What you
@@ -175,7 +179,7 @@ init([
 %% drove me crazy until I figured it out
 
 %% Server 'RECV H'
-idle({recv_h, Headers},
+idle(cast, {recv_h, Headers},
      #stream_state{
         callback_mod=CB,
         callback_state=CallbackState
@@ -194,7 +198,7 @@ idle({recv_h, Headers},
     end;
 
 %% Server 'SEND PP'
-idle({send_pp, Headers},
+idle(cast, {send_pp, Headers},
      #stream_state{
         callback_mod=CB,
         callback_state=CallbackState
@@ -210,7 +214,7 @@ idle({send_pp, Headers},
        %% because there is no END_STREAM event
 
 %% Client 'RECV PP'
-idle({recv_pp, Headers},
+idle(cast, {recv_pp, Headers},
      #stream_state{
        }=Stream) ->
     {next_state,
@@ -219,19 +223,17 @@ idle({recv_pp, Headers},
        request_headers=Headers
       }};
 %% Client 'SEND H'
-idle({send_h, Headers},
+idle(cast, {send_h, Headers},
      #stream_state{
        }=Stream) ->
     {next_state, open,
      Stream#stream_state{
         request_headers=Headers
        }};
-idle(Message, State) ->
-    lager:error("stream idle processing unexpected message: ~p", [Message]),
-    %% Never should happen.
-    {next_state, idle, State}.
+idle(Type, Event, State) ->
+    handle_event(Type, Event, State).
 
-reserved_local(timeout,
+reserved_local(timeout, _,
                #stream_state{
                   callback_state=CallbackState,
                   callback_mod=CB
@@ -243,25 +245,29 @@ reserved_local(timeout,
      Stream#stream_state{
        callback_state=NewCBState
       }};
-reserved_local({send_h, Headers},
+reserved_local(cast, {send_h, Headers},
               #stream_state{
                 }=Stream) ->
     {next_state,
      half_closed_remote,
      Stream#stream_state{
        response_headers=Headers
-      }}.
+      }};
+reserved_local(Type, Event, State) ->
+    handle_event(Type, Event, State).
 
-reserved_remote({recv_h, Headers},
+reserved_remote(cast, {recv_h, Headers},
                 #stream_state{
                   }=Stream) ->
     {next_state,
      half_closed_local,
      Stream#stream_state{
        response_headers=Headers
-      }}.
+      }};
+reserved_remote(Type, Event, State) ->
+    handle_event(Type, Event, State).
 
-open(recv_es,
+open(cast, recv_es,
      #stream_state{
         callback_mod=CB,
         callback_state=CallbackState
@@ -280,7 +286,7 @@ open(recv_es,
              Stream}
     end;
 
-open({recv_data,
+open(cast, {recv_data,
       {#frame_header{
           flags=Flags,
           length=L,
@@ -303,7 +309,7 @@ open({recv_data,
        request_body_size=Stream#stream_state.request_body_size+L,
        callback_state=NewCBState
       }};
-open({recv_data,
+open(cast, {recv_data,
       {#frame_header{
           flags=Flags,
           length=L,
@@ -338,7 +344,7 @@ open({recv_data,
         end;
 
 %% Trailers
-open({recv_h, Trailers},
+open(cast, {recv_h, Trailers},
      #stream_state{}=Stream) ->
     case is_valid_headers(request, Trailers) of
         ok ->
@@ -350,7 +356,7 @@ open({recv_h, Trailers},
         {error, Code} ->
             rst_stream_(Code, Stream)
     end;
-open({send_data,
+open(cast, {send_data,
       {#frame_header{
           type=?DATA,
           flags=Flags
@@ -368,7 +374,7 @@ open({send_data,
                 open
         end,
     {next_state, NextState, Stream};
-open(
+open(cast,
   {send_h, Headers},
   #stream_state{}=Stream) ->
     {next_state,
@@ -376,11 +382,11 @@ open(
      Stream#stream_state{
        response_headers=Headers
       }};
-open(Msg, Stream) ->
-    lager:warning("Some unexpected message in open state. ~p, ~p", [Msg, Stream]),
-    {next_state, open, Stream}.
+open(Type, Event, State) ->
+    handle_event(Type, Event, State).
 
-half_closed_remote(
+
+half_closed_remote(cast,
   {send_h, Headers},
   #stream_state{}=Stream) ->
     {next_state,
@@ -388,7 +394,7 @@ half_closed_remote(
      Stream#stream_state{
        response_headers=Headers
       }};
-half_closed_remote(
+half_closed_remote(cast,
                   {send_data,
                    {
                      #frame_header{
@@ -412,15 +418,17 @@ half_closed_remote(
     end;
 
 
-half_closed_remote(_,
+half_closed_remote(cast, _,
        #stream_state{}=Stream) ->
-    rst_stream_(?STREAM_CLOSED, Stream).
+    rst_stream_(?STREAM_CLOSED, Stream);
+half_closed_remote(Type, Event, State) ->
+    handle_event(Type, Event, State).
 
 %% PUSH_PROMISES can only be received by streams in the open or
 %% half_closed_local, but will create a new stream in the idle state,
 %% but that stream may be ready to transition, it'll make sense, I
 %% hope!
-half_closed_local(
+half_closed_local(cast,
   {recv_h, Headers},
   #stream_state{}=Stream) ->
   case is_valid_headers(response, Headers) of
@@ -432,7 +440,7 @@ half_closed_local(
       {error, Code} ->
           rst_stream_(Code, Stream)
   end;
-half_closed_local(
+half_closed_local(cast,
   {recv_data,
    {#frame_header{
        flags=Flags,
@@ -460,7 +468,7 @@ half_closed_local(
               }}
     end;
 
-half_closed_local(recv_es,
+half_closed_local(cast, recv_es,
                   #stream_state{
                      response_body = undefined,
                      incoming_frames = Q
@@ -472,7 +480,7 @@ half_closed_local(recv_es,
        response_body = Data
       }, 0};
 
-half_closed_local(recv_es,
+half_closed_local(cast, recv_es,
                   #stream_state{
                      response_body = Data
                     } = Stream) ->
@@ -482,11 +490,13 @@ half_closed_local(recv_es,
        response_body = Data
       }, 0};
 
-half_closed_local(_,
+half_closed_local(_, _,
        #stream_state{}=Stream) ->
-    rst_stream_(?STREAM_CLOSED, Stream).
+    rst_stream_(?STREAM_CLOSED, Stream);
+half_closed_local(Type, Event, State) ->
+    handle_event(Type, Event, State).
 
-closed(timeout,
+closed(timeout, _,
        #stream_state{}=Stream) ->
     gen_fsm:send_all_state_event(Stream#stream_state.connection,
                                  {stream_finished,
@@ -494,45 +504,38 @@ closed(timeout,
                                   Stream#stream_state.response_headers,
                                   Stream#stream_state.response_body}),
     {stop, normal, Stream};
-closed(_,
+closed(_, _,
        #stream_state{}=Stream) ->
-    rst_stream_(?STREAM_CLOSED, Stream).
+    rst_stream_(?STREAM_CLOSED, Stream);
+closed(Type, Event, State) ->
+    handle_event(Type, Event, State).
 
-handle_event({send_window_update, 0},
-             StateName,
+handle_event(_, {send_window_update, 0},
              #stream_state{}=Stream) ->
-    {next_state, StateName, Stream};
-handle_event({send_window_update, Size},
-             StateName,
+    {keep_state, Stream};
+handle_event(_, {send_window_update, Size},
              #stream_state{
-                socket=Socket,
-                stream_id=StreamId
-               }=Stream) ->
+               socket=Socket,
+               stream_id=StreamId
+              }=Stream) ->
     h2_frame_window_update:send(Socket, Size, StreamId),
-    {next_state, StateName,
-     Stream#stream_state{}};
-handle_event({send_connection_window_update, Size},
-             StateName,
+    {keep_state, Stream#stream_state{}};
+handle_event(_, {send_connection_window_update, Size},
              #stream_state{
-                connection=ConnPid
-               }=State) ->
+                  connection=ConnPid
+                 }=State) ->
     h2_connection:send_window_update(ConnPid, Size),
-    {next_state, StateName, State};
-handle_event(_E, StateName, State) ->
-    {next_state, StateName, State}.
-
-handle_sync_event({rst_stream, ErrorCode}, _F, StateName, State=#stream_state{}) ->
-    {reply, {ok, rst_stream_(ErrorCode, State)}, StateName, State};
-handle_sync_event(stream_id, _F, StateName, State=#stream_state{stream_id=StreamId}) ->
-    {reply, StreamId, StateName, State};
-handle_sync_event(connection, _F, StateName, State=#stream_state{connection=Conn}) ->
-    {reply, Conn, StateName, State};
-handle_sync_event(_E, _F, StateName, State) ->
-    {reply, wat, StateName, State}.
-
-handle_info(M, _StateName, State) ->
-    lager:error("BOOM! ~p", [M]),
-    {stop, normal, State}.
+    {keep_state, State};
+handle_event({call,  From}, {rst_stream, ErrorCode}, State=#stream_state{}) ->
+    {keep_state, State, [{reply, From, {ok, rst_stream_(ErrorCode, State)}}]};
+handle_event({call, From}, stream_id, State=#stream_state{stream_id=StreamId}) ->
+    {keep_state, State, [{reply, From, StreamId}]};
+handle_event({call, From}, connection, State=#stream_state{connection=Conn}) ->
+    {keep_state, State, [{reply, From, Conn}]};
+handle_event({call, From}, _, State) ->
+    {keep_state, State, [{reply, From, wat}]};
+handle_event(_, _, State) ->
+    {keep_state, State}.
 
 code_change(_OldVsn, StateName, State, _Extra) ->
     {ok, StateName, State}.
