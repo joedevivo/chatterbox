@@ -16,7 +16,7 @@ Chatterbox is a `rebar3` jam. Get into it! rebar3.org
 ## HTTP/2 Connections
 
 Chatterbox provides a module `h2_connection` which models (you
-guessed it!) an HTTP/2 connection. This gen_fsm can represent either
+guessed it!) an HTTP/2 connection. This gen_statem can represent either
 side of an HTTP/2 connection (i.e. a client *or* server). Really, the
 only difference is in how you start the connection.
 

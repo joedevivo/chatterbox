@@ -498,11 +498,11 @@ half_closed_local(Type, Event, State) ->
 
 closed(timeout, _,
        #stream_state{}=Stream) ->
-    gen_fsm:send_all_state_event(Stream#stream_state.connection,
-                                 {stream_finished,
-                                  Stream#stream_state.stream_id,
-                                  Stream#stream_state.response_headers,
-                                  Stream#stream_state.response_body}),
+    gen_statem:cast(Stream#stream_state.connection,
+                    {stream_finished,
+                     Stream#stream_state.stream_id,
+                     Stream#stream_state.response_headers,
+                     Stream#stream_state.response_body}),
     {stop, normal, Stream};
 closed(_, _,
        #stream_state{}=Stream) ->
