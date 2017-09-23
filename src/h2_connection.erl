@@ -29,6 +29,7 @@
          get_peercert/1,
          get_streams/1,
          send_window_update/2,
+         update_settings/2,
          send_frame/2
         ]).
 
@@ -293,6 +294,10 @@ get_streams(Pid) ->
 -spec send_window_update(pid(), non_neg_integer()) -> ok.
 send_window_update(Pid, Size) ->
     gen_fsm:send_all_state_event(Pid, {send_window_update, Size}).
+
+-spec update_settings(pid(), h2_frame_settings:payload()) -> ok.
+update_settings(Pid, Payload) ->
+    gen_fsm:send_all_state_event(Pid, {update_settings, Payload}).
 
 -spec stop(pid()) -> ok.
 stop(Pid) ->
@@ -925,6 +930,12 @@ handle_event({send_window_update, Size},
      Conn#connection{
        recv_window_size=CRWS+Size
       }};
+handle_event({update_settings, Http2Settings},
+             StateName,
+             #connection{}=Conn) ->
+    {next_state,
+     StateName,
+     send_settings(Http2Settings, Conn)};
 handle_event({send_headers, StreamId, Headers, Opts},
              StateName,
              #connection{
