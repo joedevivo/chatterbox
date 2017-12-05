@@ -155,7 +155,7 @@ init([
       Socket
      ]) ->
     %% TODO: Check for CB implementing this behaviour
-    {ok, CallbackState} = CB:init(ConnectionPid, StreamId, CBOptions),
+    {ok, CallbackState} = CB:init(ConnectionPid, StreamId, [Socket | CBOptions]),
 
     {ok, idle, #stream_state{
                   callback_mod=CB,
@@ -532,10 +532,20 @@ handle_event({call, From}, stream_id, State=#stream_state{stream_id=StreamId}) -
     {keep_state, State, [{reply, From, StreamId}]};
 handle_event({call, From}, connection, State=#stream_state{connection=Conn}) ->
     {keep_state, State, [{reply, From, Conn}]};
-handle_event({call, From}, _, State) ->
-    {keep_state, State, [{reply, From, wat}]};
-handle_event(_, _, State) ->
-    {keep_state, State}.
+handle_event({call, From}, Event, State=#stream_state{callback_mod=CB,
+                                                      callback_state=CallbackState}) ->
+    CallbackState1 = CB:handle_info(Event, CallbackState),
+    {keep_state, State#stream_state{callback_state=CallbackState1}, [{reply, From, ok}]};
+handle_event(cast, Event, State=#stream_state{callback_mod=CB,
+                                              callback_state=CallbackState}) ->
+    CallbackState1 = CB:handle_info(Event, CallbackState),
+    {keep_state, State#stream_state{callback_state=CallbackState1}};
+handle_event(info, Event, State=#stream_state{callback_mod=CB,
+                                              callback_state=CallbackState}) ->
+     CallbackState1 = CB:handle_info(Event, CallbackState),
+    {keep_state, State#stream_state{callback_state=CallbackState1}};
+handle_event(_, _Event, State) ->
+     {keep_state, State}.
 
 code_change(_OldVsn, StateName, State, _Extra) ->
     {ok, StateName, State}.
