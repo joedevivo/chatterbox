@@ -17,6 +17,8 @@
 -export([
          send_headers/3,
          send_headers/4,
+         send_trailers/3,
+         send_trailers/4,
          send_body/3,
          send_body/4,
          send_request/3,
@@ -243,6 +245,16 @@ send_headers(Pid, StreamId, Headers) ->
 -spec send_headers(pid(), stream_id(), hpack:headers(), send_opts()) -> ok.
 send_headers(Pid, StreamId, Headers, Opts) ->
     gen_statem:cast(Pid, {send_headers, StreamId, Headers, Opts}),
+    ok.
+
+-spec send_trailers(pid(), stream_id(), hpack:headers()) -> ok.
+send_trailers(Pid, StreamId, Trailers) ->
+    gen_statem:cast(Pid, {send_trailers, StreamId, Trailers, []}),
+    ok.
+
+-spec send_trailers(pid(), stream_id(), hpack:headers(), send_opts()) -> ok.
+send_trailers(Pid, StreamId, Trailers, Opts) ->
+    gen_statem:cast(Pid, {send_trailers, StreamId, Trailers, Opts}),
     ok.
 
 -spec send_body(pid(), stream_id(), binary()) -> ok.
@@ -1011,7 +1023,52 @@ handle_event(_, {send_headers, StreamId, Headers, Opts},
         closed ->
             {keep_state, Conn}
     end;
+handle_event(_, {send_trailers, StreamId, Headers, _Opts},
+             #connection{
+                encode_context=EncodeContext,
+                streams = Streams,
+                socket = _Socket
+               }=Conn
+            ) ->
+    lager:debug("[~p] {send trailers, ~p, ~p}",
+                [Conn#connection.type, StreamId, Headers]),
+    %% StreamComplete = proplists:get_value(send_end_stream, Opts, false),
 
+    Stream = h2_stream_set:get(StreamId, Streams),
+    case h2_stream_set:type(Stream) of
+        active ->
+            {FramesToSend, NewContext} =
+                h2_frame_headers:to_frames(h2_stream_set:stream_id(Stream),
+                                           Headers,
+                                           EncodeContext,
+                                           (Conn#connection.peer_settings)#settings.max_frame_size,
+                                           true
+                                          ),
+            NewS = h2_stream_set:update_trailers(FramesToSend, Stream),
+            {NewSWS, NewStreams} =
+                h2_stream_set:send_what_we_can(
+                  StreamId,
+                  Conn#connection.send_window_size,
+                  (Conn#connection.peer_settings)#settings.max_frame_size,
+                  h2_stream_set:upsert(
+                    h2_stream_set:update_data_queue(h2_stream_set:queued_data(Stream), false, NewS),
+                    Conn#connection.streams)),
+
+            send_t(Stream, Headers),
+            {keep_state,
+             Conn#connection{
+               encode_context=NewContext,
+               send_window_size=NewSWS,
+               streams=NewStreams
+              }};
+        idle ->
+            %% In theory this is a client maybe activating a stream,
+            %% but in practice, we've already activated the stream in
+            %% new_stream/1
+            {keep_state, Conn};
+        closed ->
+            {keep_state, Conn}
+    end;
 handle_event(_, {send_body, StreamId, Body, Opts},
              #connection{}=Conn) ->
     lager:debug("[~p] Send Body Stream ~p",
@@ -1614,6 +1671,21 @@ send_h(Stream, Headers) ->
             ok;
         Pid ->
             h2_stream:send_event(Pid, {send_h, Headers})
+    end.
+
+-spec send_t(
+        h2_stream_set:stream(),
+        hpack:headers()) ->
+                    ok.
+send_t(Stream, Trailers) ->
+    case h2_stream_set:pid(Stream) of
+        undefined ->
+            %% Should this be some kind of error?
+            lager:debug("tried sending trailers on a non running stream ~p",
+                       [h2_stream_set:stream_id(Stream)]),
+            ok;
+        Pid ->
+            h2_stream:send_event(Pid, {send_t, Trailers})
     end.
 
 -spec recv_es(Stream :: h2_stream_set:stream(),

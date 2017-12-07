@@ -55,6 +55,7 @@
           request_end_stream = false :: boolean(),
           request_end_headers = false :: boolean(),
           response_headers = [] :: hpack:headers(),
+          response_trailers = [] :: hpack:headers(),
           response_body :: iodata() | undefined,
           response_end_headers = false :: boolean(),
           response_end_stream = false :: boolean(),
@@ -257,10 +258,26 @@ reserved_local(cast, {send_h, Headers},
      Stream#stream_state{
        response_headers=Headers
       }};
+reserved_local(cast, {send_t, Headers},
+              #stream_state{
+                }=Stream) ->
+    {next_state,
+     half_closed_remote,
+     Stream#stream_state{
+       response_trailers=Headers
+      }};
 reserved_local(Type, Event, State) ->
     handle_event(Type, Event, State).
 
 reserved_remote(cast, {recv_h, Headers},
+                #stream_state{
+                  }=Stream) ->
+    {next_state,
+     half_closed_local,
+     Stream#stream_state{
+       response_headers=Headers
+      }};
+reserved_remote(cast, {recv_t, Headers},
                 #stream_state{
                   }=Stream) ->
     {next_state,
@@ -362,6 +379,24 @@ open(cast, {recv_h, Trailers},
     end;
 open(cast, {send_data,
       {#frame_header{
+          type=?HEADERS,
+          flags=Flags
+         }, _}=F},
+     #stream_state{
+        socket=Socket
+       }=Stream) ->
+    sock:send(Socket, h2_frame:to_binary(F)),
+
+    NextState =
+        case ?IS_FLAG(Flags, ?FLAG_END_STREAM) of
+            true ->
+                half_closed_local;
+            _ ->
+                open
+        end,
+    {next_state, NextState, Stream};
+open(cast, {send_data,
+      {#frame_header{
           type=?DATA,
           flags=Flags
          }, _}=F},
@@ -386,6 +421,14 @@ open(cast,
      Stream#stream_state{
        response_headers=Headers
       }};
+open(cast,
+  {send_t, Headers},
+  #stream_state{}=Stream) ->
+    {next_state,
+     half_closed_local,
+     Stream#stream_state{
+       response_trailers=Headers
+      }};
 open(Type, Event, State) ->
     handle_event(Type, Event, State).
 
@@ -399,11 +442,41 @@ half_closed_remote(cast,
        response_headers=Headers
       }};
 half_closed_remote(cast,
+  {send_t, Headers},
+  #stream_state{}=Stream) ->
+    {next_state,
+     half_closed_remote,
+     Stream#stream_state{
+       response_trailers=Headers
+      }};
+half_closed_remote(cast,
                   {send_data,
                    {
                      #frame_header{
                         flags=Flags,
                         type=?DATA
+                       },_
+                   }=F}=_Msg,
+  #stream_state{
+     socket=Socket
+    }=Stream) ->
+    case sock:send(Socket, h2_frame:to_binary(F)) of
+        ok ->
+            case ?IS_FLAG(Flags, ?FLAG_END_STREAM) of
+                true ->
+                    {next_state, closed, Stream, 0};
+                _ ->
+                    {next_state, half_closed_remote, Stream}
+            end;
+        {error,_} ->
+            {next_state, closed, Stream, 0}
+    end;
+half_closed_remote(cast,
+                  {send_data,
+                   {
+                     #frame_header{
+                        flags=Flags,
+                        type=?HEADERS
                        },_
                    }=F}=_Msg,
   #stream_state{
