@@ -9,6 +9,7 @@
          start_server_link/3,
          become/1,
          become/2,
+         become/3,
          stop/1
         ]).
 
@@ -134,11 +135,21 @@ become(Socket) ->
     become(Socket, chatterbox:settings(server)).
 
 -spec become(socket(), settings()) -> no_return().
-become({Transport, Socket}, Http2Settings) ->
+become(Socket, Http2Settings) ->
+    become(Socket, Http2Settings, #{}).
+
+-spec become(socket(), settings(), maps:map()) -> no_return().
+become({Transport, Socket}, Http2Settings, ConnectionSettings) ->
     ok = sock:setopts({Transport, Socket}, [{packet, raw}, binary]),
     {_, _, NewState} =
         start_http2_server(Http2Settings,
                            #connection{
+                              stream_callback_mod =
+                                  maps:get(stream_callback_mod, ConnectionSettings,
+                                           application:get_env(chatterbox, stream_callback_mod, chatterbox_static_stream)),
+                              stream_callback_opts =
+                                  maps:get(stream_callback_opts, ConnectionSettings,
+                                           application:get_env(chatterbox, stream_callback_opts, [])),
                               streams = h2_stream_set:new(server),
                               socket = {Transport, Socket}
                              }),

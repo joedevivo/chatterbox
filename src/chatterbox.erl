@@ -5,7 +5,8 @@
 -export([
          start/0,
          settings/0,
-         settings/1
+         settings/1,
+         settings/2
         ]).
 
 start() ->
@@ -13,6 +14,22 @@ start() ->
 
 settings() ->
     settings(server).
+
+settings(server, Settings=#{}) ->
+    HTS  = maps:get(server_header_table_size, Settings, 4096),
+    EP   = maps:get(server_enable_push, Settings, 1),
+    MCS  = maps:get(server_max_concurrent_streams, Settings, unlimited),
+    IWS  = maps:get(server_initial_window_size, Settings, 65535),
+    MFS  = maps:get(server_max_frame_size, Settings, 16384),
+    MHLS = maps:get(server_max_header_list_size, Settings, unlimited),
+    #settings{
+       header_table_size=HTS,
+       enable_push=EP,
+       max_concurrent_streams=MCS,
+       initial_window_size=IWS,
+       max_frame_size=MFS,
+       max_header_list_size=MHLS
+      }.
 
 settings(server) ->
     HTS  = application:get_env(?MODULE, server_header_table_size, 4096),
