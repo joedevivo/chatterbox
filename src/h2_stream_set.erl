@@ -67,7 +67,7 @@
 -record(
    active_stream, {
      id                    :: stream_id(),
-     % Pid running the http2_stream gen_fsm
+     % Pid running the http2_stream gen_statem
      pid                   :: pid(),
      % The process to notify with events on this stream
      notify_pid            :: pid() | undefined,
@@ -873,4 +873,3 @@ my_max_active(SS) ->
 -spec their_max_active(stream_set()) -> non_neg_integer().
 their_max_active(SS) ->
     SS#stream_set.theirs#peer_subset.max_active.
-

@@ -1,6 +1,6 @@
 -module(h2_connection).
 -include("http2.hrl").
--behaviour(gen_fsm).
+-behaviour(gen_statem).
 
 %% Start/Stop API
 -export([
@@ -33,24 +33,22 @@
          send_frame/2
         ]).
 
-%% gen_fsm callbacks
+%% gen_statem callbacks
 -export(
    [
     init/1,
-    handle_event/3,
-    handle_sync_event/4,
-    handle_info/3,
+    callback_mode/0,
     code_change/4,
     terminate/3
    ]).
 
-%% gen_fsm states
+%% gen_statem states
 -export([
-         listen/2,
-         handshake/2,
-         connected/2,
-         continuation/2,
-         closing/2
+         listen/3,
+         handshake/3,
+         connected/3,
+         continuation/3,
+         closing/3
         ]).
 
 -export([
@@ -112,7 +110,7 @@
                        ) ->
                                {ok, pid()} | ignore | {error, term()}.
 start_client_link(Transport, Host, Port, SSLOptions, Http2Settings) ->
-    gen_fsm:start_link(?MODULE, {client, Transport, Host, Port, SSLOptions, Http2Settings}, []).
+    gen_statem:start_link(?MODULE, {client, Transport, Host, Port, SSLOptions, Http2Settings}, []).
 
 -spec start_ssl_upgrade_link(inet:ip_address() | inet:hostname(),
                              inet:port_number(),
@@ -122,14 +120,14 @@ start_client_link(Transport, Host, Port, SSLOptions, Http2Settings) ->
                             ) ->
                                     {ok, pid()} | ignore | {error, term()}.
 start_ssl_upgrade_link(Host, Port, InitialMessage, SSLOptions, Http2Settings) ->
-    gen_fsm:start_link(?MODULE, {client_ssl_upgrade, Host, Port, InitialMessage, SSLOptions, Http2Settings}, []).
+    gen_statem:start_link(?MODULE, {client_ssl_upgrade, Host, Port, InitialMessage, SSLOptions, Http2Settings}, []).
 
 -spec start_server_link(socket(),
                         [ssl:ssl_option()],
                         #settings{}) ->
                                {ok, pid()} | ignore | {error, term()}.
 start_server_link({Transport, ListenSocket}, SSLOptions, Http2Settings) ->
-    gen_fsm:start_link(?MODULE, {server, {Transport, ListenSocket}, SSLOptions, Http2Settings}, []).
+    gen_statem:start_link(?MODULE, {server, {Transport, ListenSocket}, SSLOptions, Http2Settings}, []).
 
 -spec become(socket()) -> no_return().
 become(Socket) ->
@@ -144,7 +142,7 @@ become({Transport, Socket}, Http2Settings) ->
                               streams = h2_stream_set:new(server),
                               socket = {Transport, Socket}
                              }),
-    gen_fsm:enter_loop(?MODULE,
+    gen_statem:enter_loop(?MODULE,
                        [],
                        handshake,
                        NewState).
@@ -217,54 +215,57 @@ init({server, {Transport, ListenSocket}, SSLOptions, Http2Settings}) ->
             {stop, Reason}
     end.
 
+callback_mode() ->
+    state_functions.
+
 send_frame(Pid, Bin)
   when is_binary(Bin); is_list(Bin) ->
-    gen_fsm:send_all_state_event(Pid, {send_bin, Bin});
+    gen_statem:cast(Pid, {send_bin, Bin});
 send_frame(Pid, Frame) ->
-    gen_fsm:send_all_state_event(Pid, {send_frame, Frame}).
+    gen_statem:cast(Pid, {send_frame, Frame}).
 
 -spec send_headers(pid(), stream_id(), hpack:headers()) -> ok.
 send_headers(Pid, StreamId, Headers) ->
-    gen_fsm:send_all_state_event(Pid, {send_headers, StreamId, Headers, []}),
+    gen_statem:cast(Pid, {send_headers, StreamId, Headers, []}),
     ok.
 
 -spec send_headers(pid(), stream_id(), hpack:headers(), send_opts()) -> ok.
 send_headers(Pid, StreamId, Headers, Opts) ->
-    gen_fsm:send_all_state_event(Pid, {send_headers, StreamId, Headers, Opts}),
+    gen_statem:cast(Pid, {send_headers, StreamId, Headers, Opts}),
     ok.
 
 -spec send_body(pid(), stream_id(), binary()) -> ok.
 send_body(Pid, StreamId, Body) ->
-    gen_fsm:send_all_state_event(Pid, {send_body, StreamId, Body, []}),
+    gen_statem:cast(Pid, {send_body, StreamId, Body, []}),
     ok.
 -spec send_body(pid(), stream_id(), binary(), send_opts()) -> ok.
 send_body(Pid, StreamId, Body, Opts) ->
-    gen_fsm:send_all_state_event(Pid, {send_body, StreamId, Body, Opts}),
+    gen_statem:cast(Pid, {send_body, StreamId, Body, Opts}),
     ok.
 
 -spec send_request(pid(), hpack:headers(), binary()) -> ok.
 send_request(Pid, Headers, Body) ->
-    gen_fsm:sync_send_all_state_event(Pid, {send_request, self(), Headers, Body}, infinity),
+    gen_statem:call(Pid, {send_request, self(), Headers, Body}, infinity),
     ok.
 
 -spec send_ping(pid()) -> ok.
 send_ping(Pid) ->
-    gen_fsm:sync_send_all_state_event(Pid, {send_ping, self()}, infinity),
+    gen_statem:call(Pid, {send_ping, self()}, infinity),
     ok.
 
 -spec get_peer(pid()) ->
     {ok, {inet:ip_address(), inet:port_number()}} | {error, term()}.
 get_peer(Pid) ->
-    gen_fsm:sync_send_all_state_event(Pid, get_peer).
+    gen_statem:call(Pid, get_peer).
 
 -spec get_peercert(pid()) ->
     {ok, binary()} | {error, term()}.
 get_peercert(Pid) ->
-    gen_fsm:sync_send_all_state_event(Pid, get_peercert).
+    gen_statem:call(Pid, get_peercert).
 
 -spec is_push(pid()) -> boolean().
 is_push(Pid) ->
-    gen_fsm:sync_send_all_state_event(Pid, is_push).
+    gen_statem:call(Pid, is_push).
 
 -spec new_stream(pid()) -> stream_id() | {error, error_code()}.
 new_stream(Pid) ->
@@ -274,26 +275,26 @@ new_stream(Pid) ->
                         stream_id()
                       | {error, error_code()}.
 new_stream(Pid, NotifyPid) ->
-    gen_fsm:sync_send_all_state_event(Pid, {new_stream, NotifyPid}).
+    gen_statem:call(Pid, {new_stream, NotifyPid}).
 
 -spec send_promise(pid(), stream_id(), stream_id(), hpack:headers()) -> ok.
 send_promise(Pid, StreamId, NewStreamId, Headers) ->
-    gen_fsm:send_all_state_event(Pid, {send_promise, StreamId, NewStreamId, Headers}),
+    gen_statem:cast(Pid, {send_promise, StreamId, NewStreamId, Headers}),
     ok.
 
 -spec get_response(pid(), stream_id()) ->
                           {ok, {hpack:headers(), iodata()}}
                            | not_ready.
 get_response(Pid, StreamId) ->
-    gen_fsm:sync_send_all_state_event(Pid, {get_response, StreamId}).
+    gen_statem:call(Pid, {get_response, StreamId}).
 
 -spec get_streams(pid()) -> h2_stream_set:stream_set().
 get_streams(Pid) ->
-    gen_fsm:sync_send_all_state_event(Pid, streams).
+    gen_statem:call(Pid, streams).
 
 -spec send_window_update(pid(), non_neg_integer()) -> ok.
 send_window_update(Pid, Size) ->
-    gen_fsm:send_all_state_event(Pid, {send_window_update, Size}).
+    gen_statem:cast(Pid, {send_window_update, Size}).
 
 -spec update_settings(pid(), h2_frame_settings:payload()) -> ok.
 update_settings(Pid, Payload) ->
@@ -301,20 +302,51 @@ update_settings(Pid, Payload) ->
 
 -spec stop(pid()) -> ok.
 stop(Pid) ->
-    gen_fsm:send_all_state_event(Pid, stop).
+    gen_statem:cast(Pid, stop).
 
 %% The listen state only exists to wait around for new prim_inet
 %% connections
-listen(timeout, State) ->
-    go_away(?PROTOCOL_ERROR, State).
+listen(info, {inet_async, ListenSocket, Ref, {ok, ClientSocket}},
+            #h2_listening_state{
+               listen_socket = ListenSocket,
+               listen_ref = Ref,
+               transport = Transport,
+               ssl_options = SSLOptions,
+               acceptor_callback = AcceptorCallback,
+               server_settings = Http2Settings
+              }) ->
 
--spec handshake(timeout|{frame, h2_frame:frame()}, connection()) ->
+    %If anything crashes in here, at least there's another acceptor ready
+    AcceptorCallback(),
+
+    inet_db:register_socket(ClientSocket, inet_tcp),
+
+    Socket = case Transport of
+        gen_tcp ->
+            ClientSocket;
+        ssl ->
+            {ok, AcceptSocket} = ssl:ssl_accept(ClientSocket, SSLOptions),
+            {ok, <<"h2">>} = ssl:negotiated_protocol(AcceptSocket),
+            AcceptSocket
+    end,
+    start_http2_server(
+      Http2Settings,
+      #connection{
+         streams = h2_stream_set:new(server),
+         socket={Transport, Socket}
+        });
+listen(timeout, _, State) ->
+    go_away(?PROTOCOL_ERROR, State);
+listen(Type, Msg, State) ->
+    handle_event(Type, Msg, State).
+
+-spec handshake(gen_statem:event_type(), {frame, h2_frame:frame()} | term(), connection()) ->
                     {next_state,
                      handshake|connected|closing,
                      connection()}.
-handshake(timeout, State) ->
+handshake(timeout, _, State) ->
     go_away(?PROTOCOL_ERROR, State);
-handshake({frame, {FH, _Payload}=Frame}, State) ->
+handshake(_, {frame, {FH, _Payload}=Frame}, State) ->
     %% The first frame should be the client settings as per
     %% RFC-7540#3.5
     case FH#frame_header.type of
@@ -322,19 +354,23 @@ handshake({frame, {FH, _Payload}=Frame}, State) ->
             route_frame(Frame, State);
         _ ->
             go_away(?PROTOCOL_ERROR, State)
-    end.
+    end;
+handshake(Type, Msg, State) ->
+    handle_event(Type, Msg, State).
 
-connected({frame, Frame},
+connected(_, {frame, Frame},
           #connection{}=Conn
          ) ->
     lager:debug("[~p][connected] {frame, ~p}",
                 [Conn#connection.type, h2_frame:format(Frame)]),
-    route_frame(Frame, Conn).
+    route_frame(Frame, Conn);
+connected(Type, Msg, State) ->
+    handle_event(Type, Msg, State).
 
 %% The continuation state in entered after receiving a HEADERS frame
 %% with no ?END_HEADERS flag set, we're locked waiting for contiunation
 %% frames on the same stream to preserve the decoding context state
-continuation({frame,
+continuation(_, {frame,
               {#frame_header{
                   stream_id=StreamId,
                   type=?CONTINUATION
@@ -347,12 +383,12 @@ continuation({frame,
     lager:debug("[~p][continuation] [next] ~p",
                 [Conn#connection.type, h2_frame:format(Frame)]),
     route_frame(Frame, Conn);
-continuation(_, Conn) ->
-    go_away(?PROTOCOL_ERROR, Conn).
+continuation(Type, Msg, State) ->
+    handle_event(Type, Msg, State).
 
 %% The closing state should deal with frames on the wire still, I
 %% think. But we should just close it up now.
-closing(Message,
+closing(_, Message,
         #connection{
            socket=Socket
           }=Conn) ->
@@ -360,10 +396,8 @@ closing(Message,
                 [Conn#connection.type, Message]),
     sock:close(Socket),
     {stop, normal, Conn};
-closing(Message, Conn) ->
-    lager:debug("[~p][closing] ~p",
-                [Conn#connection.type, Message]),
-    {stop, normal, Conn}.
+closing(Type, Msg, State) ->
+    handle_event(Type, Msg, State).
 
 %% route_frame's job needs to be "now that we've read a frame off the
 %% wire, do connection based things to it and/or forward it to the
@@ -878,10 +912,10 @@ route_frame(Frame, #connection{}=Conn) ->
     lager:error("OOPS! ~p", [Conn]),
     go_away(?PROTOCOL_ERROR, Conn).
 
-handle_event({stream_finished,
+handle_event(_, {stream_finished,
               StreamId,
               Headers,
-              Body}, StateName,
+              Body},
              Conn) ->
     Stream = h2_stream_set:get(StreamId, Conn#connection.streams),
     case h2_stream_set:type(Stream) of
@@ -908,36 +942,30 @@ handle_event({stream_finished,
                 _ ->
                     ok
             end,
-            {next_state, StateName, NewConn};
+            {keep_state, NewConn};
         _ ->
             lager:error("[~p] stream ~p finished multiple times",
                         [Conn#connection.type,
                          StreamId]),
-            {next_state, StateName, Conn}
+            {keep_state, Conn}
     end;
-handle_event({send_window_update, 0},
-             StateName, Conn) ->
-    {next_state, StateName, Conn};
-handle_event({send_window_update, Size},
-             StateName,
+handle_event(_, {send_window_update, 0}, Conn) ->
+    {keep_state, Conn};
+handle_event(_, {send_window_update, Size},
              #connection{
                 recv_window_size=CRWS,
                 socket=Socket
                 }=Conn) ->
     ok = h2_frame_window_update:send(Socket, Size, 0),
-    {next_state,
-     StateName,
+    {keep_state,
      Conn#connection{
        recv_window_size=CRWS+Size
       }};
-handle_event({update_settings, Http2Settings},
-             StateName,
+handle_event(_, {update_settings, Http2Settings},
              #connection{}=Conn) ->
-    {next_state,
-     StateName,
+    {keep_state,
      send_settings(Http2Settings, Conn)};
-handle_event({send_headers, StreamId, Headers, Opts},
-             StateName,
+handle_event(_, {send_headers, StreamId, Headers, Opts},
              #connection{
                 encode_context=EncodeContext,
                 streams = Streams,
@@ -960,7 +988,7 @@ handle_event({send_headers, StreamId, Headers, Opts},
                                           ),
             [sock:send(Socket, h2_frame:to_binary(Frame)) || Frame <- FramesToSend],
             send_h(Stream, Headers),
-            {next_state, StateName,
+            {keep_state,
              Conn#connection{
                encode_context=NewContext
               }};
@@ -968,13 +996,12 @@ handle_event({send_headers, StreamId, Headers, Opts},
             %% In theory this is a client maybe activating a stream,
             %% but in practice, we've already activated the stream in
             %% new_stream/1
-            {next_state, StateName, Conn};
+            {keep_state, Conn};
         closed ->
-            {next_state, StateName, Conn}
+            {keep_state, Conn}
     end;
 
-handle_event({send_body, StreamId, Body, Opts},
-             StateName,
+handle_event(_, {send_body, StreamId, Body, Opts},
              #connection{}=Conn) ->
     lager:debug("[~p] Send Body Stream ~p",
                 [Conn#connection.type, StreamId]),
@@ -997,7 +1024,7 @@ handle_event({send_body, StreamId, Body, Opts},
                     h2_stream_set:update_data_queue(NewBody, BodyComplete, Stream),
                     Conn#connection.streams)),
 
-            {next_state, StateName,
+            {keep_state,
              Conn#connection{
                send_window_size=NewSWS,
                streams=NewStreams
@@ -1008,29 +1035,27 @@ handle_event({send_body, StreamId, Body, Opts},
             %% have no active stream what can we even do?
             lager:info("[~p] tried sending data on idle stream ~p",
                        [Conn#connection.type, StreamId]),
-            {next_state, StateName, Conn};
+            {keep_state, Conn};
         closed ->
-            {next_state, StateName, Conn}
+            {keep_state, Conn}
     end;
 
-handle_event({send_request, NotifyPid, Headers, Body},
-        StateName,
+handle_event(_, {send_request, NotifyPid, Headers, Body},
         #connection{
             streams=Streams,
             next_available_stream_id=NextId
         }=Conn) ->
     case send_request(NextId, NotifyPid, Conn, Streams, Headers, Body) of
         {ok, GoodStreamSet} ->
-            {next_state, StateName, Conn#connection{
+            {keep_state, Conn#connection{
                 next_available_stream_id=NextId+2,
                 streams=GoodStreamSet
             }};
         {error, _Code} ->
-            {next_state, StateName, Conn}
+            {keep_state, Conn}
     end;
 
-handle_event({send_promise, StreamId, NewStreamId, Headers},
-             StateName,
+handle_event(_, {send_promise, StreamId, NewStreamId, Headers},
              #connection{
                 streams=Streams,
                 encode_context=OldContext
@@ -1055,16 +1080,15 @@ handle_event({send_promise, StreamId, NewStreamId, Headers},
             %% Get the promised stream rolling
             h2_stream:send_pp(h2_stream_set:stream_pid(NewStream), Headers),
 
-            {next_state, StateName,
+            {keep_state,
              Conn#connection{
                encode_context=NewContext
               }};
         _ ->
-            {next_state, StateName, Conn}
+            {keep_state, Conn}
     end;
 
-handle_event({check_settings_ack, {Ref, NewSettings}},
-             StateName,
+handle_event(_, {check_settings_ack, {Ref, NewSettings}},
              #connection{
                 settings_sent=SS
                }=Conn) ->
@@ -1074,29 +1098,26 @@ handle_event({check_settings_ack, {Ref, NewSettings}},
             go_away(?SETTINGS_TIMEOUT, Conn);
         _ ->
             %% YAY!
-            {next_state, StateName, Conn}
+            {keep_state, Conn}
     end;
-handle_event({send_bin, Binary}, StateName,
+handle_event(_, {send_bin, Binary},
              #connection{} = Conn) ->
     socksend(Conn, Binary),
-    {next_state, StateName, Conn};
-handle_event({send_frame, Frame}, StateName,
+    {keep_state, Conn};
+handle_event(_, {send_frame, Frame},
              #connection{} =Conn) ->
     Binary = h2_frame:to_binary(Frame),
     socksend(Conn, Binary),
-    {next_state, StateName, Conn};
+    {keep_state, Conn};
 handle_event(stop, _StateName,
             #connection{}=Conn) ->
     go_away(0, Conn);
-handle_event(_E, StateName, Conn) ->
-    {next_state, StateName, Conn}.
-
-handle_sync_event(streams, _F, StateName,
+handle_event({call, From}, streams,
                   #connection{
                      streams=Streams
                     }=Conn) ->
-    {reply, Streams, StateName, Conn};
-handle_sync_event({get_response, StreamId}, _F, StateName,
+    {keep_state, Conn, [{reply, From, Streams}]};
+handle_event({call, From}, {get_response, StreamId},
                   #connection{}=Conn) ->
     Stream = h2_stream_set:get(StreamId, Conn#connection.streams),
     Reply = case h2_stream_set:type(Stream) of
@@ -1105,8 +1126,8 @@ handle_sync_event({get_response, StreamId}, _F, StateName,
                 active ->
                     not_ready
             end,
-    {reply, Reply, StateName, Conn};
-handle_sync_event({new_stream, NotifyPid}, _F, StateName,
+    {keep_state, Conn, [{reply, From, Reply}]};
+handle_event({call, From}, {new_stream, NotifyPid},
                   #connection{
                      streams=Streams,
                      next_available_stream_id=NextId
@@ -1132,11 +1153,11 @@ handle_sync_event({new_stream, NotifyPid}, _F, StateName,
                             [Conn#connection.type, NextId, GoodStreamSet]),
                 {NextId, GoodStreamSet}
         end,
-    {reply, Reply, StateName, Conn#connection{
+    {keep_state, Conn#connection{
                                  next_available_stream_id=NextId+2,
                                  streams=NewStreams
-                                }};
-handle_sync_event(is_push, _F, StateName,
+                                }, [{reply, From, Reply}]};
+handle_event({call, From}, is_push,
                   #connection{
                      peer_settings=#settings{enable_push=Push}
                     }=Conn) ->
@@ -1144,8 +1165,8 @@ handle_sync_event(is_push, _F, StateName,
         1 -> true;
         _ -> false
     end,
-    {reply, IsPush, StateName, Conn};
-handle_sync_event(get_peer, _F, StateName,
+    {keep_state, Conn, [{reply, From, IsPush}]};
+handle_event({call, From}, get_peer,
                   #connection{
                      socket={Transport,_}=Socket
                     }=Conn) ->
@@ -1153,11 +1174,11 @@ handle_sync_event(get_peer, _F, StateName,
         {error, _}=Error ->
             lager:warning("failed to fetch peer for ~p socket",
                           [Transport]),
-            {reply, Error, StateName, Conn};
+            {keep_state, Conn, [{reply, From, Error}]};
         {ok, _AddrPort}=OK ->
-            {reply, OK, StateName, Conn}
+            {keep_state, Conn, [{reply, From, OK}]}
     end;
-handle_sync_event(get_peercert, _F, StateName,
+handle_event({call, From}, get_peercert,
                   #connection{
                      socket={Transport,_}=Socket
                     }=Conn) ->
@@ -1165,28 +1186,26 @@ handle_sync_event(get_peercert, _F, StateName,
         {error, _}=Error ->
             lager:warning("failed to fetch peer cert for ~p socket",
                           [Transport]),
-            {reply, Error, StateName, Conn};
+            {keep_state, Conn, [{reply, From, Error}]};
         {ok, _Cert}=OK ->
-            {reply, OK, StateName, Conn}
+            {keep_state, Conn, [{reply, From, OK}]}
     end;
-handle_sync_event({send_request, NotifyPid, Headers, Body}, _F,
-        StateName,
+handle_event({call, From}, {send_request, NotifyPid, Headers, Body},
         #connection{
             streams=Streams,
             next_available_stream_id=NextId
         }=Conn) ->
     case send_request(NextId, NotifyPid, Conn, Streams, Headers, Body) of
         {ok, GoodStreamSet} ->
-            {reply, ok, StateName, Conn#connection{
+            {keep_state, Conn#connection{
                 next_available_stream_id=NextId+2,
                 streams=GoodStreamSet
-            }};
+            }, [{reply, From, ok}]};
         {error, Code} ->
-            {reply, {error, Code}, StateName, Conn}
+            {keep_state, Conn, [{reply, From, {error, Code}}]}
     end;
-handle_sync_event({send_ping, NotifyPid}, _F,
-        StateName,
-        #connection{pings = Pings} = Conn) ->
+handle_event({call, From}, {send_ping, NotifyPid},
+             #connection{pings = Pings} = Conn) ->
     PingValue = crypto:strong_rand_bytes(8),
     Frame = h2_frame_ping:new(PingValue),
     Headers = #frame_header{stream_id = 0, flags = 16#0},
@@ -1196,99 +1215,60 @@ handle_sync_event({send_ping, NotifyPid}, _F,
         ok ->
             NextPings = maps:put(PingValue, {NotifyPid, erlang:monotonic_time(milli_seconds)}, Pings),
             NextConn = Conn#connection{pings = NextPings},
-            {reply, ok, StateName, NextConn};
+            {keep_state, NextConn, [{reply, From, ok}]};
         {error, _Reason} = Err ->
-            {reply, Err, StateName, Conn}
+            {keep_state, Conn, [{reply, From, Err}]}
     end;
-handle_sync_event(_E, _F, StateName,
-                  #connection{}=Conn) ->
-    {next_state, StateName, Conn}.
-
-handle_info({inet_async, ListenSocket, Ref, {ok, ClientSocket}},
-            listen,
-            #h2_listening_state{
-               listen_socket = ListenSocket,
-               listen_ref = Ref,
-               transport = Transport,
-               ssl_options = SSLOptions,
-               acceptor_callback = AcceptorCallback,
-               server_settings = Http2Settings
-              }) ->
-
-    %If anything crashes in here, at least there's another acceptor ready
-    AcceptorCallback(),
-
-    inet_db:register_socket(ClientSocket, inet_tcp),
-
-    Socket = case Transport of
-        gen_tcp ->
-            ClientSocket;
-        ssl ->
-            {ok, AcceptSocket} = ssl:ssl_accept(ClientSocket, SSLOptions),
-            {ok, <<"h2">>} = ssl:negotiated_protocol(AcceptSocket),
-            AcceptSocket
-    end,
-    start_http2_server(
-      Http2Settings,
-      #connection{
-         streams = h2_stream_set:new(server),
-         socket={Transport, Socket}
-        });
 
 %% Socket Messages
 %% {tcp, Socket, Data}
-handle_info({tcp, Socket, Data},
-            StateName,
+handle_event(info, {tcp, Socket, Data},
             #connection{
                socket={gen_tcp,Socket}
               }=Conn) ->
-    handle_socket_data(Data, StateName, Conn);
+    handle_socket_data(Data, Conn);
 %% {ssl, Socket, Data}
-handle_info({ssl, Socket, Data},
-            StateName,
+handle_event(info, {ssl, Socket, Data},
             #connection{
                socket={ssl,Socket}
               }=Conn) ->
-    handle_socket_data(Data, StateName, Conn);
+    handle_socket_data(Data, Conn);
 %% {tcp_passive, Socket}
-handle_info({tcp_passive, Socket},
-            StateName,
+handle_event(info, {tcp_passive, Socket},
             #connection{
                socket={gen_tcp, Socket}
               }=Conn) ->
-    handle_socket_passive(StateName, Conn);
+    handle_socket_passive(Conn);
 %% {tcp_closed, Socket}
-handle_info({tcp_closed, Socket},
-            StateName,
+handle_event(info, {tcp_closed, Socket},
             #connection{
               socket={gen_tcp, Socket}
              }=Conn) ->
-    handle_socket_closed(StateName, Conn);
+    handle_socket_closed(Conn);
 %% {ssl_closed, Socket}
-handle_info({ssl_closed, Socket},
-            StateName,
+handle_event(info, {ssl_closed, Socket},
             #connection{
                socket={ssl, Socket}
               }=Conn) ->
-    handle_socket_closed(StateName, Conn);
+    handle_socket_closed(Conn);
 %% {tcp_error, Socket, Reason}
-handle_info({tcp_error, Socket, Reason},
-            StateName,
+handle_event(info, {tcp_error, Socket, Reason},
             #connection{
                socket={gen_tcp,Socket}
               }=Conn) ->
-    handle_socket_error(Reason, StateName, Conn);
+    handle_socket_error(Reason, Conn);
 %% {ssl_error, Socket, Reason}
-handle_info({ssl_error, Socket, Reason},
-            StateName,
+handle_event(info, {ssl_error, Socket, Reason},
             #connection{
                socket={ssl,Socket}
               }=Conn) ->
-    handle_socket_error(Reason, StateName, Conn);
-handle_info({_,R}=M, StateName,
+    handle_socket_error(Reason, Conn);
+handle_event(info, {_,R}=M,
            #connection{}=Conn) ->
     lager:error("[~p] BOOM! ~p", [Conn#connection.type, M]),
-    handle_socket_error(R, StateName, Conn).
+    handle_socket_error(R, Conn);
+handle_event(_, _, Conn) ->
+     go_away(?PROTOCOL_ERROR, Conn).
 
 code_change(_OldVsn, StateName, Conn, _Extra) ->
     {ok, StateName, Conn}.
@@ -1311,7 +1291,7 @@ go_away(ErrorCode,
                                        stream_id=0
                                       }, GoAway}),
     socksend(Conn, GoAwayBin),
-    gen_fsm:send_event(self(), io_lib:format("GO_AWAY: ErrorCode ~p", [ErrorCode])),
+    gen_statem:cast(self(), io_lib:format("GO_AWAY: ErrorCode ~p", [ErrorCode])),
     {next_state, closing, Conn}.
 
 %% rst_stream/3 looks for a running process for the stream. If it
@@ -1366,7 +1346,7 @@ send_ack_timeout(SS) ->
     SendAck = fun() ->
                   lager:debug("Spawning ack timeout alarm clock: ~p + ~p", [Self, SS]),
                   timer:sleep(5000),
-                  gen_fsm:send_all_state_event(Self, {check_settings_ack,SS})
+                  gen_statem:cast(Self, {check_settings_ack,SS})
               end,
     spawn_link(SendAck).
 
@@ -1452,14 +1432,12 @@ accept_preface(Socket, <<Char:8,Rem/binary>>) ->
 %% up and do something every time Data comes in.
 
 handle_socket_data(<<>>,
-                   StateName,
                    #connection{
                       socket=Socket
                      }=Conn) ->
     active_once(Socket),
-    {next_state, StateName, Conn};
+    {keep_state, Conn};
 handle_socket_data(Data,
-                   StateName,
                    #connection{
                       socket=Socket,
                       buffer=Buffer
@@ -1493,35 +1471,35 @@ handle_socket_data(Data,
     case h2_frame:recv(ToParse) of
         %% We got a full frame, ship it off to the FSM
         {ok, Frame, Rem} ->
-            gen_fsm:send_event(self(), {frame, Frame}),
-            handle_socket_data(Rem, StateName, NewConn);
+            gen_statem:cast(self(), {frame, Frame}),
+            handle_socket_data(Rem, NewConn);
         %% Not enough bytes left to make a header :(
         {not_enough_header, Bin} ->
             %% This is a situation where more bytes should come soon,
             %% so let's switch back to active, once
             active_once(Socket),
-            {next_state, StateName, NewConn#connection{buffer={binary, Bin}}};
+            {keep_state, NewConn#connection{buffer={binary, Bin}}};
         %% Not enough bytes to make a payload
         {not_enough_payload, Header, Bin} ->
             %% This too
             active_once(Socket),
-            {next_state, StateName, NewConn#connection{buffer={frame, Header, Bin}}};
+            {keep_state, NewConn#connection{buffer={frame, Header, Bin}}};
         {error, 0, Code, _Rem} ->
             %% Remaining Bytes don't matter, we're closing up shop.
             go_away(Code, NewConn);
         {error, StreamId, Code, Rem} ->
             Stream = h2_stream_set:get(StreamId, Conn#connection.streams),
             rst_stream(Stream, Code, NewConn),
-            handle_socket_data(Rem, StateName, NewConn)
+            handle_socket_data(Rem, NewConn)
     end.
 
-handle_socket_passive(StateName, Conn) ->
-    {next_state, StateName, Conn}.
+handle_socket_passive(Conn) ->
+    {keep_state, Conn}.
 
-handle_socket_closed(_StateName, Conn) ->
+handle_socket_closed(Conn) ->
     {stop, normal, Conn}.
 
-handle_socket_error(Reason, _StateName, Conn) ->
+handle_socket_error(Reason, Conn) ->
     {stop, Reason, Conn}.
 
 socksend(#connection{
@@ -1601,7 +1579,7 @@ recv_h(Stream,
         active ->
             %% If the stream is active, let the process deal with it.
             Pid = h2_stream_set:pid(Stream),
-            gen_fsm:send_event(Pid, {recv_h, Headers});
+            h2_stream:send_event(Pid, {recv_h, Headers});
         closed ->
             %% If the stream is closed, there's no running FSM
             rst_stream(Stream, ?STREAM_CLOSED, Conn);
@@ -1624,7 +1602,7 @@ send_h(Stream, Headers) ->
                        [h2_stream_set:stream_id(Stream)]),
             ok;
         Pid ->
-            gen_fsm:send_event(Pid, {send_h, Headers})
+            h2_stream:send_event(Pid, {send_h, Headers})
     end.
 
 -spec recv_es(Stream :: h2_stream_set:stream(),
@@ -1635,7 +1613,7 @@ recv_es(Stream, Conn) ->
     case h2_stream_set:type(Stream) of
         active ->
             Pid = h2_stream_set:pid(Stream),
-            gen_fsm:send_event(Pid, recv_es);
+            h2_stream:send_event(Pid, recv_es);
         closed ->
             rst_stream(Stream, ?STREAM_CLOSED, Conn);
         idle ->
@@ -1651,7 +1629,7 @@ recv_pp(Stream, Headers) ->
             %% Should this be an error?
             ok;
         Pid ->
-            gen_fsm:send_event(Pid, {recv_pp, Headers})
+            h2_stream:send_event(Pid, {recv_pp, Headers})
     end.
 
 -spec recv_data(h2_stream_set:stream(),
@@ -1665,7 +1643,7 @@ recv_data(Stream, Frame) ->
             %% anyway.
             ok;
         Pid ->
-            gen_fsm:send_event(Pid, {recv_data, Frame})
+            h2_stream:send_event(Pid, {recv_data, Frame})
     end.
 
 send_request(NextId, NotifyPid, Conn, Streams, Headers, Body) ->

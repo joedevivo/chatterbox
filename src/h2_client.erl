@@ -1,7 +1,7 @@
 -module(h2_client).
 -include("http2.hrl").
 
-%% Today's the day! We need to turn this gen_server into a gen_fsm
+%% Today's the day! We need to turn this gen_server into a gen_statem
 %% which means this is going to look a lot like the "opposite of
 %% http2_connection". This is the way to take advantage of the
 %% abstraction of http2_socket. Still, the client API is way more
@@ -31,9 +31,9 @@
 %% this is gonna get weird. start_link/* is going to call
 %% http2_socket's start_link function, which will handle opening the
 %% socket and sending the HTTP/2 Preface over the wire. Once that's
-%% working, it's going to call gen_fsm:start_link(http2c, [SocketPid],
+%% working, it's going to call gen_statem:start_link(http2c, [SocketPid],
 %% []) which will then use our init/1 callback. You can't actually
-%% start this gen_fsm with this API. That's intentional, it will
+%% start this gen_statem with this API. That's intentional, it will
 %% eventually get started if things go right. If they don't, you
 %% wouldn't want one of these anyway.
 
