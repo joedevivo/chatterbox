@@ -8,6 +8,7 @@
          send_pp/2,
          send_data/2,
          stream_id/0,
+         call/2,
          connection/0,
          send_window_update/1,
          send_connection_window_update/1,
@@ -127,6 +128,9 @@ send_data(Pid, Frame) ->
 -spec stream_id() -> stream_id().
 stream_id() ->
     gen_statem:call(self(), stream_id).
+
+call(Pid, Msg) ->
+    gen_statem:call(Pid, Msg).
 
 -spec connection() -> pid().
 connection() ->
@@ -534,8 +538,8 @@ handle_event({call, From}, connection, State=#stream_state{connection=Conn}) ->
     {keep_state, State, [{reply, From, Conn}]};
 handle_event({call, From}, Event, State=#stream_state{callback_mod=CB,
                                                       callback_state=CallbackState}) ->
-    CallbackState1 = CB:handle_info(Event, CallbackState),
-    {keep_state, State#stream_state{callback_state=CallbackState1}, [{reply, From, ok}]};
+    {ok, Reply, CallbackState1} = CB:handle_call(Event, CallbackState),
+    {keep_state, State#stream_state{callback_state=CallbackState1}, [{reply, From, Reply}]};
 handle_event(cast, Event, State=#stream_state{callback_mod=CB,
                                               callback_state=CallbackState}) ->
     CallbackState1 = CB:handle_info(Event, CallbackState),
