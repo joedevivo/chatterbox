@@ -8,6 +8,7 @@
          send_pp/2,
          send_data/2,
          stream_id/0,
+         call/2,
          connection/0,
          send_window_update/1,
          send_connection_window_update/1,
@@ -128,6 +129,9 @@ send_data(Pid, Frame) ->
 stream_id() ->
     gen_statem:call(self(), stream_id).
 
+call(Pid, Msg) ->
+    gen_statem:call(Pid, Msg).
+
 -spec connection() -> pid().
 connection() ->
     gen_statem:call(self(), connection).
@@ -155,7 +159,7 @@ init([
       Socket
      ]) ->
     %% TODO: Check for CB implementing this behaviour
-    {ok, CallbackState} = CB:init(ConnectionPid, StreamId, CBOptions),
+    {ok, CallbackState} = CB:init(ConnectionPid, StreamId, [Socket | CBOptions]),
 
     {ok, idle, #stream_state{
                   callback_mod=CB,
@@ -532,10 +536,20 @@ handle_event({call, From}, stream_id, State=#stream_state{stream_id=StreamId}) -
     {keep_state, State, [{reply, From, StreamId}]};
 handle_event({call, From}, connection, State=#stream_state{connection=Conn}) ->
     {keep_state, State, [{reply, From, Conn}]};
-handle_event({call, From}, _, State) ->
-    {keep_state, State, [{reply, From, wat}]};
-handle_event(_, _, State) ->
-    {keep_state, State}.
+handle_event({call, From}, Event, State=#stream_state{callback_mod=CB,
+                                                      callback_state=CallbackState}) ->
+    {ok, Reply, CallbackState1} = CB:handle_call(Event, CallbackState),
+    {keep_state, State#stream_state{callback_state=CallbackState1}, [{reply, From, Reply}]};
+handle_event(cast, Event, State=#stream_state{callback_mod=CB,
+                                              callback_state=CallbackState}) ->
+    CallbackState1 = CB:handle_info(Event, CallbackState),
+    {keep_state, State#stream_state{callback_state=CallbackState1}};
+handle_event(info, Event, State=#stream_state{callback_mod=CB,
+                                              callback_state=CallbackState}) ->
+     CallbackState1 = CB:handle_info(Event, CallbackState),
+    {keep_state, State#stream_state{callback_state=CallbackState1}};
+handle_event(_, _Event, State) ->
+     {keep_state, State}.
 
 code_change(_OldVsn, StateName, State, _Extra) ->
     {ok, StateName, State}.

@@ -298,7 +298,7 @@ send_window_update(Pid, Size) ->
 
 -spec update_settings(pid(), h2_frame_settings:payload()) -> ok.
 update_settings(Pid, Payload) ->
-    gen_fsm:send_all_state_event(Pid, {update_settings, Payload}).
+    gen_statem:cast(Pid, {update_settings, Payload}).
 
 -spec stop(pid()) -> ok.
 stop(Pid) ->
@@ -581,7 +581,7 @@ route_frame(F={H=#frame_header{
                 %% hit the next clause
                 {false, auto, true} ->
                     %% Make window size great again
-                    lager:info("[~p] Stream ~p WindowUpdate ~p",
+                    lager:debug("[~p] Stream ~p WindowUpdate ~p",
                                [Conn#connection.type, StreamId, L]),
                     h2_frame_window_update:send(Conn#connection.socket,
                                                 L, StreamId),
@@ -1033,7 +1033,7 @@ handle_event(_, {send_body, StreamId, Body, Opts},
             %% Sending DATA frames on an idle stream?  It's a
             %% Connection level protocol error on reciept, but If we
             %% have no active stream what can we even do?
-            lager:info("[~p] tried sending data on idle stream ~p",
+            lager:debug("[~p] tried sending data on idle stream ~p",
                        [Conn#connection.type, StreamId]),
             {keep_state, Conn};
         closed ->
@@ -1372,7 +1372,7 @@ start_http2_server(
   #connection{
      socket=Socket
     }=Conn) ->
-    lager:info("[server] StartHTTP2 settings: ~p",
+    lager:debug("[server] StartHTTP2 settings: ~p",
                [Http2Settings]),
 
     case accept_preface(Socket) of
@@ -1598,7 +1598,7 @@ send_h(Stream, Headers) ->
     case h2_stream_set:pid(Stream) of
         undefined ->
             %% Should this be some kind of error?
-            lager:info("tried sending headers on a non running stream ~p",
+            lager:debug("tried sending headers on a non running stream ~p",
                        [h2_stream_set:stream_id(Stream)]),
             ok;
         Pid ->
