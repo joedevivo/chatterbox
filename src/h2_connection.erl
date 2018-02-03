@@ -384,8 +384,6 @@ handshake(Type, Msg, State) ->
 connected(_, {frame, Frame},
           #connection{}=Conn
          ) ->
-    lager:debug("[~p][connected] {frame, ~p}",
-                [Conn#connection.type, h2_frame:format(Frame)]),
     route_frame(Frame, Conn);
 connected(Type, Msg, State) ->
     handle_event(Type, Msg, State).
@@ -403,20 +401,16 @@ continuation(_, {frame,
                                   stream_id = StreamId
                                  }
                }=Conn) ->
-    lager:debug("[~p][continuation] [next] ~p",
-                [Conn#connection.type, h2_frame:format(Frame)]),
     route_frame(Frame, Conn);
 continuation(Type, Msg, State) ->
     handle_event(Type, Msg, State).
 
 %% The closing state should deal with frames on the wire still, I
 %% think. But we should just close it up now.
-closing(_, Message,
+closing(_, _Message,
         #connection{
            socket=Socket
           }=Conn) ->
-    lager:debug("[~p][closing] s ~p",
-                [Conn#connection.type, Message]),
     sock:close(Socket),
     {stop, normal, Conn};
 closing(Type, Msg, State) ->
@@ -457,8 +451,6 @@ route_frame({H, Payload},
               }=Conn)
     when H#frame_header.type == ?SETTINGS,
          ?NOT_FLAG((H#frame_header.flags), ?FLAG_ACK) ->
-    lager:debug("[~p] Received SETTINGS",
-               [Conn#connection.type]),
     %% Need a way of processing settings so I know which ones came in
     %% on this one payload.
     case h2_frame_settings:validate(Payload) of
@@ -468,10 +460,8 @@ route_frame({H, Payload},
             Delta =
                 case proplists:get_value(?SETTINGS_INITIAL_WINDOW_SIZE, PList) of
                     undefined ->
-                        lager:debug("[~p] IWS undefined", [Conn#connection.type]),
                         0;
                     NewIWS ->
-                        lager:debug("old IWS: ~p new IWS: ~p", [OldIWS, NewIWS]),
                         NewIWS - OldIWS
                 end,
             NewPeerSettings = h2_frame_settings:overlay(PS, Payload),
@@ -497,8 +487,6 @@ route_frame({H, Payload},
             NewEncodeContext = hpack:new_max_table_size(HTS, EncodeContext),
 
             socksend(Conn, h2_frame_settings:ack()),
-            lager:debug("[~p] Sent Settings ACK",
-                        [Conn#connection.type]),
             {next_state, connected, Conn#connection{
                                       peer_settings=NewPeerSettings,
                                       %% Why aren't we updating send_window_size here? Section 6.9.2 of
@@ -523,8 +511,6 @@ route_frame({H, _Payload},
               }=Conn)
     when H#frame_header.type == ?SETTINGS,
          ?IS_FLAG((H#frame_header.flags), ?FLAG_ACK) ->
-    lager:debug("[~p] Received SETTINGS ACK",
-               [Conn#connection.type]),
     case queue:out(SS) of
         {{value, {_Ref, NewSettings}}, NewSS} ->
 
@@ -564,8 +550,6 @@ route_frame({H, _Payload},
 route_frame({H,_Payload}, Conn)
     when H#frame_header.type == ?DATA,
          H#frame_header.length > Conn#connection.recv_window_size ->
-    lager:debug("[~p] Received DATA Frame for Stream ~p with L > CRWS",
-                [Conn#connection.type, H#frame_header.stream_id]),
     go_away(?FLOW_CONTROL_ERROR, Conn);
 
 route_frame(F={H=#frame_header{
@@ -576,8 +560,6 @@ route_frame(F={H=#frame_header{
                streams=Streams
               }=Conn)
     when H#frame_header.type == ?DATA ->
-    lager:debug("[~p] Received DATA Frame for Stream ~p",
-                [Conn#connection.type, StreamId]),
     Stream = h2_stream_set:get(StreamId, Streams),
 
     case h2_stream_set:type(Stream) of
@@ -588,13 +570,6 @@ route_frame(F={H=#frame_header{
               L > 0
              } of
                 {true, _, _} ->
-                    lager:error("[~p][Stream ~p] Flow Control got ~p bytes, Stream window was ~p",
-                                [
-                                 Conn#connection.type,
-                                 StreamId,
-                                 L,
-                                 h2_stream_set:recv_window_size(Stream)]
-                               ),
                     rst_stream(Stream,
                                ?FLOW_CONTROL_ERROR,
                                Conn);
@@ -604,8 +579,6 @@ route_frame(F={H=#frame_header{
                 %% hit the next clause
                 {false, auto, true} ->
                     %% Make window size great again
-                    lager:debug("[~p] Stream ~p WindowUpdate ~p",
-                               [Conn#connection.type, StreamId, L]),
                     h2_frame_window_update:send(Conn#connection.socket,
                                                 L, StreamId),
                     send_window_update(self(), L),
@@ -640,9 +613,6 @@ route_frame({#frame_header{type=?HEADERS}=FH, _Payload}=Frame,
             #connection{}=Conn) ->
     StreamId = FH#frame_header.stream_id,
     Streams = Conn#connection.streams,
-
-    lager:debug("[~p] Received HEADERS Frame for Stream ~p",
-                [Conn#connection.type, StreamId]),
 
     %% Four things could be happening here.
 
@@ -698,18 +668,14 @@ route_frame({#frame_header{type=?HEADERS}=FH, _Payload}=Frame,
     end;
 
 route_frame(F={H=#frame_header{
-                    stream_id=StreamId,
+                    stream_id=_StreamId,
                     type=?CONTINUATION
                    }, _Payload},
             #connection{
                continuation = #continuation_state{
-                                 frames = CFQ,
-                                 stream_id = StreamId
+                                 frames = CFQ
                                 } = Cont
               }=Conn) ->
-    lager:debug("[~p] Received CONTINUATION Frame for Stream ~p",
-                [Conn#connection.type, StreamId]),
-
     maybe_hpack(Cont#continuation_state{
                   frames=queue:in(F, CFQ),
                   end_headers=?IS_FLAG((H#frame_header.flags), ?FLAG_END_HEADERS)
@@ -724,8 +690,6 @@ route_frame({H, _Payload},
 route_frame({H, _Payload},
             #connection{} = Conn)
     when H#frame_header.type == ?PRIORITY ->
-    lager:debug("[~p] Received PRIORITY Frame, but it's only a suggestion anyway...",
-               [Conn#connection.type]),
     {next_state, connected, Conn};
 
 route_frame(
@@ -733,11 +697,10 @@ route_frame(
       stream_id=StreamId,
       type=?RST_STREAM
       },
-   Payload},
+   _Payload},
   #connection{} = Conn) ->
-    EC = h2_frame_rst_stream:error_code(Payload),
-    lager:debug("[~p] Received RST_STREAM (~p) for Stream ~p",
-                [Conn#connection.type, EC, StreamId]),
+    %% TODO: anything with this?
+    %% EC = h2_frame_rst_stream:error_code(Payload),
     Streams = Conn#connection.streams,
     Stream = h2_stream_set:get(StreamId, Streams),
     case h2_stream_set:type(Stream) of
@@ -760,8 +723,6 @@ route_frame({H=#frame_header{
     when H#frame_header.type == ?PUSH_PROMISE,
          Conn#connection.type == client ->
     PSID = h2_frame_push_promise:promised_stream_id(Payload),
-    lager:debug("[~p] Received PUSH_PROMISE Frame on Stream ~p for Stream ~p",
-                [Conn#connection.type, StreamId, PSID]),
 
     Streams = Conn#connection.streams,
 
@@ -815,8 +776,6 @@ route_frame({H, Ping},
             #connection{}=Conn)
     when H#frame_header.type == ?PING,
          ?NOT_FLAG((H#frame_header.flags), ?FLAG_ACK) ->
-    lager:debug("[~p] Received PING",
-               [Conn#connection.type]),
     Ack = h2_frame_ping:ack(Ping),
     socksend(Conn, h2_frame:to_binary(Ack)),
     {next_state, connected, Conn};
@@ -826,11 +785,8 @@ route_frame({H, Payload},
          ?IS_FLAG((H#frame_header.flags), ?FLAG_ACK) ->
     case maps:get(h2_frame_ping:to_binary(Payload), Pings, undefined) of
         undefined ->
-            lager:debug("[~p] Received unknown PING ACK",
-                        [Conn#connection.type]);
+            ok;
         {NotifyPid, _} ->
-            lager:debug("[~p] Received PING ACK",
-                        [Conn#connection.type]),
             NotifyPid ! {'PONG', self()}
     end,
     NextPings = maps:remove(Payload, Pings),
@@ -838,8 +794,6 @@ route_frame({H, Payload},
 route_frame({H=#frame_header{stream_id=0}, _Payload},
             #connection{}=Conn)
     when H#frame_header.type == ?GOAWAY ->
-    lager:debug("[~p] Received GOAWAY Frame for Stream 0",
-               [Conn#connection.type]),
     go_away(?NO_ERROR, Conn);
 
 %% Window Update
@@ -853,8 +807,6 @@ route_frame(
      send_window_size=SWS
     }=Conn) ->
     WSI = h2_frame_window_update:size_increment(Payload),
-    lager:debug("[~p] Stream 0 Window Update: ~p",
-                [Conn#connection.type, WSI]),
     NewSendWindow = SWS+WSI,
     case NewSendWindow > 2147483647 of
         true ->
@@ -871,8 +823,6 @@ route_frame(
                   (Conn#connection.peer_settings)#settings.max_frame_size,
                   Streams
                  ),
-            lager:debug("[~p] and Connection Send Window now: ~p",
-                        [Conn#connection.type, RemainingSendWindow]),
             {next_state, connected,
              Conn#connection{
                send_window_size=RemainingSendWindow,
@@ -887,13 +837,9 @@ route_frame(
     StreamId = FH#frame_header.stream_id,
     Streams = Conn#connection.streams,
     WSI = h2_frame_window_update:size_increment(Payload),
-    lager:debug("[~p] Received WINDOW_UPDATE Frame for Stream ~p",
-                [Conn#connection.type, StreamId]),
     Stream = h2_stream_set:get(StreamId, Streams),
     case h2_stream_set:type(Stream) of
         idle ->
-            lager:error("[~p] Window update for an idle stream (~p)",
-                       [Conn#connection.type, StreamId]),
             go_away(?PROTOCOL_ERROR, Conn);
         closed ->
             rst_stream(Stream, ?STREAM_CLOSED, Conn);
@@ -903,10 +849,8 @@ route_frame(
 
             case NewSSWS > 2147483647 of
                 true ->
-                    lager:error("Sending ~p FLOWCONTROL ERROR because NSW = ~p", [StreamId, NewSSWS]),
                     rst_stream(Stream, ?FLOW_CONTROL_ERROR, Conn);
                 false ->
-                    lager:debug("Stream ~p send window now: ~p", [StreamId, NewSSWS]),
                     {RemainingSendWindow, NewStreams}
                         = h2_stream_set:send_what_we_can(
                             StreamId,
@@ -925,14 +869,11 @@ route_frame(
     end;
 route_frame({#frame_header{type=T}, _}, Conn)
   when T > ?CONTINUATION ->
-    lager:debug("Ignoring Unsupported Expansion Frame"),
     {next_state, connected, Conn};
 route_frame(Frame, #connection{}=Conn) ->
-    lager:error("[~p] Frame condition not covered by pattern match",
-               [Conn#connection.type]),
-    lager:error("This is bad and you probably found a bug. Please open a github issue with this output:"),
-    lager:error("OOPS! " ++ h2_frame:format(Frame)),
-    lager:error("OOPS! ~p", [Conn]),
+    error_logger:error_msg("Frame condition not covered by pattern match."
+                           "Please open a github issue with this output: ~s",
+                           [h2_frame:format(Frame)]),
     go_away(?PROTOCOL_ERROR, Conn).
 
 handle_event(_, {stream_finished,
@@ -967,9 +908,7 @@ handle_event(_, {stream_finished,
             end,
             {keep_state, NewConn};
         _ ->
-            lager:error("[~p] stream ~p finished multiple times",
-                        [Conn#connection.type,
-                         StreamId]),
+            %% stream finished multiple times
             {keep_state, Conn}
     end;
 handle_event(_, {send_window_update, 0}, Conn) ->
@@ -995,9 +934,7 @@ handle_event(_, {send_headers, StreamId, Headers, Opts},
                 socket = Socket
                }=Conn
             ) ->
-    lager:debug("[~p] {send headers, ~p, ~p}",
-                [Conn#connection.type, StreamId, Headers]),
-    StreamComplete = proplists:get_value(send_end_stream, Opts, false),
+   StreamComplete = proplists:get_value(send_end_stream, Opts, false),
 
     Stream = h2_stream_set:get(StreamId, Streams),
     case h2_stream_set:type(Stream) of
@@ -1030,10 +967,6 @@ handle_event(_, {send_trailers, StreamId, Headers, _Opts},
                 socket = _Socket
                }=Conn
             ) ->
-    lager:debug("[~p] {send trailers, ~p, ~p}",
-                [Conn#connection.type, StreamId, Headers]),
-    %% StreamComplete = proplists:get_value(send_end_stream, Opts, false),
-
     Stream = h2_stream_set:get(StreamId, Streams),
     case h2_stream_set:type(Stream) of
         active ->
@@ -1071,8 +1004,6 @@ handle_event(_, {send_trailers, StreamId, Headers, _Opts},
     end;
 handle_event(_, {send_body, StreamId, Body, Opts},
              #connection{}=Conn) ->
-    lager:debug("[~p] Send Body Stream ~p",
-                [Conn#connection.type, StreamId]),
     BodyComplete = proplists:get_value(send_end_stream, Opts, true),
 
     Stream = h2_stream_set:get(StreamId, Conn#connection.streams),
@@ -1101,8 +1032,6 @@ handle_event(_, {send_body, StreamId, Body, Opts},
             %% Sending DATA frames on an idle stream?  It's a
             %% Connection level protocol error on reciept, but If we
             %% have no active stream what can we even do?
-            lager:debug("[~p] tried sending data on idle stream ~p",
-                       [Conn#connection.type, StreamId]),
             {keep_state, Conn};
         closed ->
             {keep_state, Conn}
@@ -1213,12 +1142,10 @@ handle_event({call, From}, {new_stream, NotifyPid},
               Streams)
         of
             {error, Code, _NewStream} ->
-                lager:warning("[~p] tried to create new_stream ~p, but there are too many",
-                              [Conn#connection.type, NextId]),
+                %% TODO: probably want to have events like this available for metrics
+                %% tried to create new_stream but there are too many
                 {{error, Code}, Streams};
             GoodStreamSet ->
-                lager:debug("[~p] added stream #~p to ~p",
-                            [Conn#connection.type, NextId, GoodStreamSet]),
                 {NextId, GoodStreamSet}
         end,
     {keep_state, Conn#connection{
@@ -1236,24 +1163,20 @@ handle_event({call, From}, is_push,
     {keep_state, Conn, [{reply, From, IsPush}]};
 handle_event({call, From}, get_peer,
                   #connection{
-                     socket={Transport,_}=Socket
+                     socket=Socket
                     }=Conn) ->
     case sock:peername(Socket) of
         {error, _}=Error ->
-            lager:warning("failed to fetch peer for ~p socket",
-                          [Transport]),
             {keep_state, Conn, [{reply, From, Error}]};
         {ok, _AddrPort}=OK ->
             {keep_state, Conn, [{reply, From, OK}]}
     end;
 handle_event({call, From}, get_peercert,
                   #connection{
-                     socket={Transport,_}=Socket
+                     socket=Socket
                     }=Conn) ->
     case sock:peercert(Socket) of
         {error, _}=Error ->
-            lager:warning("failed to fetch peer cert for ~p socket",
-                          [Transport]),
             {keep_state, Conn, [{reply, From, Error}]};
         {ok, _Cert}=OK ->
             {keep_state, Conn, [{reply, From, OK}]}
@@ -1331,9 +1254,8 @@ handle_event(info, {ssl_error, Socket, Reason},
                socket={ssl,Socket}
               }=Conn) ->
     handle_socket_error(Reason, Conn);
-handle_event(info, {_,R}=M,
+handle_event(info, {_,R},
            #connection{}=Conn) ->
-    lager:error("[~p] BOOM! ~p", [Conn#connection.type, M]),
     handle_socket_error(R, Conn);
 handle_event(_, _, Conn) ->
      go_away(?PROTOCOL_ERROR, Conn).
@@ -1343,11 +1265,10 @@ code_change(_OldVsn, StateName, Conn, _Extra) ->
 
 terminate(normal, _StateName, _Conn) ->
     ok;
-terminate(Reason, _StateName, Conn=#connection{}) ->
-    lager:debug("[~p] terminate reason: ~p~n",
-                [Conn#connection.type, Reason]);
-terminate(Reason, StateName, State) ->
-    lager:debug("Crashed ~p ~p, ~p", [Reason, StateName, State]).
+terminate(_Reason, _StateName, _Conn=#connection{}) ->
+    ok;
+terminate(_Reason, _StateName, _State) ->
+    ok.
 
 -spec go_away(error_code(), connection()) -> {next_state, closing, connection()}.
 go_away(ErrorCode,
@@ -1359,6 +1280,7 @@ go_away(ErrorCode,
                                        stream_id=0
                                       }, GoAway}),
     socksend(Conn, GoAwayBin),
+    %% TODO: why is this sending a string?
     gen_statem:cast(self(), io_lib:format("GO_AWAY: ErrorCode ~p", [ErrorCode])),
     {next_state, closing, Conn}.
 
@@ -1412,7 +1334,6 @@ send_settings(SettingsToSend,
 send_ack_timeout(SS) ->
     Self = self(),
     SendAck = fun() ->
-                  lager:debug("Spawning ack timeout alarm clock: ~p + ~p", [Self, SS]),
                   timer:sleep(5000),
                   gen_statem:cast(Self, {check_settings_ack,SS})
               end,
@@ -1440,9 +1361,6 @@ start_http2_server(
   #connection{
      socket=Socket
     }=Conn) ->
-    lager:debug("[server] StartHTTP2 settings: ~p",
-               [Http2Settings]),
-
     case accept_preface(Socket) of
         ok ->
             ok = active_once(Socket),
@@ -1457,7 +1375,6 @@ start_http2_server(
              send_settings(Http2Settings, NewState)
             };
         {error, invalid_preface} ->
-            lager:debug("[server] Invalid Preface"),
             {next_state, closing, Conn}
     end.
 
@@ -1571,14 +1488,12 @@ handle_socket_error(Reason, Conn) ->
     {stop, Reason, Conn}.
 
 socksend(#connection{
-            socket=Socket,
-            type=T
+            socket=Socket
            }, Data) ->
     case sock:send(Socket, Data) of
         ok ->
             ok;
         {error, Reason} ->
-            lager:debug("[~p] {error, ~p} sending, ~p", [T, Reason, Data]),
             {error, Reason}
     end.
 
@@ -1665,9 +1580,7 @@ recv_h(Stream,
 send_h(Stream, Headers) ->
     case h2_stream_set:pid(Stream) of
         undefined ->
-            %% Should this be some kind of error?
-            lager:debug("tried sending headers on a non running stream ~p",
-                       [h2_stream_set:stream_id(Stream)]),
+            %% TODO: Should this be some kind of error?
             ok;
         Pid ->
             h2_stream:send_event(Pid, {send_h, Headers})
@@ -1680,9 +1593,7 @@ send_h(Stream, Headers) ->
 send_t(Stream, Trailers) ->
     case h2_stream_set:pid(Stream) of
         undefined ->
-            %% Should this be some kind of error?
-            lager:debug("tried sending trailers on a non running stream ~p",
-                       [h2_stream_set:stream_id(Stream)]),
+            %% TODO:  Should this be some kind of error?
             ok;
         Pid ->
             h2_stream:send_event(Pid, {send_t, Trailers})
@@ -1742,14 +1653,9 @@ send_request(NextId, NotifyPid, Conn, Streams, Headers, Body) ->
             Streams)
     of
         {error, Code, _NewStream} ->
-            lager:warning("[~p] tried to create new_stream ~p, but error ~p",
-                [Conn#connection.type, NextId, Code]),
-
+            %% error creating new stream
             {error, Code};
         GoodStreamSet ->
-            lager:debug("[~p] added stream #~p to ~p",
-                [Conn#connection.type, NextId, GoodStreamSet]),
-
             send_headers(self(), NextId, Headers),
             send_body(self(), NextId, Body),
 

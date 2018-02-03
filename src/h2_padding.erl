@@ -29,7 +29,6 @@ read_padded_payload(<<Padding:8,Bytes/bits>>,
     L = Length - Padding,
     case L > 0 of
         true ->
-            lager:debug("~p = ~p - ~p", [L, Length, Padding]),
             <<Data:L/binary,_:Padding/binary>> = Bytes,
             Data;
         false ->

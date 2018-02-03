@@ -10,8 +10,7 @@
                   crypto,
                   public_key,
                   ssl,
-                  hpack,
-                  lager
+                  hpack
                  ]},
   {env,
    [

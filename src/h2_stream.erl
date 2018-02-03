@@ -630,7 +630,7 @@ code_change(_OldVsn, StateName, State, _Extra) ->
 terminate(normal, _StateName, _State) ->
     ok;
 terminate(_Reason, _StateName, _State) ->
-    lager:debug("terminate reason: ~p~n", [_Reason]).
+    ok.
 
 -spec rst_stream_(error_code(), state()) ->
                          {next_state,
