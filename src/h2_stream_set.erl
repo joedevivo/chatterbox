@@ -79,7 +79,8 @@
      % hasn't allowed it to be sent yet
      queued_data           :: undefined | done | binary(),
      % Has the body been completely recieved.
-     body_complete = false :: boolean()
+     body_complete = false :: boolean(),
+     trailers = undefined  :: [h2_frame:frame()] | undefined
     }).
 -type active_stream() :: #active_stream{}.
 
@@ -132,6 +133,7 @@
 -export(
    [
     queued_data/1,
+    update_trailers/2,
     update_data_queue/3,
     decrement_recv_window/2,
     recv_window_size/1,
@@ -664,8 +666,15 @@ c_send_what_we_can(SWS, MFS, [S|Streams], Acc) ->
                          MFS :: non_neg_integer(),
                          Stream :: stream()) ->
                                 {integer(), stream()}.
-s_send_what_we_can(SWS, _, #active_stream{queued_data=Data}=S)
+s_send_what_we_can(SWS, _, #active_stream{queued_data=Data,
+                                          trailers=undefined}=S)
   when is_atom(Data) ->
+    {SWS, S};
+s_send_what_we_can(SWS, _, #active_stream{queued_data=Data,
+                                          pid=Pid,
+                                          trailers=Trailers}=S)
+  when is_atom(Data) ->
+    [h2_stream:send_data(Pid, Frame) || Frame <- Trailers],
     {SWS, S};
 s_send_what_we_can(SWS, MFS, #active_stream{}=Stream) ->
     %% We're coming in here with three numbers we need to look at:
@@ -692,7 +701,7 @@ s_send_what_we_can(SWS, MFS, #active_stream{}=Stream) ->
     %% this recursion, but not the connection level
 
     SSWS = Stream#active_stream.send_window_size,
-
+    Trailers = Stream#active_stream.trailers,
     QueueSize = byte_size(Stream#active_stream.queued_data),
 
     {MaxToSend, ExitStrategy} =
@@ -741,6 +750,17 @@ s_send_what_we_can(SWS, MFS, #active_stream{}=Stream) ->
 
     _Sent = h2_stream:send_data(Stream#active_stream.pid, Frame),
 
+    case NewS of
+        #active_stream{trailers=undefined} ->
+            ok;
+        #active_stream{pid=Pid,
+                       queued_data=done,
+                       trailers=Trailers} ->
+            [h2_stream:send_data(Pid, Trailer) || Trailer <- Trailers];
+        _ ->
+            ok
+    end,
+
     case ExitStrategy of
         max_frame_size ->
             s_send_what_we_can(SWS - SentBytes, MFS, NewS);
@@ -782,6 +802,9 @@ queued_data(#active_stream{queued_data=QD}) ->
     QD;
 queued_data(_) ->
     undefined.
+
+update_trailers(Trailers, Stream=#active_stream{}) ->
+    Stream#active_stream{trailers=Trailers}.
 
 update_data_queue(
   NewBody,
