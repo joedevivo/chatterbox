@@ -243,7 +243,6 @@ new_stream(
                            send_window_size=InitialSendWindow,
                            recv_window_size=InitialRecvWindow
                           },
-            lager:debug("NewStream ~p", [NewStream]),
             case upsert(NewStream, StreamSet) of
                 {error, ?REFUSED_STREAM} ->
                     %% This should be very rare, if it ever happens at
@@ -468,11 +467,10 @@ upsert_peer_subset(
       active = lists:keystore(Id, 2, PeerSubset#peer_subset.active, Stream)
      };
 %% Catch All
+%% TODO: remove this match and crash instead?
 upsert_peer_subset(
- Stream,
- PeerSubset) ->
-    lager:error("Tried upserting ~p to ~p, but clause isn't covered",
-                [Stream, PeerSubset]),
+  _Stream,
+  PeerSubset) ->
     PeerSubset.
 
 

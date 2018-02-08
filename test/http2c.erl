@@ -3,7 +3,6 @@
 %% PLEASE ONLY USE FOR TESTING
 %%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
--compile({parse_transform, lager_transform}).
 -module(http2c).
 
 -behaviour(gen_server).
@@ -81,9 +80,9 @@ wait_for_n_frames(Pid, StreamId, N) ->
 
 wait_for_n_frames(_Pid, StreamId, N, Attempts, Acc)
   when Attempts > 20 ->
-    lager:error("Timed out waiting for ~p frames on Stream ~p", [N, StreamId]),
-    lager:error("Did receive ~p frames.", [length(Acc)]),
-    lager:error("  those frames were ~p", [Acc]),
+    ct:pal("Timed out waiting for ~p frames on Stream ~p", [N, StreamId]),
+    ct:pal("Did receive ~p frames.", [length(Acc)]),
+    ct:pal("  those frames were ~p", [Acc]),
     case length(Acc) == N of
         true ->
             Acc;
@@ -97,7 +96,6 @@ wait_for_n_frames(Pid, StreamId, N, Attempts, Acc) ->
 
     case length(Frames) >= N of
         true ->
-            lager:info("Frames: ~p ~p", [N, Frames]),
             ?assertEqual(true, length(Frames) >= N),
             Frames;
         false ->
@@ -129,7 +127,6 @@ init([]) ->
         false ->
             {gen_tcp, ClientOptions}
     end,
-    lager:debug("Transport: ~p", [Transport]),
     {ok, Socket} = Transport:connect(Host, Port, Options),
 
     %% Send the preamble
@@ -140,15 +137,13 @@ init([]) ->
     h2_frame_settings:ack({Transport, Socket}),
 
     ClientSettings = chatterbox:settings(client),
-    lager:debug("[client] settings: ~p", [h2_settings:to_proplist(ClientSettings)]),
+    ct:pal("[client] settings: ~p", [h2_settings:to_proplist(ClientSettings)]),
 
     BinToSend = h2_frame_settings:send(#settings{}, ClientSettings),
     Transport:send(Socket, BinToSend),
 
-    {AH, PAck} = h2_frame:read({Transport, Socket}, 100),
-    lager:debug("AH: ~p, ~p", [AH, PAck]),
-    Ack = ?IS_FLAG((AH#frame_header.flags), ?FLAG_ACK),
-    lager:debug("Ack: ~p", [Ack]),
+    {AH, _PAck} = h2_frame:read({Transport, Socket}, 100),
+    _ = ?IS_FLAG((AH#frame_header.flags), ?FLAG_ACK),
 
     case Transport of
         ssl ->
@@ -187,7 +182,6 @@ handle_call(Request, _From, State) ->
                          {noreply, #http2c_state{}, timeout()} |
                          {stop, any(), #http2c_state{}}.
 handle_cast({send_bin, Bin}, #http2c_state{socket={Transport, Socket}}=State) ->
-    lager:debug("Sending ~p", [Bin]),
     Transport:send(Socket, Bin),
     {noreply, State};
 handle_cast(recv, #http2c_state{
@@ -196,7 +190,6 @@ handle_cast(recv, #http2c_state{
         }=State) ->
     RawHeader = Transport:recv(Socket, 9),
     {FHeader, <<>>} = h2_frame:read_binary_frame_header(RawHeader),
-    lager:info("http2c recv ~p", [FHeader]),
     RawBody = Transport:recv(Socket, FHeader#frame_header.length),
     {ok, Payload, <<>>} = h2_frame:read_binary_payload(RawBody, FHeader),
     F = {FHeader, Payload},
@@ -227,8 +220,7 @@ handle_info({tcp_closed,_}, State) ->
     {noreply, State};
 handle_info({ssl_closed,_}, State) ->
     {noreply, State};
-handle_info(Info, State) ->
-    lager:debug("unexpected [http2c]: ~p~n", [Info]),
+handle_info(_Info, State) ->
     {noreply, State}.
 
 %% This function is called by a gen_server when it is about to
@@ -267,7 +259,6 @@ process_binary(<<HeaderBin:9/binary,Bin/binary>>, undefined, <<>>, Frames) ->
             {Frames, Header, Bin}
     end;
 process_binary(Bin, Header, <<>>, Frames) ->
-    lager:info("process_binary(~p,~p,~p,~p", [Bin,Header,<<>>,Frames]),
     L = Header#frame_header.length,
     case byte_size(Bin) >= L of
         true ->

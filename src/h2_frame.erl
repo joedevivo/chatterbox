@@ -86,7 +86,6 @@ read(Socket, Timeout) ->
             {error, Reason};
         FrameHeader ->
             {ok, Payload} = read_payload(Socket, FrameHeader, Timeout),
-            lager:debug(format({FrameHeader, Payload})),
             {FrameHeader, Payload}
     end.
 

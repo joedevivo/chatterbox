@@ -26,7 +26,6 @@ spawn_handle(Pid, StreamId, Headers, ReqBody) ->
         iodata()
        ) -> ok.
 handle(ConnPid, StreamId, Headers, _ReqBody) ->
-    lager:debug("handle(~p, ~p, ~p, _)", [ConnPid, StreamId, Headers]),
     Path = binary_to_list(proplists:get_value(<<":path">>, Headers)),
 
     %% QueryString Hack?
@@ -54,8 +53,6 @@ handle(ConnPid, StreamId, Headers, _ReqBody) ->
     %% TODO: Logic about "/" vs "index.html", "index.htm", etc...
     %% Directory browsing?
     File = RootDir ++ Path4,
-    lager:debug("[chatterbox_static_content_handler] serving ~p on stream ~p", [File, StreamId]),
-    %%lager:info("Request Headers: ~p", [Headers]),
 
     case {filelib:is_file(File), filelib:is_dir(File)} of
         {_, true} ->
@@ -96,8 +93,6 @@ handle(ConnPid, StreamId, Headers, _ReqBody) ->
                         _ -> []
                     end,
 
-                    lager:debug("Resources to push: ~p", [Resources]),
-
                     NewStreams =
                         lists:foldl(fun(R, Acc) ->
                                             NewStreamId = h2_connection:new_stream(ConnPid),
@@ -110,9 +105,7 @@ handle(ConnPid, StreamId, Headers, _ReqBody) ->
                                     Resources
                                    ),
 
-                    lager:debug("New Streams for promises: ~p", [NewStreams]),
-
-                    [spawn_handle(ConnPid, NewStreamId, PHeaders, <<>>) || {NewStreamId, PHeaders} <- NewStreams],
+                     [spawn_handle(ConnPid, NewStreamId, PHeaders, <<>>) || {NewStreamId, PHeaders} <- NewStreams],
 
                     ok;
                 _ ->

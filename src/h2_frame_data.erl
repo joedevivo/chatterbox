@@ -45,7 +45,6 @@ read_binary(_, #frame_header{stream_id=0}) ->
 read_binary(Bin, _H=#frame_header{length=0}) ->
     {ok, #data{data= <<>>}, Bin};
 read_binary(Bin, H=#frame_header{length=L}) ->
-    lager:debug("read_binary L: ~p, actually: ~p", [L, byte_size(Bin)]),
     <<PayloadBin:L/binary,Rem/bits>> = Bin,
     case h2_padding:read_possibly_padded_payload(PayloadBin, H) of
         {error, Code} ->

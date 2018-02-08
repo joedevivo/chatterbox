@@ -81,8 +81,6 @@ start(Config) ->
           [{port, 8081}|proplists:get_value(ssl_options, Settings)],
           chatterbox_ranch_protocol,
           []),
-    lager:set_loglevel(cth_readable_lager_backend, debug),
-
     Config.
 
 ssl(SSLBool, Config) ->
