@@ -45,7 +45,6 @@
   ]},
 
   {pkg_name, ts_chatterbox},
-  {maintainers, ["Joe DeVivo", "Tristan Sloughter"]},
   {licenses, ["MIT"]},
   {links, [{"Github", "https://github.com/joedevivo/chatterbox"}]}
  ]}.
