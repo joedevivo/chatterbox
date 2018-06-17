@@ -19,6 +19,7 @@
          start_link/2,
          start_link/3,
          start_link/4,
+         start_link/5,
          start_ssl_upgrade_link/4,
          stop/1,
          send_request/3,
@@ -102,14 +103,17 @@ start_link(https, Host, SSLOptions)
                       | ignore
                       | {error, term()}.
 start_link(Transport, Host, Port, SSLOptions) ->
+    start_link(Transport, Host, Port, SSLOptions, #{}).
+
+start_link(Transport, Host, Port, SSLOptions, ConnectionSettings) ->
     NewT = case Transport of
                http -> gen_tcp;
                https -> ssl
            end,
-    h2_connection:start_client_link(NewT, Host, Port, SSLOptions, chatterbox:settings(client)).
+    h2_connection:start_client_link(NewT, Host, Port, SSLOptions, chatterbox:settings(client), ConnectionSettings).
 
 start_ssl_upgrade_link(Host, Port, InitialMessage, SSLOptions) ->
-    h2_connection:start_ssl_upgrade_link(Host, Port, InitialMessage, SSLOptions, chatterbox:settings(client)).
+    h2_connection:start_ssl_upgrade_link(Host, Port, InitialMessage, SSLOptions, chatterbox:settings(client), #{}).
 
 -spec stop(pid()) -> ok.
 stop(Pid) ->
@@ -139,7 +143,7 @@ send_request(CliPid, Headers, Body) ->
     case h2_connection:new_stream(CliPid) of
         {error, _Code} = Err ->
             Err;
-        StreamId ->
+        {StreamId, _} ->
             h2_connection:send_headers(CliPid, StreamId, Headers),
             h2_connection:send_body(CliPid, StreamId, Body),
             {ok, StreamId}
@@ -149,7 +153,7 @@ send_ping(CliPid) ->
     h2_connection:send_ping(CliPid).
 
 -spec get_response(pid(), stream_id()) ->
-                          {ok, {hpack:header(), iodata()}}
+                          {ok, {hpack:headers(), iodata(), hpack:headers()}}
                            | not_ready
                            | {error, term()}.
 get_response(CliPid, StreamId) ->
