@@ -4,8 +4,8 @@
 
 %% Start/Stop API
 -export([
-         start_client_link/5,
-         start_ssl_upgrade_link/5,
+         start_client_link/6,
+         start_ssl_upgrade_link/6,
          start_server_link/3,
          become/1,
          become/2,
@@ -26,6 +26,7 @@
          is_push/1,
          new_stream/1,
          new_stream/2,
+         new_stream/4,
          send_promise/4,
          get_response/2,
          get_peer/1,
@@ -90,8 +91,8 @@
           settings_sent = queue:new() :: queue:queue(),
           next_available_stream_id = 2 :: stream_id(),
           streams :: h2_stream_set:stream_set(),
-          stream_callback_mod = application:get_env(chatterbox, stream_callback_mod, chatterbox_static_stream) :: module(),
-          stream_callback_opts = application:get_env(chatterbox, stream_callback_opts, []) :: list(),
+          stream_callback_mod :: module() | undefined,
+          stream_callback_opts :: list() | undefined,
           buffer = empty :: empty | {binary, binary()} | {frame, h2_frame:header(), binary()},
           continuation = undefined :: undefined | #continuation_state{},
           flow_control = auto :: auto | manual,
@@ -115,21 +116,23 @@
                         inet:ip_address() | inet:hostname(),
                         inet:port_number(),
                         [ssl:ssl_option()],
-                        settings()
+                        settings(),
+                        maps:map()
                        ) ->
                                {ok, pid()} | ignore | {error, term()}.
-start_client_link(Transport, Host, Port, SSLOptions, Http2Settings) ->
-    gen_statem:start_link(?MODULE, {client, Transport, Host, Port, SSLOptions, Http2Settings}, []).
+start_client_link(Transport, Host, Port, SSLOptions, Http2Settings, ConnectionSettings) ->
+    gen_statem:start_link(?MODULE, {client, Transport, Host, Port, SSLOptions, Http2Settings, ConnectionSettings}, []).
 
 -spec start_ssl_upgrade_link(inet:ip_address() | inet:hostname(),
                              inet:port_number(),
                              binary(),
                              [ssl:ssl_option()],
-                             settings()
+                             settings(),
+                             maps:map()
                             ) ->
                                     {ok, pid()} | ignore | {error, term()}.
-start_ssl_upgrade_link(Host, Port, InitialMessage, SSLOptions, Http2Settings) ->
-    gen_statem:start_link(?MODULE, {client_ssl_upgrade, Host, Port, InitialMessage, SSLOptions, Http2Settings}, []).
+start_ssl_upgrade_link(Host, Port, InitialMessage, SSLOptions, Http2Settings, ConnectionSettings) ->
+    gen_statem:start_link(?MODULE, {client_ssl_upgrade, Host, Port, InitialMessage, SSLOptions, Http2Settings, ConnectionSettings}, []).
 
 -spec start_server_link(socket(),
                         [ssl:ssl_option()],
@@ -167,7 +170,7 @@ become({Transport, Socket}, Http2Settings, ConnectionSettings) ->
                        NewState).
 
 %% Init callback
-init({client, Transport, Host, Port, SSLOptions, Http2Settings}) ->
+init({client, Transport, Host, Port, SSLOptions, Http2Settings, ConnectionSettings}) ->
     case Transport:connect(Host, Port, client_options(Transport, SSLOptions)) of
         {ok, Socket} ->
             ok = sock:setopts({Transport, Socket}, [{packet, raw}, binary]),
@@ -175,6 +178,8 @@ init({client, Transport, Host, Port, SSLOptions, Http2Settings}) ->
             InitialState =
                 #connection{
                    type = client,
+                   stream_callback_mod = maps:get(stream_callback_mod, ConnectionSettings, undefined),
+                   stream_callback_opts = maps:get(stream_callback_opts, ConnectionSettings, []),
                    streams = h2_stream_set:new(client),
                    socket = {Transport, Socket},
                    next_available_stream_id=1,
@@ -187,7 +192,7 @@ init({client, Transport, Host, Port, SSLOptions, Http2Settings}) ->
         {error, Reason} ->
             {stop, Reason}
     end;
-init({client_ssl_upgrade, Host, Port, InitialMessage, SSLOptions, Http2Settings}) ->
+init({client_ssl_upgrade, Host, Port, InitialMessage, SSLOptions, Http2Settings, ConnectionSettings}) ->
     case gen_tcp:connect(Host, Port, [{active, false}]) of
         {ok, TCP} ->
             gen_tcp:send(TCP, InitialMessage),
@@ -199,6 +204,8 @@ init({client_ssl_upgrade, Host, Port, InitialMessage, SSLOptions, Http2Settings}
                     InitialState =
                         #connection{
                            type = client,
+                           stream_callback_mod = maps:get(stream_callback_mod, ConnectionSettings, undefined),
+                           stream_callback_opts = maps:get(stream_callback_opts, ConnectionSettings, []),
                            streams = h2_stream_set:new(client),
                            socket = {ssl, Socket},
                            next_available_stream_id=1,
@@ -296,15 +303,18 @@ get_peercert(Pid) ->
 is_push(Pid) ->
     gen_statem:call(Pid, is_push).
 
--spec new_stream(pid()) -> stream_id() | {error, error_code()}.
+-spec new_stream(pid()) -> {stream_id(), pid()} | {error, error_code()}.
 new_stream(Pid) ->
     new_stream(Pid, self()).
 
 -spec new_stream(pid(), pid()) ->
-                        stream_id()
+                        {stream_id(), pid()}
                       | {error, error_code()}.
 new_stream(Pid, NotifyPid) ->
     gen_statem:call(Pid, {new_stream, NotifyPid}).
+
+new_stream(Pid, CallbackMod, CallbackOpts, NotifyPid) ->
+    gen_statem:call(Pid, {new_stream, CallbackMod, CallbackOpts, NotifyPid}).
 
 -spec send_promise(pid(), stream_id(), stream_id(), hpack:headers()) -> ok.
 send_promise(Pid, StreamId, NewStreamId, Headers) ->
@@ -641,11 +651,12 @@ route_frame({#frame_header{type=?HEADERS}=FH, _Payload}=Frame,
                       Conn#connection.socket,
                       (Conn#connection.peer_settings)#settings.initial_window_size,
                       (Conn#connection.self_settings)#settings.initial_window_size,
+                      Conn#connection.type,
                       Streams) of
                     {error, ErrorCode, NewStream} ->
                         rst_stream(NewStream, ErrorCode, Conn),
                         {none, Conn};
-                    NewStreams ->
+                    {_, NewStreams} ->
                         {headers, Conn#connection{streams=NewStreams}}
                 end;
             {active, server} ->
@@ -741,7 +752,7 @@ route_frame({H=#frame_header{
     %% reserved(local) and reserved(remote) aren't technically
     %% 'active', but they're being counted that way right now. Again,
     %% that only matters if Server Push is enabled.
-    NewStreams =
+    {_, NewStreams} =
         h2_stream_set:new_stream(
           PSID,
           NotifyPid,
@@ -750,6 +761,7 @@ route_frame({H=#frame_header{
           Conn#connection.socket,
           (Conn#connection.peer_settings)#settings.initial_window_size,
           (Conn#connection.self_settings)#settings.initial_window_size,
+          Conn#connection.type,
           Streams),
 
     Continuation = #continuation_state{
@@ -885,7 +897,8 @@ route_frame(Frame, #connection{}=Conn) ->
 handle_event(_, {stream_finished,
               StreamId,
               Headers,
-              Body},
+              Body,
+              Trailers},
              Conn) ->
     Stream = h2_stream_set:get(StreamId, Conn#connection.streams),
     case h2_stream_set:type(Stream) of
@@ -894,7 +907,7 @@ handle_event(_, {stream_finished,
             Response =
                 case Conn#connection.type of
                     server -> garbage;
-                    client -> {Headers, Body}
+                    client -> {Headers, Body, Trailers}
                 end,
             {_NewStream, NewStreams} =
                 h2_stream_set:close(
@@ -1138,32 +1151,12 @@ handle_event({call, From}, {get_response, StreamId},
     {keep_state, Conn#connection{streams=NewStreams}, [{reply, From, Reply}]};
 handle_event({call, From}, {new_stream, NotifyPid},
                   #connection{
-                     streams=Streams,
-                     next_available_stream_id=NextId
+                     stream_callback_mod=CallbackMod,
+                     stream_callback_opts=CallbackOpts
                     }=Conn) ->
-    {Reply, NewStreams} =
-        case
-            h2_stream_set:new_stream(
-              NextId,
-              NotifyPid,
-              Conn#connection.stream_callback_mod,
-              Conn#connection.stream_callback_opts,
-              Conn#connection.socket,
-              Conn#connection.peer_settings#settings.initial_window_size,
-              Conn#connection.self_settings#settings.initial_window_size,
-              Streams)
-        of
-            {error, Code, _NewStream} ->
-                %% TODO: probably want to have events like this available for metrics
-                %% tried to create new_stream but there are too many
-                {{error, Code}, Streams};
-            GoodStreamSet ->
-                {NextId, GoodStreamSet}
-        end,
-    {keep_state, Conn#connection{
-                                 next_available_stream_id=NextId+2,
-                                 streams=NewStreams
-                                }, [{reply, From, Reply}]};
+    new_stream_(From, CallbackMod, CallbackOpts, NotifyPid, Conn);
+handle_event({call, From}, {new_stream, CallbackMod, CallbackState, NotifyPid}, Conn) ->
+    new_stream_(From, CallbackMod, CallbackState, NotifyPid, Conn);
 handle_event({call, From}, is_push,
                   #connection{
                      peer_settings=#settings{enable_push=Push}
@@ -1281,6 +1274,33 @@ terminate(_Reason, _StateName, _Conn=#connection{}) ->
     ok;
 terminate(_Reason, _StateName, _State) ->
     ok.
+
+new_stream_(From, CallbackMod, CallbackState, NotifyPid, Conn=#connection{streams=Streams,
+                                                                          next_available_stream_id=NextId}) ->
+    {Reply, NewStreams} =
+        case
+            h2_stream_set:new_stream(
+              NextId,
+              NotifyPid,
+              CallbackMod,
+              CallbackState,
+              Conn#connection.socket,
+              Conn#connection.peer_settings#settings.initial_window_size,
+              Conn#connection.self_settings#settings.initial_window_size,
+              Conn#connection.type,
+              Streams)
+        of
+            {error, Code, _NewStream} ->
+                %% TODO: probably want to have events like this available for metrics
+                %% tried to create new_stream but there are too many
+                {{error, Code}, Streams};
+            {Pid, GoodStreamSet} ->
+                {{NextId, Pid}, GoodStreamSet}
+        end,
+    {keep_state, Conn#connection{
+                                 next_available_stream_id=NextId+2,
+                                 streams=NewStreams
+                                }, [{reply, From, Reply}]}.
 
 -spec go_away(error_code(), connection()) -> {next_state, closing, connection()}.
 go_away(ErrorCode,
@@ -1662,12 +1682,13 @@ send_request(NextId, NotifyPid, Conn, Streams, Headers, Body) ->
             Conn#connection.socket,
             Conn#connection.peer_settings#settings.initial_window_size,
             Conn#connection.self_settings#settings.initial_window_size,
+            Conn#connection.type,
             Streams)
     of
         {error, Code, _NewStream} ->
             %% error creating new stream
             {error, Code};
-        GoodStreamSet ->
+        {_, GoodStreamSet} ->
             send_headers(self(), NextId, Headers),
             send_body(self(), NextId, Body),
 

@@ -6,10 +6,10 @@
 
 -export([
          init/3,
-         on_receive_request_headers/2,
+         on_receive_headers/2,
          on_send_push_promise/2,
-         on_receive_request_data/2,
-         on_request_end_stream/1
+         on_receive_data/2,
+         on_end_stream/1
         ]).
 
 -record(cb_static, {
@@ -23,16 +23,16 @@ init(ConnPid, StreamId, _) ->
     {ok, #cb_static{connection_pid=ConnPid,
                     stream_id=StreamId}}.
 
-on_receive_request_headers(Headers, State) ->
+on_receive_headers(Headers, State) ->
     {ok, State#cb_static{req_headers=Headers}}.
 
 on_send_push_promise(Headers, State) ->
     {ok, State#cb_static{req_headers=Headers}}.
 
-on_receive_request_data(_Bin, State)->
+on_receive_data(_Bin, State)->
     {ok, State}.
 
-on_request_end_stream(State=#cb_static{connection_pid=ConnPid,
+on_end_stream(State=#cb_static{connection_pid=ConnPid,
                                        stream_id=StreamId}) ->
     Headers = State#cb_static.req_headers,
 
@@ -102,7 +102,7 @@ on_request_end_stream(State=#cb_static{connection_pid=ConnPid,
 
                         lists:foldl(
                           fun(R, Acc) ->
-                                  NewStreamId = h2_connection:new_stream(ConnPid),
+                                  {NewStreamId, _} = h2_connection:new_stream(ConnPid),
                                   PHeaders = generate_push_promise_headers(Headers, <<$/,R/binary>>
                                                                           ),
                                   h2_connection:send_promise(ConnPid, StreamId, NewStreamId, PHeaders),

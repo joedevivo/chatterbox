@@ -6,10 +6,10 @@
 
 -export([
          init/3,
-         on_receive_request_headers/2,
+         on_receive_headers/2,
          on_send_push_promise/2,
-         on_receive_request_data/2,
-         on_request_end_stream/1
+         on_receive_data/2,
+         on_end_stream/1
         ]).
 
 -record(state, {conn_pid :: pid(),
@@ -23,10 +23,10 @@ init(ConnPid, StreamId, _Opts) ->
     {ok, #state{conn_pid=ConnPid,
                 stream_id=StreamId}}.
 
--spec on_receive_request_headers(
+-spec on_receive_headers(
             Headers :: hpack:headers(),
             CallbackState :: any()) -> {ok, NewState :: any()}.
-on_receive_request_headers(_Headers, State=#state{conn_pid=ConnPid}) ->
+on_receive_headers(_Headers, State=#state{conn_pid=ConnPid}) ->
     {ok, Peer} = h2_connection:get_peer(ConnPid),
     {ok, State#state{peer=Peer}}.
 
@@ -35,15 +35,15 @@ on_receive_request_headers(_Headers, State=#state{conn_pid=ConnPid}) ->
             CallbackState :: any()) -> {ok, NewState :: any()}.
 on_send_push_promise(_Headers, State) -> {ok, State}.
 
--spec on_receive_request_data(
+-spec on_receive_data(
             iodata(),
             CallbackState :: any())-> {ok, NewState :: any()}.
-on_receive_request_data(_Data, State) -> {ok, State}.
+on_receive_data(_Data, State) -> {ok, State}.
 
--spec on_request_end_stream(
+-spec on_end_stream(
             CallbackState :: any()) ->
     {ok, NewState :: any()}.
-on_request_end_stream(State=#state{conn_pid=ConnPid,
+on_end_stream(State=#state{conn_pid=ConnPid,
                                    stream_id=StreamId,
                                    peer={Address, Port}}) ->
     Body = list_to_binary(io_lib:format("Address: ~p, Port: ~p", [Address, Port])),

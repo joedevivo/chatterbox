@@ -3,7 +3,7 @@
 
 %% Public API
 -export([
-         start_link/5,
+         start_link/6,
          send_event/2,
          send_pp/2,
          send_data/2,
@@ -56,13 +56,14 @@
           request_end_headers = false :: boolean(),
           response_headers = [] :: hpack:headers(),
           response_trailers = [] :: hpack:headers(),
-          response_body :: iodata() | undefined,
+          response_body = undefined :: iodata() | undefined,
           response_end_headers = false :: boolean(),
           response_end_stream = false :: boolean(),
           next_state = undefined :: undefined | stream_state_name(),
           promised_stream = undefined :: undefined | state(),
           callback_state = undefined :: any(),
-          callback_mod = undefined :: module()
+          callback_mod = undefined :: module(),
+          type :: client | server
          }).
 
 -type state() :: #stream_state{}.
@@ -76,7 +77,7 @@
            ) ->
   {ok, callback_state()}.
 
--callback on_receive_request_headers(
+-callback on_receive_headers(
             Headers :: hpack:headers(),
             CallbackState :: callback_state()) ->
     {ok, NewState :: callback_state()}.
@@ -86,12 +87,12 @@
             CallbackState :: callback_state()) ->
     {ok, NewState :: callback_state()}.
 
--callback on_receive_request_data(
+-callback on_receive_data(
             iodata(),
             CallbackState :: callback_state())->
     {ok, NewState :: callback_state()}.
 
--callback on_request_end_stream(
+-callback on_end_stream(
             CallbackState :: callback_state()) ->
     {ok, NewState :: callback_state()}.
 
@@ -101,15 +102,17 @@
         Connection :: pid(),
         CallbackModule :: module(),
         CallbackOptions :: list(),
+        Type :: client | server,
         Socket :: sock:socket()
                   ) ->
                         {ok, pid()} | ignore | {error, term()}.
-start_link(StreamId, Connection, CallbackModule, CallbackOptions, Socket) ->
+start_link(StreamId, Connection, CallbackModule, CallbackOptions, Type, Socket) ->
     gen_statem:start_link(?MODULE,
                           [StreamId,
                            Connection,
                            CallbackModule,
                            CallbackOptions,
+                           Type,
                            Socket],
                           []).
 
@@ -155,19 +158,35 @@ stop(Pid) ->
 init([
       StreamId,
       ConnectionPid,
-      CB,
-      CBOptions,
+      CB=undefined,
+      _CBOptions,
+      Type,
       Socket
      ]) ->
-    %% TODO: Check for CB implementing this behaviour
-    {ok, CallbackState} = CB:init(ConnectionPid, StreamId, [Socket | CBOptions]),
-
     {ok, idle, #stream_state{
                   callback_mod=CB,
                   socket=Socket,
                   stream_id=StreamId,
                   connection=ConnectionPid,
-                  callback_state=CallbackState
+                  type = Type
+                 }};
+init([
+      StreamId,
+      ConnectionPid,
+      CB,
+      CBOptions,
+      Type,
+      Socket
+     ]) ->
+    %% TODO: Check for CB implementing this behaviour
+    {ok, NewCBState} = callback(CB, init, [ConnectionPid, StreamId], [Socket | CBOptions]),
+    {ok, idle, #stream_state{
+                  callback_mod=CB,
+                  socket=Socket,
+                  stream_id=StreamId,
+                  connection=ConnectionPid,
+                  callback_state=NewCBState,
+                  type = Type
                  }}.
 
 callback_mode() ->
@@ -183,6 +202,19 @@ callback_mode() ->
 %% PUSH_PROMISE frame with that Stream Id. It's a subtle thing, but it
 %% drove me crazy until I figured it out
 
+callback(undefined, _, _, State) ->
+    {ok, State};
+callback(Mod, Fun, Args, State) ->
+    %% load the module if it isn't already
+    AllArgs = Args ++ [State],
+    erlang:function_exported(Mod, module_info, 0) orelse code:ensure_loaded(Mod),
+    case erlang:function_exported(Mod, Fun, length(AllArgs)) of
+        true ->
+            erlang:apply(Mod, Fun, AllArgs);
+        false ->
+            {ok, State}
+    end.
+
 %% Server 'RECV H'
 idle(cast, {recv_h, Headers},
      #stream_state{
@@ -191,7 +223,7 @@ idle(cast, {recv_h, Headers},
        }=Stream) ->
     case is_valid_headers(request, Headers) of
         ok ->
-            {ok, NewCBState} = CB:on_receive_request_headers(Headers, CallbackState),
+            {ok, NewCBState} = callback(CB, on_receive_headers, [Headers], CallbackState),
             {next_state,
              open,
              Stream#stream_state{
@@ -208,7 +240,7 @@ idle(cast, {send_pp, Headers},
         callback_mod=CB,
         callback_state=CallbackState
        }=Stream) ->
-    {ok, NewCBState} = CB:on_send_push_promise(Headers, CallbackState),
+    {ok, NewCBState} = callback(CB, on_send_push_promise, [Headers], CallbackState),
     {next_state,
      reserved_local,
      Stream#stream_state{
@@ -244,7 +276,7 @@ reserved_local(timeout, _,
                   callback_mod=CB
                   }=Stream) ->
     check_content_length(Stream),
-    {ok, NewCBState} = CB:on_request_end_stream(CallbackState),
+    {ok, NewCBState} = callback(CB, on_end_stream, [], CallbackState),
     {next_state,
      reserved_local,
      Stream#stream_state{
@@ -271,19 +303,27 @@ reserved_local(Type, Event, State) ->
 
 reserved_remote(cast, {recv_h, Headers},
                 #stream_state{
+                   callback_mod=CB,
+                   callback_state=CallbackState
                   }=Stream) ->
+    {ok, NewCBState} = callback(CB, on_receive_headers, [Headers], CallbackState),
     {next_state,
      half_closed_local,
      Stream#stream_state{
-       response_headers=Headers
+       response_headers=Headers,
+       callback_state=NewCBState
       }};
 reserved_remote(cast, {recv_t, Headers},
                 #stream_state{
+                   callback_mod=CB,
+                   callback_state=CallbackState
                   }=Stream) ->
+    {ok, NewCBState} = callback(CB, on_receive_headers, [Headers], CallbackState),
     {next_state,
      half_closed_local,
      Stream#stream_state{
-       response_headers=Headers
+       response_headers=Headers,
+       callback_state=NewCBState
       }};
 reserved_remote(Type, Event, State) ->
     handle_event(Type, Event, State).
@@ -295,7 +335,7 @@ open(cast, recv_es,
        }=Stream) ->
     case check_content_length(Stream) of
         ok ->
-            {ok, NewCBState} = CB:on_request_end_stream(CallbackState),
+            {ok, NewCBState} = callback(CB, on_end_stream, [], CallbackState),
             {next_state,
              half_closed_remote,
              Stream#stream_state{
@@ -320,7 +360,7 @@ open(cast, {recv_data,
        }=Stream)
   when ?NOT_FLAG(Flags, ?FLAG_END_STREAM) ->
     Bin = h2_frame_data:data(Payload),
-    {ok, NewCBState} = CB:on_receive_request_data(Bin, CallbackState),
+    {ok, NewCBState} = callback(CB, on_receive_data, [Bin], CallbackState),
     {next_state,
      open,
      Stream#stream_state{
@@ -343,20 +383,20 @@ open(cast, {recv_data,
        }=Stream)
   when ?IS_FLAG(Flags, ?FLAG_END_STREAM) ->
     Bin = h2_frame_data:data(Payload),
-    {ok, CallbackState1} = CB:on_receive_request_data(Bin, CallbackState),
+    {ok, NewCBState} = callback(CB, on_receive_data, [Bin], CallbackState),
     NewStream = Stream#stream_state{
                   incoming_frames=queue:in(F, IFQ),
                   request_body_size=Stream#stream_state.request_body_size+L,
                   request_end_stream=true,
-                  callback_state=CallbackState1
+                  callback_state=NewCBState
                  },
     case check_content_length(NewStream) of
         ok ->
-            {ok, NewCBState} = CB:on_request_end_stream(CallbackState1),
+            {ok, NewCBState1} = callback(CB, on_end_stream, [], NewCBState),
             {next_state,
              half_closed_remote,
              NewStream#stream_state{
-               callback_state=NewCBState
+               callback_state=NewCBState1
               }};
         rst_stream ->
             {next_state,
@@ -366,17 +406,30 @@ open(cast, {recv_data,
 
 %% Trailers
 open(cast, {recv_h, Trailers},
-     #stream_state{}=Stream) ->
+     #stream_state{type=server}=Stream) ->
     case is_valid_headers(request, Trailers) of
         ok ->
-            {next_state,
-             open,
+            {keep_state,
              Stream#stream_state{
                request_headers=Stream#stream_state.request_headers ++ Trailers
               }};
         {error, Code} ->
             rst_stream_(Code, Stream)
     end;
+open(cast, {recv_h, Headers},
+     #stream_state{type=client,
+                   callback_mod=CB,
+                   callback_state=CallbackState}=Stream) ->
+  case is_valid_headers(response, Headers) of
+      ok ->
+          {ok, NewCBState} = callback(CB, on_receive_headers, [Headers], CallbackState),
+          {keep_state,
+           Stream#stream_state{
+             callback_state=NewCBState,
+             response_headers=Headers}};
+      {error, Code} ->
+          rst_stream_(Code, Stream)
+  end;
 open(cast, {send_data,
       {#frame_header{
           type=?HEADERS,
@@ -506,24 +559,30 @@ half_closed_remote(Type, Event, State) ->
 %% but that stream may be ready to transition, it'll make sense, I
 %% hope!
 half_closed_local(cast,
-  {recv_h, Headers},
-  #stream_state{}=Stream) ->
+                  {recv_h, Headers},
+                  #stream_state{callback_mod=CB,
+                                callback_state=CallbackState
+                               }=Stream) ->
   case is_valid_headers(response, Headers) of
       ok ->
+          {ok, NewCBState} = callback(CB, on_receive_headers, [Headers], CallbackState),
           {next_state,
            half_closed_local,
            Stream#stream_state{
+             callback_state=NewCBState,
              response_headers=Headers}};
       {error, Code} ->
           rst_stream_(Code, Stream)
   end;
+
 half_closed_local(cast,
   {recv_data,
    {#frame_header{
        flags=Flags,
        type=?DATA
-      },_}=F},
+      }, _}=F},
   #stream_state{
+     callback_mod=undefined,
      incoming_frames=IFQ
      } = Stream) ->
     NewQ = queue:in(F, IFQ),
@@ -544,27 +603,60 @@ half_closed_local(cast,
                incoming_frames=NewQ
               }}
     end;
-
+half_closed_local(cast,
+  {recv_data,
+   {#frame_header{
+       flags=Flags,
+       type=?DATA
+      }, Payload}},
+  #stream_state{
+     callback_mod=CB,
+     callback_state=CallbackState
+     } = Stream) ->
+    Data = h2_frame_data:data(Payload),
+    {ok, NewCBState} = callback(CB, on_receive_data, [Data], CallbackState),
+    case ?IS_FLAG(Flags, ?FLAG_END_STREAM) of
+        true ->
+            {ok, NewCBState1} = callback(CB, on_end_stream, [], NewCBState),
+            {next_state, closed,
+             Stream#stream_state{
+               callback_state=NewCBState1
+              }, 0};
+        _ ->
+            {next_state,
+             half_closed_local,
+             Stream#stream_state{
+               callback_state=NewCBState
+              }}
+    end;
 half_closed_local(cast, recv_es,
                   #stream_state{
                      response_body = undefined,
+                     callback_mod=CB,
+                     callback_state=CallbackState,
                      incoming_frames = Q
                     } = Stream) ->
+    {ok, NewCBState} = callback(CB, on_end_stream, [], CallbackState),
     Data = [h2_frame_data:data(Payload) || {#frame_header{type=?DATA}, Payload} <- queue:to_list(Q)],
     {next_state, closed,
      Stream#stream_state{
        incoming_frames=queue:new(),
-       response_body = Data
+       response_body = Data,
+       callback_state=NewCBState
       }, 0};
 
 half_closed_local(cast, recv_es,
                   #stream_state{
-                     response_body = Data
+                     response_body = Data,
+                     callback_mod=CB,
+                     callback_state=CallbackState
                     } = Stream) ->
+    {ok, NewCBState} = callback(CB, on_end_stream, [], CallbackState),
     {next_state, closed,
      Stream#stream_state{
        incoming_frames=queue:new(),
-       response_body = Data
+       response_body = Data,
+       callback_state=NewCBState
       }, 0};
 
 half_closed_local(_, _,
@@ -579,7 +671,8 @@ closed(timeout, _,
                     {stream_finished,
                      Stream#stream_state.stream_id,
                      Stream#stream_state.response_headers,
-                     Stream#stream_state.response_body}),
+                     Stream#stream_state.response_body,
+                     Stream#stream_state.response_trailers}),
     {stop, normal, Stream};
 closed(_, _,
        #stream_state{}=Stream) ->

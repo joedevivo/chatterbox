@@ -96,6 +96,8 @@
      response_headers :: hpack:headers() | undefined,
      % The response body
      response_body    :: binary() | undefined,
+     % The response trailers received
+     response_trailers :: hpack:headers() | undefined,
      % Can this be thrown away?
      garbage = false  :: boolean() | undefined
      }).
@@ -123,7 +125,7 @@
 -export(
    [
     new/1,
-    new_stream/8,
+    new_stream/9,
     get/2,
     upsert/2,
     sort/1
@@ -210,8 +212,9 @@ new(server) ->
         Socket :: sock:socket(),
         InitialSendWindow :: integer(),
         InitialRecvWindow :: integer(),
+        Type :: client | server,
         StreamSet :: stream_set()) ->
-                        stream_set()
+                        {pid(), stream_set()}
                             | {error, error_code(), closed_stream()}.
 new_stream(
           StreamId,
@@ -221,6 +224,7 @@ new_stream(
           Socket,
           InitialSendWindow,
           InitialRecvWindow,
+          Type,
           StreamSet) ->
     PeerSubset = get_peer_subset(StreamId, StreamSet),
     case PeerSubset#peer_subset.max_active =/= unlimited andalso
@@ -234,6 +238,7 @@ new_stream(
                        self(),
                        CBMod,
                        CBOpts,
+                       Type,
                        Socket
                       ),
             NewStream = #active_stream{
@@ -257,7 +262,7 @@ new_stream(
                     h2_stream:stop(Pid),
                     {error, ?REFUSED_STREAM, #closed_stream{id=StreamId}};
                 NewStreamSet ->
-                    NewStreamSet
+                    {Pid, NewStreamSet}
             end
     end.
 
@@ -505,24 +510,26 @@ close(Closed=#closed_stream{},
       Streams) ->
     {Closed, Streams};
 close(_Idle=#idle_stream{id=StreamId},
-      {Headers, Body},
+      {Headers, Body, Trailers},
       Streams) ->
     Closed = #closed_stream{
                 id=StreamId,
                 response_headers=Headers,
-                response_body=Body
+                response_body=Body,
+                response_trailers=Trailers
                },
     {Closed, upsert(Closed, Streams)};
 close(#active_stream{
          id=Id,
          notify_pid=NotifyPid
         },
-      {Headers, Body},
+      {Headers, Body, Trailers},
       Streams) ->
     Closed = #closed_stream{
                 id=Id,
                 response_headers=Headers,
                 response_body=Body,
+                response_trailers=Trailers,
                 notify_pid=NotifyPid
                },
     {Closed, upsert(Closed, Streams)}.
@@ -817,8 +824,9 @@ update_data_queue(_, _, S) ->
 
 response(#closed_stream{
             response_headers=Headers,
-            response_body=Body}) ->
-    {Headers, Body};
+            response_body=Body,
+            response_trailers=Trailers}) ->
+    {Headers, Body, Trailers};
 response(_) ->
     no_response.
 
