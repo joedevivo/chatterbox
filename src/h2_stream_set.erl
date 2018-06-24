@@ -680,7 +680,7 @@ s_send_what_we_can(SWS, _, #active_stream{queued_data=Data,
                                           trailers=Trailers}=S)
   when is_atom(Data) ->
     [h2_stream:send_data(Pid, Frame) || Frame <- Trailers],
-    {SWS, S};
+    {SWS, S#active_stream{trailers=undefined}};
 s_send_what_we_can(SWS, MFS, #active_stream{}=Stream) ->
     %% We're coming in here with three numbers we need to look at:
     %% * Connection send window size
@@ -706,7 +706,6 @@ s_send_what_we_can(SWS, MFS, #active_stream{}=Stream) ->
     %% this recursion, but not the connection level
 
     SSWS = Stream#active_stream.send_window_size,
-    Trailers = Stream#active_stream.trailers,
     QueueSize = byte_size(Stream#active_stream.queued_data),
 
     {MaxToSend, ExitStrategy} =
@@ -755,24 +754,25 @@ s_send_what_we_can(SWS, MFS, #active_stream{}=Stream) ->
 
     _Sent = h2_stream:send_data(Stream#active_stream.pid, Frame),
 
-    case NewS of
-        #active_stream{trailers=undefined} ->
-            ok;
-        #active_stream{pid=Pid,
-                       queued_data=done,
-                       trailers=Trailers} ->
-            [h2_stream:send_data(Pid, Trailer) || Trailer <- Trailers];
-        _ ->
-            ok
-    end,
+    NewS1 = case NewS of
+                #active_stream{trailers=undefined} ->
+                    NewS;
+                #active_stream{pid=Pid,
+                               queued_data=done,
+                               trailers=Trailers1} ->
+                    [h2_stream:send_data(Pid, Trailer) || Trailer <- Trailers1],
+                    NewS#active_stream{trailers=undefined};
+                _ ->
+                    NewS
+            end,
 
     case ExitStrategy of
         max_frame_size ->
-            s_send_what_we_can(SWS - SentBytes, MFS, NewS);
+            s_send_what_we_can(SWS - SentBytes, MFS, NewS1);
         stream ->
-            {SWS - SentBytes, NewS};
+            {SWS - SentBytes, NewS1};
         connection ->
-            {SWS - SentBytes, NewS}
+            {SWS - SentBytes, NewS1}
     end;
 s_send_what_we_can(SWS, _MFS, NonActiveStream) ->
     {SWS, NonActiveStream}.
