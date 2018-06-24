@@ -293,8 +293,7 @@ reserved_local(cast, {send_h, Headers},
 reserved_local(cast, {send_t, Headers},
               #stream_state{
                 }=Stream) ->
-    {next_state,
-     half_closed_remote,
+    {keep_state,
      Stream#stream_state{
        response_trailers=Headers
       }};
@@ -477,8 +476,7 @@ open(cast,
 open(cast,
   {send_t, Headers},
   #stream_state{}=Stream) ->
-    {next_state,
-     half_closed_local,
+    {keep_state,
      Stream#stream_state{
        response_trailers=Headers
       }};
@@ -497,8 +495,7 @@ half_closed_remote(cast,
 half_closed_remote(cast,
   {send_t, Headers},
   #stream_state{}=Stream) ->
-    {next_state,
-     half_closed_remote,
+    {keep_state,
      Stream#stream_state{
        response_trailers=Headers
       }};
@@ -658,7 +655,9 @@ half_closed_local(cast, recv_es,
        response_body = Data,
        callback_state=NewCBState
       }, 0};
-
+half_closed_local(cast, {send_t, _Trailers},
+                  #stream_state{}) ->
+    keep_state_and_data;
 half_closed_local(_, _,
        #stream_state{}=Stream) ->
     rst_stream_(?STREAM_CLOSED, Stream);
