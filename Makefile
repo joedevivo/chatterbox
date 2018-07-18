@@ -6,7 +6,7 @@ REBAR3 = $(CURDIR)/rebar3
 endif
 
 # Fallback to rebar on PATH
-REBAR3 ?= $(shell which rebar3)
+#REBAR3 ?= $(shell which rebar3)
 
 # And finally, prep to download rebar if all else fails
 ifeq ($(REBAR3),)
