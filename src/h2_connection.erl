@@ -105,6 +105,12 @@
 
 -export_type([send_option/0, send_opts/0]).
 
+-ifdef(OTP_RELEASE).
+-define(ssl_accept(ClientSocket, SSLOptions), ssl:handshake(ClientSocket, SSLOptions)).
+-else.
+-define(ssl_accept(ClientSocket, SSLOptions), ssl:ssl_accept(ClientSocket, SSLOptions)).
+-endif.
+
 -spec start_client_link(gen_tcp | ssl,
                         inet:ip_address() | inet:hostname(),
                         inet:port_number(),
@@ -348,7 +354,7 @@ listen(info, {inet_async, ListenSocket, Ref, {ok, ClientSocket}},
         gen_tcp ->
             ClientSocket;
         ssl ->
-            {ok, AcceptSocket} = ssl:ssl_accept(ClientSocket, SSLOptions),
+            {ok, AcceptSocket} = ?ssl_accept(ClientSocket, SSLOptions),
             {ok, <<"h2">>} = ssl:negotiated_protocol(AcceptSocket),
             AcceptSocket
     end,
