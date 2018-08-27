@@ -1,10 +1,15 @@
 language: erlang
 
 otp_release:
+  - 21.0
   - 20.0
   - 19.3
 
 before_script: kerl list installations
+
+before_install:
+  - wget https://github.com/erlang/rebar3/releases/download/3.6.1/rebar3 -O rebar3
+  - chmod +x rebar3
 
 install: make clean
 
