@@ -26,8 +26,8 @@ read_possibly_padded_payload(Bin, Header) ->
                          -> binary() | {error, error_code()}.
 read_padded_payload(<<Padding:8,Bytes/bits>>,
                     #frame_header{length=Length}) ->
-    L = Length - Padding,
-    case L > 0 of
+    L = Length - Padding - 1, % Exclude Pad length field (1 byte)
+    case L >= 0 of
         true ->
             <<Data:L/binary,_:Padding/binary>> = Bytes,
             Data;
