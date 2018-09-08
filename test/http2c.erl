@@ -142,7 +142,7 @@ init([]) ->
     BinToSend = h2_frame_settings:send(#settings{}, ClientSettings),
     Transport:send(Socket, BinToSend),
 
-    {AH, _PAck} = h2_frame:read({Transport, Socket}, 100),
+    {AH, _PAck} = h2_frame:read({Transport, Socket}, 1000),
     _ = ?IS_FLAG((AH#frame_header.flags), ?FLAG_ACK),
 
     case Transport of

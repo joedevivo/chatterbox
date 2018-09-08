@@ -818,9 +818,29 @@ update_data_queue(_, _, S) ->
 response(#closed_stream{
             response_headers=Headers,
             response_body=Body}) ->
-    {Headers, Body};
+    Encoding = case lists:keyfind(<<"content-encoding">>, 1, Headers) of
+        false -> identity;
+        {_, Encoding0} -> binary_to_atom(Encoding0, 'utf8')
+    end,
+    {Headers, decode_body(Body, Encoding)};
 response(_) ->
     no_response.
+
+decode_body(Body, identity) ->
+    Body;
+decode_body(Body, gzip) ->
+    zlib:gunzip(Body);
+decode_body(Body, zip) ->
+    zlib:unzip(Body);
+decode_body(Body, compress) ->
+    zlib:uncompress(Body);
+decode_body(Body, deflate) ->
+    Z = zlib:open(),
+    ok = zlib:inflateInit(Z, -15),
+    Decompressed = try zlib:inflate(Z, Body) catch E:V -> {E,V} end,
+    ok = zlib:inflateEnd(Z),
+    ok = zlib:close(Z),
+    iolist_to_binary(Decompressed).
 
 recv_window_size(#active_stream{recv_window_size=RWS}) ->
     RWS;

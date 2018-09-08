@@ -4,6 +4,7 @@
 
 %% Start/Stop API
 -export([
+         start_client_link/2,
          start_client_link/5,
          start_ssl_upgrade_link/5,
          start_server_link/3,
@@ -121,6 +122,13 @@
 start_client_link(Transport, Host, Port, SSLOptions, Http2Settings) ->
     gen_statem:start_link(?MODULE, {client, Transport, Host, Port, SSLOptions, Http2Settings}, []).
 
+-spec start_client_link(socket(),
+                        settings()
+                       ) ->
+                               {ok, pid()} | ignore | {error, term()}.
+start_client_link({Transport, Socket}, Http2Settings) ->
+    gen_statem:start_link(?MODULE, {client, {Transport, Socket}, Http2Settings}, []).
+
 -spec start_ssl_upgrade_link(inet:ip_address() | inet:hostname(),
                              inet:port_number(),
                              binary(),
@@ -170,44 +178,32 @@ become({Transport, Socket}, Http2Settings, ConnectionSettings) ->
 init({client, Transport, Host, Port, SSLOptions, Http2Settings}) ->
     case Transport:connect(Host, Port, client_options(Transport, SSLOptions)) of
         {ok, Socket} ->
-            ok = sock:setopts({Transport, Socket}, [{packet, raw}, binary]),
-            Transport:send(Socket, <<?PREFACE>>),
-            InitialState =
-                #connection{
-                   type = client,
-                   streams = h2_stream_set:new(client),
-                   socket = {Transport, Socket},
-                   next_available_stream_id=1,
-                   flow_control=application:get_env(chatterbox, client_flow_control, auto)
-                  },
-            {ok,
-             handshake,
-             send_settings(Http2Settings, InitialState),
-             4500};
+            init({client, {Transport, Socket}, Http2Settings});
         {error, Reason} ->
             {stop, Reason}
     end;
+init({client, {Transport, Socket}, Http2Settings}) ->
+    ok = sock:setopts({Transport, Socket}, [{packet, raw}, binary, {active, once}]),
+    Transport:send(Socket, <<?PREFACE>>),
+    InitialState =
+        #connection{
+           type = client,
+           streams = h2_stream_set:new(client),
+           socket = {Transport, Socket},
+           next_available_stream_id=1,
+           flow_control=application:get_env(chatterbox, client_flow_control, auto)
+          },
+    {ok,
+     handshake,
+     send_settings(Http2Settings, InitialState),
+     4500};
 init({client_ssl_upgrade, Host, Port, InitialMessage, SSLOptions, Http2Settings}) ->
     case gen_tcp:connect(Host, Port, [{active, false}]) of
         {ok, TCP} ->
             gen_tcp:send(TCP, InitialMessage),
             case ssl:connect(TCP, client_options(ssl, SSLOptions)) of
                 {ok, Socket} ->
-                    active_once({ssl, Socket}),
-                    ok = ssl:setopts(Socket, [{packet, raw}, binary]),
-                    ssl:send(Socket, <<?PREFACE>>),
-                    InitialState =
-                        #connection{
-                           type = client,
-                           streams = h2_stream_set:new(client),
-                           socket = {ssl, Socket},
-                           next_available_stream_id=1,
-                           flow_control=application:get_env(chatterbox, client_flow_control, auto)
-                          },
-                    {ok,
-                     handshake,
-                     send_settings(Http2Settings, InitialState),
-                     4500};
+                    init({client, {ssl, Socket}, Http2Settings});
                 {error, Reason} ->
                     {stop, Reason}
             end;
@@ -1359,7 +1355,7 @@ client_options(Transport, SSLOptions) ->
     ClientSocketOptions = [
                            binary,
                            {packet, raw},
-                           {active, once}
+                           {active, false}
                           ],
     case Transport of
         ssl ->
