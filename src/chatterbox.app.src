@@ -42,9 +42,9 @@
     {server_max_header_list_size, unlimited},
 
     {server_flow_control, auto}
-
   ]},
 
+  {pkg_name, ts_chatterbox},
   {maintainers, ["Joe DeVivo", "Tristan Sloughter"]},
   {licenses, ["MIT"]},
   {links, [{"Github", "https://github.com/joedevivo/chatterbox"}]}
