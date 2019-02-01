@@ -152,8 +152,7 @@ become(Socket, Http2Settings) ->
 -spec become(socket(), settings(), maps:map()) -> no_return().
 become({Transport, Socket}, Http2Settings, ConnectionSettings) ->
     ok = sock:setopts({Transport, Socket}, [{packet, raw}, binary]),
-    {_, _, NewState} =
-        start_http2_server(Http2Settings,
+    case start_http2_server(Http2Settings,
                            #connection{
                               stream_callback_mod =
                                   maps:get(stream_callback_mod, ConnectionSettings,
@@ -163,11 +162,16 @@ become({Transport, Socket}, Http2Settings, ConnectionSettings) ->
                                            application:get_env(chatterbox, stream_callback_opts, [])),
                               streams = h2_stream_set:new(server),
                               socket = {Transport, Socket}
-                             }),
-    gen_statem:enter_loop(?MODULE,
-                       [],
-                       handshake,
-                       NewState).
+                             }) of
+        {_, handshake, NewState} ->
+            gen_statem:enter_loop(?MODULE,
+                                  [],
+                                  handshake,
+                                  NewState);
+        {_, closing, _NewState} ->
+            sock:close({Transport, Socket}),
+            exit(invalid_preface)
+    end.
 
 %% Init callback
 init({client, Transport, Host, Port, SSLOptions, Http2Settings, ConnectionSettings}) ->
