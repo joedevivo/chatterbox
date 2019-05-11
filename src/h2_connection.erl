@@ -4,14 +4,11 @@
 
 %% Start/Stop API
 -export([
-<<<<<<< HEAD
          start_client_link/2,
          start_client_link/5,
          start_ssl_upgrade_link/5,
-=======
          start_client_link/6,
          start_ssl_upgrade_link/6,
->>>>>>> client stream callbacks
          start_server_link/3,
          become/1,
          become/2,
@@ -191,6 +188,8 @@ init({client, Transport, Host, Port, SSLOptions, Http2Settings, ConnectionSettin
     case Transport:connect(Host, Port, client_options(Transport, SSLOptions)) of
         {ok, Socket} ->
             init({client, {Transport, Socket}, Http2Settings, ConnectionSettings});
+        {error, econnrefused} ->
+            ignore;
         {error, Reason} ->
             {stop, Reason}
     end;
@@ -218,6 +217,8 @@ init({client_ssl_upgrade, Host, Port, InitialMessage, SSLOptions, Http2Settings,
             case ssl:connect(TCP, client_options(ssl, SSLOptions)) of
                 {ok, Socket} ->
                     init({client, {ssl, Socket}, Http2Settings, ConnectionSettings});
+                {error, econnrefused} ->
+                    ignore;
                 {error, Reason} ->
                     {stop, Reason}
             end;
