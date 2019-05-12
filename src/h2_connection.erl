@@ -191,7 +191,7 @@ init({client, Transport, Host, Port, SSLOptions, Http2Settings, ConnectionSettin
         {error, econnrefused} ->
             ignore;
         {error, Reason} ->
-            {stop, Reason}
+            {stop, {shutdown,Reason}}
     end;
 init({client, {Transport, Socket}, Http2Settings, ConnectionSettings}) ->
     ok = sock:setopts({Transport, Socket}, [{packet, raw}, binary, {active, once}]),
@@ -220,7 +220,7 @@ init({client_ssl_upgrade, Host, Port, InitialMessage, SSLOptions, Http2Settings,
                 {error, econnrefused} ->
                     ignore;
                 {error, Reason} ->
-                    {stop, Reason}
+                    {stop, {shutdown,Reason}}
             end;
         {error, Reason} ->
             {stop, Reason}
