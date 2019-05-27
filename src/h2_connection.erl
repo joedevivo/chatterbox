@@ -5,8 +5,6 @@
 %% Start/Stop API
 -export([
          start_client_link/2,
-         start_client_link/5,
-         start_ssl_upgrade_link/5,
          start_client_link/6,
          start_ssl_upgrade_link/6,
          start_server_link/3,
