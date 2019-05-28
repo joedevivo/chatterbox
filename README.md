@@ -104,7 +104,7 @@ RequestHeaders = [
 
 RequestBody = <<>>,
 
-{ok, {ResponseHeaders, ResponseBody}}
+{ok, {ResponseHeaders, ResponseBody, ResponseTrailers}}
     = h2_client:sync_request(Pid, RequestHeaders, RequestBody).
 ```
 
@@ -125,7 +125,7 @@ So you can use a receive block, like this
 ```erlang
 receive
     {'END_STREAM', StreamId} ->
-        {ok, {ResponseHeaders, ResponseBody}} = h2_client:get_response(Pid, StreamId)
+        {ok, {ResponseHeaders, ResponseBody, ResponseTrailers}} = h2_client:get_response(Pid, StreamId)
 end,
 ```
 

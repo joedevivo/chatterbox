@@ -96,6 +96,8 @@
      response_headers :: hpack:headers() | undefined,
      % The response body
      response_body    :: binary() | undefined,
+     % The response trailers received
+     response_trailers :: hpack:headers() | undefined,
      % Can this be thrown away?
      garbage = false  :: boolean() | undefined
      }).
@@ -123,7 +125,7 @@
 -export(
    [
     new/1,
-    new_stream/8,
+    new_stream/9,
     get/2,
     upsert/2,
     sort/1
@@ -210,8 +212,9 @@ new(server) ->
         Socket :: sock:socket(),
         InitialSendWindow :: integer(),
         InitialRecvWindow :: integer(),
+        Type :: client | server,
         StreamSet :: stream_set()) ->
-                        stream_set()
+                        {pid(), stream_set()}
                             | {error, error_code(), closed_stream()}.
 new_stream(
           StreamId,
@@ -221,6 +224,7 @@ new_stream(
           Socket,
           InitialSendWindow,
           InitialRecvWindow,
+          Type,
           StreamSet) ->
     PeerSubset = get_peer_subset(StreamId, StreamSet),
     case PeerSubset#peer_subset.max_active =/= unlimited andalso
@@ -234,6 +238,7 @@ new_stream(
                        self(),
                        CBMod,
                        CBOpts,
+                       Type,
                        Socket
                       ),
             NewStream = #active_stream{
@@ -257,7 +262,7 @@ new_stream(
                     h2_stream:stop(Pid),
                     {error, ?REFUSED_STREAM, #closed_stream{id=StreamId}};
                 NewStreamSet ->
-                    NewStreamSet
+                    {Pid, NewStreamSet}
             end
     end.
 
@@ -505,24 +510,26 @@ close(Closed=#closed_stream{},
       Streams) ->
     {Closed, Streams};
 close(_Idle=#idle_stream{id=StreamId},
-      {Headers, Body},
+      {Headers, Body, Trailers},
       Streams) ->
     Closed = #closed_stream{
                 id=StreamId,
                 response_headers=Headers,
-                response_body=Body
+                response_body=Body,
+                response_trailers=Trailers
                },
     {Closed, upsert(Closed, Streams)};
 close(#active_stream{
          id=Id,
          notify_pid=NotifyPid
         },
-      {Headers, Body},
+      {Headers, Body, Trailers},
       Streams) ->
     Closed = #closed_stream{
                 id=Id,
                 response_headers=Headers,
                 response_body=Body,
+                response_trailers=Trailers,
                 notify_pid=NotifyPid
                },
     {Closed, upsert(Closed, Streams)}.
@@ -673,7 +680,7 @@ s_send_what_we_can(SWS, _, #active_stream{queued_data=Data,
                                           trailers=Trailers}=S)
   when is_atom(Data) ->
     [h2_stream:send_data(Pid, Frame) || Frame <- Trailers],
-    {SWS, S};
+    {SWS, S#active_stream{trailers=undefined}};
 s_send_what_we_can(SWS, MFS, #active_stream{}=Stream) ->
     %% We're coming in here with three numbers we need to look at:
     %% * Connection send window size
@@ -699,7 +706,6 @@ s_send_what_we_can(SWS, MFS, #active_stream{}=Stream) ->
     %% this recursion, but not the connection level
 
     SSWS = Stream#active_stream.send_window_size,
-    Trailers = Stream#active_stream.trailers,
     QueueSize = byte_size(Stream#active_stream.queued_data),
 
     {MaxToSend, ExitStrategy} =
@@ -748,24 +754,25 @@ s_send_what_we_can(SWS, MFS, #active_stream{}=Stream) ->
 
     _Sent = h2_stream:send_data(Stream#active_stream.pid, Frame),
 
-    case NewS of
-        #active_stream{trailers=undefined} ->
-            ok;
-        #active_stream{pid=Pid,
-                       queued_data=done,
-                       trailers=Trailers} ->
-            [h2_stream:send_data(Pid, Trailer) || Trailer <- Trailers];
-        _ ->
-            ok
-    end,
+    NewS1 = case NewS of
+                #active_stream{trailers=undefined} ->
+                    NewS;
+                #active_stream{pid=Pid,
+                               queued_data=done,
+                               trailers=Trailers1} ->
+                    [h2_stream:send_data(Pid, Trailer) || Trailer <- Trailers1],
+                    NewS#active_stream{trailers=undefined};
+                _ ->
+                    NewS
+            end,
 
     case ExitStrategy of
         max_frame_size ->
-            s_send_what_we_can(SWS - SentBytes, MFS, NewS);
+            s_send_what_we_can(SWS - SentBytes, MFS, NewS1);
         stream ->
-            {SWS - SentBytes, NewS};
+            {SWS - SentBytes, NewS1};
         connection ->
-            {SWS - SentBytes, NewS}
+            {SWS - SentBytes, NewS1}
     end;
 s_send_what_we_can(SWS, _MFS, NonActiveStream) ->
     {SWS, NonActiveStream}.
@@ -817,12 +824,13 @@ update_data_queue(_, _, S) ->
 
 response(#closed_stream{
             response_headers=Headers,
-            response_body=Body}) ->
+            response_body=Body,
+            response_trailers=Trailers}) ->
     Encoding = case lists:keyfind(<<"content-encoding">>, 1, Headers) of
         false -> identity;
         {_, Encoding0} -> binary_to_atom(Encoding0, 'utf8')
     end,
-    {Headers, decode_body(Body, Encoding)};
+    {Headers, decode_body(Body, Encoding), Trailers};
 response(_) ->
     no_response.
 
