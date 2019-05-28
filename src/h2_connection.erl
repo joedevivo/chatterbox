@@ -186,8 +186,6 @@ init({client, Transport, Host, Port, SSLOptions, Http2Settings, ConnectionSettin
     case Transport:connect(Host, Port, client_options(Transport, SSLOptions)) of
         {ok, Socket} ->
             init({client, {Transport, Socket}, Http2Settings, ConnectionSettings});
-        {error, econnrefused} ->
-            ignore;
         {error, Reason} ->
             {stop, {shutdown,Reason}}
     end;
@@ -215,8 +213,6 @@ init({client_ssl_upgrade, Host, Port, InitialMessage, SSLOptions, Http2Settings,
             case ssl:connect(TCP, client_options(ssl, SSLOptions)) of
                 {ok, Socket} ->
                     init({client, {ssl, Socket}, Http2Settings, ConnectionSettings});
-                {error, econnrefused} ->
-                    ignore;
                 {error, Reason} ->
                     {stop, {shutdown,Reason}}
             end;
