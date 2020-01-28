@@ -4,6 +4,8 @@
 
 %% Start/Stop API
 -export([
+         start_client/2,
+         start_client/5,
          start_client_link/2,
          start_client_link/5,
          start_ssl_upgrade_link/5,
@@ -122,12 +124,29 @@
 start_client_link(Transport, Host, Port, SSLOptions, Http2Settings) ->
     gen_statem:start_link(?MODULE, {client, Transport, Host, Port, SSLOptions, Http2Settings}, []).
 
+-spec start_client(gen_tcp | ssl,
+                        inet:ip_address() | inet:hostname(),
+                        inet:port_number(),
+                        [ssl:ssl_option()],
+                        settings()
+                       ) ->
+                               {ok, pid()} | ignore | {error, term()}.
+start_client(Transport, Host, Port, SSLOptions, Http2Settings) ->
+    gen_statem:start(?MODULE, {client, Transport, Host, Port, SSLOptions, Http2Settings}, []).
+
 -spec start_client_link(socket(),
                         settings()
                        ) ->
                                {ok, pid()} | ignore | {error, term()}.
 start_client_link({Transport, Socket}, Http2Settings) ->
     gen_statem:start_link(?MODULE, {client, {Transport, Socket}, Http2Settings}, []).
+
+-spec start_client(socket(),
+                        settings()
+                       ) ->
+                               {ok, pid()} | ignore | {error, term()}.
+start_client({Transport, Socket}, Http2Settings) ->
+    gen_statem:start(?MODULE, {client, {Transport, Socket}, Http2Settings}, []).
 
 -spec start_ssl_upgrade_link(inet:ip_address() | inet:hostname(),
                              inet:port_number(),

@@ -19,6 +19,7 @@
          start_link/2,
          start_link/3,
          start_link/4,
+         start/4,
          start_ssl_upgrade_link/4,
          stop/1,
          send_request/3,
@@ -107,6 +108,20 @@ start_link(Transport, Host, Port, SSLOptions) ->
                https -> ssl
            end,
     h2_connection:start_client_link(NewT, Host, Port, SSLOptions, chatterbox:settings(client)).
+
+-spec start(http | https,
+                 string(),
+                 non_neg_integer(),
+                 [ssl:ssl_option()]) ->
+                        {ok, pid()}
+                      | ignore
+                      | {error, term()}.
+start(Transport, Host, Port, SSLOptions) ->
+    NewT = case Transport of
+               http -> gen_tcp;
+               https -> ssl
+           end,
+    h2_connection:start_client(NewT, Host, Port, SSLOptions, chatterbox:settings(client)).
 
 start_ssl_upgrade_link(Host, Port, InitialMessage, SSLOptions) ->
     h2_connection:start_ssl_upgrade_link(Host, Port, InitialMessage, SSLOptions, chatterbox:settings(client)).
