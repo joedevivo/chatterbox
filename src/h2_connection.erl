@@ -122,7 +122,10 @@
                        ) ->
                                {ok, pid()} | ignore | {error, term()}.
 start_client_link(Transport, Host, Port, SSLOptions, Http2Settings) ->
-    gen_statem:start_link(?MODULE, {client, Transport, Host, Port, SSLOptions, Http2Settings}, []).
+    StatemSettings = application:get_env(chatterbox, statem_options, []),
+    gen_statem:start_link(?MODULE,
+                          {client, Transport, Host, Port, SSLOptions, Http2Settings},
+                          StatemSettings).
 
 -spec start_client(gen_tcp | ssl,
                         inet:ip_address() | inet:hostname(),
@@ -132,21 +135,30 @@ start_client_link(Transport, Host, Port, SSLOptions, Http2Settings) ->
                        ) ->
                                {ok, pid()} | ignore | {error, term()}.
 start_client(Transport, Host, Port, SSLOptions, Http2Settings) ->
-    gen_statem:start(?MODULE, {client, Transport, Host, Port, SSLOptions, Http2Settings}, []).
+    StatemSettings = application:get_env(chatterbox, statem_options, []),
+    gen_statem:start(?MODULE,
+                     {client, Transport, Host, Port, SSLOptions, Http2Settings},
+                     StatemSettings).
 
 -spec start_client_link(socket(),
                         settings()
                        ) ->
                                {ok, pid()} | ignore | {error, term()}.
 start_client_link({Transport, Socket}, Http2Settings) ->
-    gen_statem:start_link(?MODULE, {client, {Transport, Socket}, Http2Settings}, []).
+    StatemSettings = application:get_env(chatterbox, statem_options, []),
+    gen_statem:start_link(?MODULE,
+                          {client, {Transport, Socket}, Http2Settings},
+                          StatemSettings).
 
 -spec start_client(socket(),
-                        settings()
-                       ) ->
+                   settings()
+                  ) ->
                                {ok, pid()} | ignore | {error, term()}.
 start_client({Transport, Socket}, Http2Settings) ->
-    gen_statem:start(?MODULE, {client, {Transport, Socket}, Http2Settings}, []).
+    StatemSettings = application:get_env(chatterbox, statem_options, []),
+    gen_statem:start(?MODULE,
+                     {client, {Transport, Socket}, Http2Settings},
+                     StatemSettings).
 
 -spec start_ssl_upgrade_link(inet:ip_address() | inet:hostname(),
                              inet:port_number(),
@@ -156,14 +168,20 @@ start_client({Transport, Socket}, Http2Settings) ->
                             ) ->
                                     {ok, pid()} | ignore | {error, term()}.
 start_ssl_upgrade_link(Host, Port, InitialMessage, SSLOptions, Http2Settings) ->
-    gen_statem:start_link(?MODULE, {client_ssl_upgrade, Host, Port, InitialMessage, SSLOptions, Http2Settings}, []).
+    StatemSettings = application:get_env(chatterbox, statem_options, []),
+    gen_statem:start_link(?MODULE,
+                          {client_ssl_upgrade, Host, Port, InitialMessage, SSLOptions, Http2Settings},
+                          StatemSettings).
 
 -spec start_server_link(socket(),
                         [ssl:ssl_option()],
                         #settings{}) ->
                                {ok, pid()} | ignore | {error, term()}.
 start_server_link({Transport, ListenSocket}, SSLOptions, Http2Settings) ->
-    gen_statem:start_link(?MODULE, {server, {Transport, ListenSocket}, SSLOptions, Http2Settings}, []).
+    StatemSettings = application:get_env(chatterbox, statem_options, []),
+    gen_statem:start_link(?MODULE,
+                          {server, {Transport, ListenSocket}, SSLOptions, Http2Settings},
+                          StatemSettings).
 
 -spec become(socket()) -> no_return().
 become(Socket) ->
