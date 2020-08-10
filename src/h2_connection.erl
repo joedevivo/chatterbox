@@ -160,7 +160,7 @@ start_ssl_upgrade_link(Host, Port, InitialMessage, SSLOptions, Http2Settings) ->
 
 -spec start_server_link(socket(),
                         [ssl:ssl_option()],
-                        #settings{}) ->
+                        settings()) ->
                                {ok, pid()} | ignore | {error, term()}.
 start_server_link({Transport, ListenSocket}, SSLOptions, Http2Settings) ->
     gen_statem:start_link(?MODULE, {server, {Transport, ListenSocket}, SSLOptions, Http2Settings}, []).
@@ -985,13 +985,15 @@ handle_event(_, {send_headers, StreamId, Headers, Opts},
         closed ->
             {keep_state, Conn}
     end;
-handle_event(_, {send_trailers, StreamId, Headers, _Opts},
+handle_event(_, {send_trailers, StreamId, Headers, Opts},
              #connection{
                 encode_context=EncodeContext,
                 streams = Streams,
                 socket = _Socket
                }=Conn
             ) ->
+    BodyComplete = proplists:get_value(send_end_stream, Opts, true),
+
     Stream = h2_stream_set:get(StreamId, Streams),
     case h2_stream_set:type(Stream) of
         active ->
@@ -1009,7 +1011,7 @@ handle_event(_, {send_trailers, StreamId, Headers, _Opts},
                   Conn#connection.send_window_size,
                   (Conn#connection.peer_settings)#settings.max_frame_size,
                   h2_stream_set:upsert(
-                    h2_stream_set:update_data_queue(h2_stream_set:queued_data(Stream), false, NewS),
+                    h2_stream_set:update_data_queue(h2_stream_set:queued_data(Stream), BodyComplete, NewS),
                     Conn#connection.streams)),
 
             send_t(Stream, Headers),
