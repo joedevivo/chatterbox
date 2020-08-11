@@ -4,6 +4,7 @@
 %% Public API
 -export([
          start_link/5,
+         start_link/6,
          send_event/2,
          send_pp/2,
          send_data/2,
