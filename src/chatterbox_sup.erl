@@ -31,11 +31,13 @@ init([]) ->
 
     Http2Settings = chatterbox:settings(server),
 
+    {ok, StatemOptions} = application:get_env(chatterbox, statem_server_options, []),
+
     spawn_link(fun empty_listeners/0),
     {ok, ListenSocket} = gen_tcp:listen(Port, Options),
     Restart = {simple_one_for_one, 60, 3600},
     Children = [{socket,
-                {h2_connection, start_server_link, [{Transport, ListenSocket}, SSLOptions, Http2Settings]},
+                {h2_connection, start_server_link, [{Transport, ListenSocket}, SSLOptions, Http2Settings, StatemOptions]},
                 temporary, 1000, worker, [h2_connection]}],
     {ok, {Restart, Children}}.
 
