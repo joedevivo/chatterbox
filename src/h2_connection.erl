@@ -88,6 +88,7 @@
 -record(connection, {
           type = undefined :: client | server | undefined,
           ssl_options = [],
+          statem_options = [] :: [gen_statem:start_opt()],
           listen_ref :: non_neg_integer() | undefined,
           socket = undefined :: sock:socket(),
           peer_settings = #settings{} :: settings(),
@@ -260,7 +261,8 @@ become({Transport, Socket}, Http2Settings, ConnectionSettings) ->
                                   maps:get(stream_callback_opts, ConnectionSettings,
                                            application:get_env(chatterbox, stream_callback_opts, [])),
                               streams = h2_stream_set:new(server),
-                              socket = {Transport, Socket}
+                              socket = {Transport, Socket},
+                              statem_options = application:get_env(chatterbox, statem_server_options, [])
                              }) of
         {_, handshake, NewState} ->
             gen_statem:enter_loop(?MODULE,
@@ -289,7 +291,8 @@ init({client, {Transport, Socket}, Http2Settings}) ->
            streams = h2_stream_set:new(client),
            socket = {Transport, Socket},
            next_available_stream_id=1,
-           flow_control=application:get_env(chatterbox, client_flow_control, auto)
+           flow_control=application:get_env(chatterbox, client_flow_control, auto),
+           statem_options=application:get_env(chatterbox, statem_client_options, [])
           },
     {ok,
      handshake,
@@ -735,7 +738,8 @@ route_frame({#frame_header{type=?HEADERS}=FH, _Payload}=Frame,
                       Conn#connection.socket,
                       (Conn#connection.peer_settings)#settings.initial_window_size,
                       (Conn#connection.self_settings)#settings.initial_window_size,
-                      Streams) of
+                      Streams,
+                      Conn#connection.statem_options) of
                     {error, ErrorCode, NewStream} ->
                         rst_stream(NewStream, ErrorCode, Conn),
                         {none, Conn};
@@ -844,7 +848,8 @@ route_frame({H=#frame_header{
           Conn#connection.socket,
           (Conn#connection.peer_settings)#settings.initial_window_size,
           (Conn#connection.self_settings)#settings.initial_window_size,
-          Streams),
+          Streams,
+          Conn#connection.statem_options),
 
     Continuation = #continuation_state{
                       stream_id=StreamId,
@@ -1245,7 +1250,8 @@ handle_event({call, From}, {new_stream, NotifyPid},
               Conn#connection.socket,
               Conn#connection.peer_settings#settings.initial_window_size,
               Conn#connection.self_settings#settings.initial_window_size,
-              Streams)
+              Streams,
+              Conn#connection.statem_options)
         of
             {error, Code, _NewStream} ->
                 %% TODO: probably want to have events like this available for metrics
@@ -1756,7 +1762,8 @@ send_request(NextId, NotifyPid, Conn, Streams, Headers, Body) ->
             Conn#connection.socket,
             Conn#connection.peer_settings#settings.initial_window_size,
             Conn#connection.self_settings#settings.initial_window_size,
-            Streams)
+            Streams,
+            Conn#connection.statem_options)
     of
         {error, Code, _NewStream} ->
             %% error creating new stream
