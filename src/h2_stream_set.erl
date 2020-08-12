@@ -374,33 +374,37 @@ upsert_peer_subset(
   PeerSubset)
   when Id >= PeerSubset#peer_subset.lowest_stream_id,
        Id < PeerSubset#peer_subset.next_available_stream_id ->
-    OldStream = lists:keyfind(Id, 2, PeerSubset#peer_subset.active),
-    OldType = type(OldStream),
-    ActiveDiff =
-        case OldType of
-            closed -> 0;
-            active -> -1
-        end,
+    case lists:keyfind(Id, 2, PeerSubset#peer_subset.active) of
+        false ->
+            PeerSubset;
+        OldStream ->
+            OldType = type(OldStream),
+            ActiveDiff =
+                case OldType of
+                    closed -> 0;
+                    active -> -1
+                end,
 
-    NewActive = lists:keydelete(Id, 2, PeerSubset#peer_subset.active),
-    %% NewActive could now have a #closed_stream with no information
-    %% in it as the lowest active stream, so we should drop those.
-    OptimizedNewActive = drop_unneeded_streams(NewActive),
+            NewActive = lists:keydelete(Id, 2, PeerSubset#peer_subset.active),
+            %% NewActive could now have a #closed_stream with no information
+            %% in it as the lowest active stream, so we should drop those.
+            OptimizedNewActive = drop_unneeded_streams(NewActive),
 
-    case OptimizedNewActive of
-        [] ->
-            PeerSubset#peer_subset{
-              lowest_stream_id=PeerSubset#peer_subset.next_available_stream_id,
-              active_count=0,
-              active=[]
-              };
-        [NewLowestStream|_] ->
-            NewLowest = stream_id(NewLowestStream),
-            PeerSubset#peer_subset{
-              lowest_stream_id=NewLowest,
-              active_count=PeerSubset#peer_subset.active_count+ActiveDiff,
-              active=OptimizedNewActive
-             }
+            case OptimizedNewActive of
+                [] ->
+                    PeerSubset#peer_subset{
+                      lowest_stream_id=PeerSubset#peer_subset.next_available_stream_id,
+                      active_count=0,
+                      active=[]
+                     };
+                [NewLowestStream|_] ->
+                    NewLowest = stream_id(NewLowestStream),
+                    PeerSubset#peer_subset{
+                      lowest_stream_id=NewLowest,
+                      active_count=PeerSubset#peer_subset.active_count+ActiveDiff,
+                      active=OptimizedNewActive
+                     }
+            end
     end;
 %% Case 2: Like case 1, but it's not garbage
 upsert_peer_subset(
@@ -411,19 +415,23 @@ upsert_peer_subset(
   PeerSubset)
   when Id >= PeerSubset#peer_subset.lowest_stream_id,
        Id < PeerSubset#peer_subset.next_available_stream_id ->
-    OldStream = lists:keyfind(Id, 2, PeerSubset#peer_subset.active),
-    OldType = type(OldStream),
-    ActiveDiff =
-        case OldType of
-            closed -> 0;
-            active -> -1
-        end,
+    case lists:keyfind(Id, 2, PeerSubset#peer_subset.active) of
+        false ->
+            PeerSubset;
+        OldStream ->
+            OldType = type(OldStream),
+            ActiveDiff =
+                case OldType of
+                    closed -> 0;
+                    active -> -1
+                end,
 
-    NewActive = lists:keyreplace(Id, 2, PeerSubset#peer_subset.active, Closed),
-    PeerSubset#peer_subset{
-      active_count=PeerSubset#peer_subset.active_count+ActiveDiff,
-      active=NewActive
-     };
+            NewActive = lists:keyreplace(Id, 2, PeerSubset#peer_subset.active, Closed),
+            PeerSubset#peer_subset{
+              active_count=PeerSubset#peer_subset.active_count+ActiveDiff,
+              active=NewActive
+             }
+    end;
 %% Case 3: It's closed, but greater than or equal to next available:
 upsert_peer_subset(
   #closed_stream{
