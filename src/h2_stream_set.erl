@@ -374,7 +374,7 @@ upsert_peer_subset(
   PeerSubset)
   when Id >= PeerSubset#peer_subset.lowest_stream_id,
        Id < PeerSubset#peer_subset.next_available_stream_id ->
-    OldStream = lists:keyfind(Id, 2, PeerSubset#peer_subset.active),
+    OldStream = get_from_subset(Id, PeerSubset),
     OldType = type(OldStream),
     ActiveDiff =
         case OldType of
@@ -393,7 +393,7 @@ upsert_peer_subset(
               lowest_stream_id=PeerSubset#peer_subset.next_available_stream_id,
               active_count=0,
               active=[]
-              };
+             };
         [NewLowestStream|_] ->
             NewLowest = stream_id(NewLowestStream),
             PeerSubset#peer_subset{
@@ -411,7 +411,7 @@ upsert_peer_subset(
   PeerSubset)
   when Id >= PeerSubset#peer_subset.lowest_stream_id,
        Id < PeerSubset#peer_subset.next_available_stream_id ->
-    OldStream = lists:keyfind(Id, 2, PeerSubset#peer_subset.active),
+    OldStream = get_from_subset(Id, PeerSubset),
     OldType = type(OldStream),
     ActiveDiff =
         case OldType of
