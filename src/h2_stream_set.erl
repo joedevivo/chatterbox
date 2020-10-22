@@ -124,6 +124,7 @@
    [
     new/1,
     new_stream/8,
+    new_stream/9,
     get/2,
     upsert/2,
     sort/1
@@ -210,18 +211,37 @@ new(server) ->
         Socket :: sock:socket(),
         InitialSendWindow :: integer(),
         InitialRecvWindow :: integer(),
-        StreamSet :: stream_set()) ->
+        StreamSet :: stream_set(),
+        [gen_statem:start_opt()]) ->
                         stream_set()
                             | {error, error_code(), closed_stream()}.
-new_stream(
-          StreamId,
-          NotifyPid,
-          CBMod,
-          CBOpts,
-          Socket,
-          InitialSendWindow,
-          InitialRecvWindow,
-          StreamSet) ->
+new_stream(StreamId,
+           NotifyPid,
+           CBMod,
+           CBOpts,
+           Socket,
+           InitialSendWindow,
+           InitialRecvWindow,
+           StreamSet) ->
+    new_stream(StreamId,
+               NotifyPid,
+               CBMod,
+               CBOpts,
+               Socket,
+               InitialSendWindow,
+               InitialRecvWindow,
+               StreamSet,
+               []).
+
+new_stream(StreamId,
+           NotifyPid,
+           CBMod,
+           CBOpts,
+           Socket,
+           InitialSendWindow,
+           InitialRecvWindow,
+           StreamSet,
+           StatemOptions) ->
     PeerSubset = get_peer_subset(StreamId, StreamSet),
     case PeerSubset#peer_subset.max_active =/= unlimited andalso
          PeerSubset#peer_subset.active_count >= PeerSubset#peer_subset.max_active
@@ -234,7 +254,8 @@ new_stream(
                        self(),
                        CBMod,
                        CBOpts,
-                       Socket
+                       Socket,
+                       StatemOptions
                       ),
             NewStream = #active_stream{
                            id = StreamId,

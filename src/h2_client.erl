@@ -19,8 +19,10 @@
          start_link/2,
          start_link/3,
          start_link/4,
+         start_link/5,
          start/4,
          start_ssl_upgrade_link/4,
+         start_ssl_upgrade_link/5,
          stop/1,
          send_request/3,
          send_ping/1,
@@ -90,6 +92,17 @@ start_link(https, Host, SSLOptions)
     start_link(https, Host, 443, SSLOptions).
 
 
+-spec start_link(http | https,
+                 string(),
+                 non_neg_integer(),
+                 [ssl:ssl_option()]) ->
+                        {ok, pid()}
+                      | ignore
+                      | {error, term()}.
+
+start_link(Transport, Host, Port, SSLOptions) ->
+    start_link(Transport, Host, Port, SSLOptions, []).
+
 %% Here's your all access client starter. MAXIMUM TUNABLES! Scheme,
 %% Hostname, Port and SSLOptions. All of the start_link/* calls come
 %% through here eventually, so this is where we turn 'http' and
@@ -98,33 +111,42 @@ start_link(https, Host, SSLOptions)
 -spec start_link(http | https,
                  string(),
                  non_neg_integer(),
-                 [ssl:ssl_option()]) ->
+                 [ssl:ssl_option()],
+                 [gen_statem:start_opt()]) ->
                         {ok, pid()}
                       | ignore
                       | {error, term()}.
-start_link(Transport, Host, Port, SSLOptions) ->
+
+start_link(Transport, Host, Port, SSLOptions, StatemOptions) ->
     NewT = case Transport of
                http -> gen_tcp;
                https -> ssl
            end,
-    h2_connection:start_client_link(NewT, Host, Port, SSLOptions, chatterbox:settings(client)).
+    h2_connection:start_client_link(NewT, Host, Port, SSLOptions, chatterbox:settings(client), StatemOptions).
 
 -spec start(http | https,
-                 string(),
-                 non_neg_integer(),
-                 [ssl:ssl_option()]) ->
+            string(),
+            non_neg_integer(),
+            [ssl:ssl_option()],
+            [gen_statem:start_opt()]) ->
                         {ok, pid()}
                       | ignore
                       | {error, term()}.
 start(Transport, Host, Port, SSLOptions) ->
+    start(Transport, Host, Port, SSLOptions, []).
+
+start(Transport, Host, Port, SSLOptions, StatemOptions) ->
     NewT = case Transport of
                http -> gen_tcp;
                https -> ssl
            end,
-    h2_connection:start_client(NewT, Host, Port, SSLOptions, chatterbox:settings(client)).
+    h2_connection:start_client(NewT, Host, Port, SSLOptions, chatterbox:settings(client), StatemOptions).
 
 start_ssl_upgrade_link(Host, Port, InitialMessage, SSLOptions) ->
-    h2_connection:start_ssl_upgrade_link(Host, Port, InitialMessage, SSLOptions, chatterbox:settings(client)).
+    start_ssl_upgrade_link(Host, Port, InitialMessage, SSLOptions, []).
+
+start_ssl_upgrade_link(Host, Port, InitialMessage, SSLOptions, StatemOptions) ->
+    h2_connection:start_ssl_upgrade_link(Host, Port, InitialMessage, SSLOptions, chatterbox:settings(client), StatemOptions).
 
 -spec stop(pid()) -> ok.
 stop(Pid) ->

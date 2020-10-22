@@ -4,6 +4,7 @@
 %% Public API
 -export([
          start_link/5,
+         start_link/6,
          send_event/2,
          send_pp/2,
          send_data/2,
@@ -105,13 +106,25 @@
                   ) ->
                         {ok, pid()} | ignore | {error, term()}.
 start_link(StreamId, Connection, CallbackModule, CallbackOptions, Socket) ->
+    start_link(StreamId, Connection, CallbackModule, CallbackOptions, Socket, []).
+
+-spec start_link(
+        StreamId :: stream_id(),
+        Connection :: pid(),
+        CallbackModule :: module(),
+        CallbackOptions :: list(),
+        Socket :: sock:socket(),
+        [gen_statem:start_opt()]
+                  ) ->
+                        {ok, pid()} | ignore | {error, term()}.
+start_link(StreamId, Connection, CallbackModule, CallbackOptions, Socket, StatemOptions) ->
     gen_statem:start_link(?MODULE,
                           [StreamId,
                            Connection,
                            CallbackModule,
                            CallbackOptions,
                            Socket],
-                          []).
+                          StatemOptions).
 
 send_event(Pid, Event) ->
     gen_statem:cast(Pid, Event).
