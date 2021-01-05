@@ -99,7 +99,9 @@
           buffer = empty :: empty | {binary, binary()} | {frame, h2_frame:header(), binary()},
           continuation = undefined :: undefined | #continuation_state{},
           flow_control = auto :: auto | manual,
-          pings = #{} :: #{binary() => {pid(), non_neg_integer()}}
+          pings = #{} :: #{binary() => {pid(), non_neg_integer()}},
+          %% if true then set a stream as garbage in the stream_set
+          garbage_on_end = false :: boolean()
 }).
 
 -type connection() :: #connection{}.
@@ -209,6 +211,7 @@ init({client, Transport, Host, Port, SSLOptions, Http2Settings, ConnectionSettin
             InitialState =
                 #connection{
                    type = client,
+                   garbage_on_end = maps:get(garbage_on_end, ConnectionSettings, false),
                    stream_callback_mod = maps:get(stream_callback_mod, ConnectionSettings, undefined),
                    stream_callback_opts = maps:get(stream_callback_opts, ConnectionSettings, []),
                    streams = h2_stream_set:new(client),
@@ -235,6 +238,7 @@ init({client_ssl_upgrade, Host, Port, InitialMessage, SSLOptions, Http2Settings,
                     InitialState =
                         #connection{
                            type = client,
+                           garbage_on_end = maps:get(garbage_on_end, ConnectionSettings, false),
                            stream_callback_mod = maps:get(stream_callback_mod, ConnectionSettings, undefined),
                            stream_callback_opts = maps:get(stream_callback_opts, ConnectionSettings, []),
                            streams = h2_stream_set:new(client),
@@ -353,7 +357,7 @@ send_promise(Pid, StreamId, NewStreamId, Headers) ->
     ok.
 
 -spec get_response(pid(), stream_id()) ->
-                          {ok, {hpack:headers(), iodata()}}
+                          {ok, {hpack:headers(), iodata(), iodata()}}
                            | not_ready.
 get_response(Pid, StreamId) ->
     gen_statem:call(Pid, {get_response, StreamId}).
@@ -936,9 +940,10 @@ handle_event(_, {stream_finished,
         active ->
             NotifyPid = h2_stream_set:notify_pid(Stream),
             Response =
-                case Conn#connection.type of
-                    server -> garbage;
-                    client -> {Headers, Body, Trailers}
+                case {Conn#connection.type, Conn#connection.garbage_on_end} of
+                    {server, _} -> garbage;
+                    {client, false} -> {Headers, Body, Trailers};
+                    {client, true} -> garbage
                 end,
             {_NewStream, NewStreams} =
                 h2_stream_set:close(
