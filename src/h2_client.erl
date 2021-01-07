@@ -125,7 +125,7 @@ start(Transport, Host, Port, SSLOptions) ->
                http -> gen_tcp;
                https -> ssl
            end,
-    h2_connection:start_client(NewT, Host, Port, SSLOptions, chatterbox:settings(client)).
+    h2_connection:start_client(NewT, Host, Port, SSLOptions, chatterbox:settings(client), #{}).
 
 start_ssl_upgrade_link(Host, Port, InitialMessage, SSLOptions) ->
     h2_connection:start_ssl_upgrade_link(Host, Port, InitialMessage, SSLOptions, chatterbox:settings(client), #{}).
