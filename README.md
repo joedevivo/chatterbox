@@ -34,7 +34,6 @@ Options = [
         %% you can find certs to play with in ./config
         {certfile,   "localhost.crt"},
         {keyfile,    "localhost.key"},
-        {honor_cipher_order, false},
         {versions, ['tlsv1.2']},
         {next_protocols_advertised, [<<"h2">>]}
 ],

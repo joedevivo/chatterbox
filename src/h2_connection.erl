@@ -206,7 +206,7 @@ become({Transport, Socket}, Http2Settings, ConnectionSettings) ->
 init({client, Transport, Host, Port, SSLOptions, Http2Settings, ConnectionSettings}) ->
     case Transport:connect(Host, Port, client_options(Transport, SSLOptions)) of
         {ok, Socket} ->
-            ok = sock:setopts({Transport, Socket}, [{packet, raw}, binary]),
+            ok = sock:setopts({Transport, Socket}, [{packet, raw}, binary, {active, once}]),
             Transport:send(Socket, <<?PREFACE>>),
             InitialState =
                 #connection{
@@ -232,8 +232,7 @@ init({client_ssl_upgrade, Host, Port, InitialMessage, SSLOptions, Http2Settings,
             gen_tcp:send(TCP, InitialMessage),
             case ssl:connect(TCP, client_options(ssl, SSLOptions)) of
                 {ok, Socket} ->
-                    active_once({ssl, Socket}),
-                    ok = ssl:setopts(Socket, [{packet, raw}, binary]),
+                    ok = ssl:setopts(Socket, [{packet, raw}, binary, {active, once}]),
                     ssl:send(Socket, <<?PREFACE>>),
                     InitialState =
                         #connection{
