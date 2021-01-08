@@ -359,16 +359,25 @@ open(cast, {recv_data,
        }=Stream)
   when ?NOT_FLAG(Flags, ?FLAG_END_STREAM) ->
     Bin = h2_frame_data:data(Payload),
-    {ok, NewCBState} = callback(CB, on_receive_data, [Bin], CallbackState),
-    {next_state,
-     open,
-     Stream#stream_state{
-       %% TODO: We're storing everything in the state. It's fine for
-       %% some cases, but the decision should be left to the user
-       incoming_frames=queue:in(F, IFQ),
-       request_body_size=Stream#stream_state.request_body_size+L,
-       callback_state=NewCBState
-      }};
+    case CB of
+        undefined ->
+            {next_state,
+             open,
+             Stream#stream_state{
+               %% TODO: We're storing everything in the state. It's fine for
+               %% some cases, but the decision should be left to the user
+               incoming_frames=queue:in(F, IFQ),
+               request_body_size=Stream#stream_state.request_body_size+L
+              }};
+        _ ->
+            {ok, NewCBState} = callback(CB, on_receive_data, [Bin], CallbackState),
+            {next_state,
+             open,
+             Stream#stream_state{
+               request_body_size=Stream#stream_state.request_body_size+L,
+               callback_state=NewCBState
+              }}
+    end;
 open(cast, {recv_data,
       {#frame_header{
           flags=Flags,
@@ -382,26 +391,43 @@ open(cast, {recv_data,
        }=Stream)
   when ?IS_FLAG(Flags, ?FLAG_END_STREAM) ->
     Bin = h2_frame_data:data(Payload),
-    {ok, NewCBState} = callback(CB, on_receive_data, [Bin], CallbackState),
-    NewStream = Stream#stream_state{
+    case CB of
+        undefined ->
+            NewStream =
+                Stream#stream_state{
                   incoming_frames=queue:in(F, IFQ),
                   request_body_size=Stream#stream_state.request_body_size+L,
-                  request_end_stream=true,
-                  callback_state=NewCBState
+                  request_end_stream=true
                  },
-    case check_content_length(NewStream) of
-        ok ->
-            {ok, NewCBState1} = callback(CB, on_end_stream, [], NewCBState),
-            {next_state,
-             half_closed_remote,
-             NewStream#stream_state{
-               callback_state=NewCBState1
-              }};
-        rst_stream ->
-            {next_state,
-             closed,
-             NewStream}
-        end;
+            case check_content_length(NewStream) of
+                ok ->
+                    {next_state, half_closed_remote, NewStream};
+                rst_stream ->
+                    {next_state, closed, NewStream}
+            end;
+
+        _ ->
+            {ok, NewCBState} = callback(CB, on_receive_data, [Bin], CallbackState),
+
+            NewStream = Stream#stream_state{
+                          request_body_size=Stream#stream_state.request_body_size+L,
+                          request_end_stream=true,
+                          callback_state=NewCBState
+                         },
+            case check_content_length(NewStream) of
+                ok ->
+                    {ok, NewCBState1} = callback(CB, on_end_stream, [], NewCBState),
+                    {next_state,
+                     half_closed_remote,
+                     NewStream#stream_state{
+                       callback_state=NewCBState1
+                      }};
+                rst_stream ->
+                    {next_state,
+                     closed,
+                     NewStream}
+            end
+    end;
 
 %% Trailers
 open(cast, {recv_h, Trailers},
