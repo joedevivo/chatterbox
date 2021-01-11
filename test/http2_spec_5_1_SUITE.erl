@@ -233,7 +233,7 @@ half_closed_remote_sends_headers(_Config) ->
 
 
     http2c:send_unaltered_frames(Client, H2),
-     Resp = http2c:wait_for_n_frames(Client, 1, 3),
+    Resp = http2c:wait_for_n_frames(Client, 1, 2),
     ct:pal("Resp: ~p", [Resp]),
     ?assertEqual(true, (length(Resp) >= 1)),
 

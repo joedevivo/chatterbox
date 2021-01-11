@@ -34,7 +34,6 @@ Options = [
         %% you can find certs to play with in ./config
         {certfile,   "localhost.crt"},
         {keyfile,    "localhost.key"},
-        {honor_cipher_order, false},
         {versions, ['tlsv1.2']},
         {next_protocols_advertised, [<<"h2">>]}
 ],
@@ -104,7 +103,7 @@ RequestHeaders = [
 
 RequestBody = <<>>,
 
-{ok, {ResponseHeaders, ResponseBody}}
+{ok, {ResponseHeaders, ResponseBody, ResponseTrailers}}
     = h2_client:sync_request(Pid, RequestHeaders, RequestBody).
 ```
 
@@ -125,7 +124,7 @@ So you can use a receive block, like this
 ```erlang
 receive
     {'END_STREAM', StreamId} ->
-        {ok, {ResponseHeaders, ResponseBody}} = h2_client:get_response(Pid, StreamId)
+        {ok, {ResponseHeaders, ResponseBody, ResponseTrailers}} = h2_client:get_response(Pid, StreamId)
 end,
 ```
 

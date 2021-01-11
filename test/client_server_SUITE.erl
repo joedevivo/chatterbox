@@ -67,7 +67,7 @@ complex_request(_Config) ->
          {<<"accept-encoding">>, <<"gzip, deflate">>},
          {<<"user-agent">>, <<"chattercli/0.0.1 :D">>}
         ],
-    {ok, {ResponseHeaders, ResponseBody}} = h2_client:sync_request(Client, RequestHeaders, <<>>),
+    {ok, {ResponseHeaders, ResponseBody, _Trailers}} = h2_client:sync_request(Client, RequestHeaders, <<>>),
 
     ct:pal("Response Headers: ~p", [ResponseHeaders]),
     ct:pal("Response Body: ~p", [ResponseBody]),
@@ -87,7 +87,7 @@ upgrade_tcp_connection(_Config) ->
          {<<"accept-encoding">>, <<"gzip, deflate">>},
          {<<"user-agent">>, <<"chattercli/0.0.1 :D">>}
         ],
-    {ok, {ResponseHeaders, ResponseBody}} = h2_client:sync_request(Client, RequestHeaders, <<>>),
+    {ok, {ResponseHeaders, ResponseBody, _Trailers}} = h2_client:sync_request(Client, RequestHeaders, <<>>),
     ct:pal("Response Headers: ~p", [ResponseHeaders]),
     ct:pal("Response Body: ~p", [ResponseBody]),
     ok.
@@ -105,7 +105,7 @@ basic_push(_Config) ->
          {<<"accept-encoding">>, <<"gzip, deflate">>},
          {<<"user-agent">>, <<"chattercli/0.0.1 :D">>}
         ],
-    {ok, {ResponseHeaders, ResponseBody}} = h2_client:sync_request(Client, RequestHeaders, <<>>),
+    {ok, {ResponseHeaders, ResponseBody, _Trailers}} = h2_client:sync_request(Client, RequestHeaders, <<>>),
 
     ct:pal("Response Headers: ~p", [ResponseHeaders]),
     ct:pal("Response Body: ~p", [ResponseBody]),
@@ -155,7 +155,7 @@ get_peer_in_handler(_Config) ->
         ],
 
 
-    {ok, {ResponseHeaders, ResponseBody}} = h2_client:sync_request(Client, RequestHeaders, <<>>),
+    {ok, {ResponseHeaders, ResponseBody, _Trailers}} = h2_client:sync_request(Client, RequestHeaders, <<>>),
     ct:pal("Response Headers: ~p", [ResponseHeaders]),
     ct:pal("Response Body: ~p", [ResponseBody]),
     ok.
@@ -175,7 +175,7 @@ send_body_opts(_Config) ->
 
     ExpectedResponseBody = <<"BodyPart1\nBodyPart2">>,
 
-    {ok, {ResponseHeaders, ResponseBody}} = h2_client:sync_request(Client, RequestHeaders, <<>>),
+    {ok, {ResponseHeaders, ResponseBody, _Trailers}} = h2_client:sync_request(Client, RequestHeaders, <<>>),
     ct:pal("Response Headers: ~p", [ResponseHeaders]),
     ct:pal("Response Body: ~p", [ResponseBody]),
     ?assertEqual(ExpectedResponseBody, (iolist_to_binary(ResponseBody))),
