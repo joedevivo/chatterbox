@@ -30,6 +30,7 @@
          new_stream/1,
          new_stream/2,
          new_stream/4,
+         new_stream/6,
          send_promise/4,
          get_response/2,
          get_peer/1,
@@ -349,6 +350,14 @@ new_stream(Pid, NotifyPid) ->
 
 new_stream(Pid, CallbackMod, CallbackOpts, NotifyPid) ->
     gen_statem:call(Pid, {new_stream, CallbackMod, CallbackOpts, NotifyPid}).
+
+%% @doc `new_stream/6' accepts Headers so they can be sent within the connection process
+%% when a stream id is assigned. This ensures that another process couldn't also have
+%% requested a new stream and send its headers before the stream with a lower id, which
+%% results in the server closing the connection when it gets headers for the lower id stream.
+-spec new_stream(pid(), module(), term(), hpack:headers(), send_opts(), pid()) -> {stream_id(), pid()} | {error, error_code()}.
+new_stream(Pid, CallbackMod, CallbackOpts, Headers, Opts, NotifyPid) ->
+    gen_statem:call(Pid, {new_stream, CallbackMod, CallbackOpts, Headers, Opts, NotifyPid}).
 
 -spec send_promise(pid(), stream_id(), stream_id(), hpack:headers()) -> ok.
 send_promise(Pid, StreamId, NewStreamId, Headers) ->
@@ -981,39 +990,8 @@ handle_event(_, {update_settings, Http2Settings},
              #connection{}=Conn) ->
     {keep_state,
      send_settings(Http2Settings, Conn)};
-handle_event(_, {send_headers, StreamId, Headers, Opts},
-             #connection{
-                encode_context=EncodeContext,
-                streams = Streams,
-                socket = Socket
-               }=Conn
-            ) ->
-   StreamComplete = proplists:get_value(send_end_stream, Opts, false),
-
-    Stream = h2_stream_set:get(StreamId, Streams),
-    case h2_stream_set:type(Stream) of
-        active ->
-            {FramesToSend, NewContext} =
-                h2_frame_headers:to_frames(h2_stream_set:stream_id(Stream),
-                                           Headers,
-                                           EncodeContext,
-                                            (Conn#connection.peer_settings)#settings.max_frame_size,
-                                           StreamComplete
-                                          ),
-            [sock:send(Socket, h2_frame:to_binary(Frame)) || Frame <- FramesToSend],
-            send_h(Stream, Headers),
-            {keep_state,
-             Conn#connection{
-               encode_context=NewContext
-              }};
-        idle ->
-            %% In theory this is a client maybe activating a stream,
-            %% but in practice, we've already activated the stream in
-            %% new_stream/1
-            {keep_state, Conn};
-        closed ->
-            {keep_state, Conn}
-    end;
+handle_event(_, {send_headers, StreamId, Headers, Opts}, Conn) ->
+    send_headers_(StreamId, Headers, Opts, Conn);
 handle_event(_, {send_trailers, StreamId, Headers, Opts},
              #connection{
                 encode_context=EncodeContext,
@@ -1194,6 +1172,8 @@ handle_event({call, From}, {new_stream, NotifyPid},
     new_stream_(From, CallbackMod, CallbackOpts, NotifyPid, Conn);
 handle_event({call, From}, {new_stream, CallbackMod, CallbackState, NotifyPid}, Conn) ->
     new_stream_(From, CallbackMod, CallbackState, NotifyPid, Conn);
+handle_event({call, From}, {new_stream, CallbackMod, CallbackState, Headers, Opts, NotifyPid}, Conn) ->
+    new_stream_(From, CallbackMod, CallbackState, Headers, Opts, NotifyPid, Conn);
 handle_event({call, From}, is_push,
                   #connection{
                      peer_settings=#settings{enable_push=Push}
@@ -1338,6 +1318,68 @@ new_stream_(From, CallbackMod, CallbackState, NotifyPid, Conn=#connection{stream
                                  next_available_stream_id=NextId+2,
                                  streams=NewStreams
                                 }, [{reply, From, Reply}]}.
+
+new_stream_(From, CallbackMod, CallbackState, Headers, Opts, NotifyPid, Conn=#connection{streams=Streams,
+                                                                                         next_available_stream_id=NextId}) ->
+    {Reply, NewStreams} =
+        case
+            h2_stream_set:new_stream(
+              NextId,
+              NotifyPid,
+              CallbackMod,
+              CallbackState,
+              Conn#connection.socket,
+              Conn#connection.peer_settings#settings.initial_window_size,
+              Conn#connection.self_settings#settings.initial_window_size,
+              Conn#connection.type,
+              Streams)
+        of
+            {error, Code, _NewStream} ->
+                %% TODO: probably want to have events like this available for metrics
+                %% tried to create new_stream but there are too many
+                {{error, Code}, Streams};
+            {Pid, GoodStreamSet} ->
+                {{NextId, Pid}, GoodStreamSet}
+        end,
+
+    Conn1 = Conn#connection{
+              next_available_stream_id=NextId+2,
+              streams=NewStreams
+             },
+    {keep_state, Conn2} = send_headers_(NextId, Headers, Opts, Conn1),
+
+    {keep_state, Conn2, [{reply, From, Reply}]}.
+
+send_headers_(StreamId, Headers, Opts, #connection{encode_context=EncodeContext,
+                                                   streams = Streams,
+                                                   socket = Socket
+                                                  }=Conn) ->
+    StreamComplete = proplists:get_value(send_end_stream, Opts, false),
+
+    Stream = h2_stream_set:get(StreamId, Streams),
+    case h2_stream_set:type(Stream) of
+        active ->
+            {FramesToSend, NewContext} =
+                h2_frame_headers:to_frames(h2_stream_set:stream_id(Stream),
+                                           Headers,
+                                           EncodeContext,
+                                           (Conn#connection.peer_settings)#settings.max_frame_size,
+                                           StreamComplete
+                                          ),
+            [sock:send(Socket, h2_frame:to_binary(Frame)) || Frame <- FramesToSend],
+            send_h(Stream, Headers),
+            {keep_state,
+             Conn#connection{
+               encode_context=NewContext
+              }};
+        idle ->
+            %% In theory this is a client maybe activating a stream,
+            %% but in practice, we've already activated the stream in
+            %% new_stream/1
+            {keep_state, Conn};
+        closed ->
+            {keep_state, Conn}
+    end.
 
 -spec go_away(error_code(), connection()) -> {next_state, closing, connection()}.
 go_away(ErrorCode,
