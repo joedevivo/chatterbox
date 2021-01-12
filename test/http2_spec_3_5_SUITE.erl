@@ -43,10 +43,10 @@ send_invalid_connection_preface(Preface, _Config) ->
 
     ssl:send(Socket, Preface),
 
-    ssl:recv(Socket, 0, 10000),
+    ssl:recv(Socket, 0, 5000),
 
-    {error, closed} = ssl:send(Socket, <<"something else">>),
-    {error, closed} = ssl:connection_information(Socket),
+    {error, _} = ssl:send(Socket, <<"something else">>),
+    {error, _} = ssl:connection_information(Socket),
     ok.
 
 sends_incomplete_connection_preface(_Config) ->
@@ -70,6 +70,6 @@ sends_incomplete_connection_preface(_Config) ->
     %% There's a 5 second timeout before the socket will be closed
     ssl:recv(Socket, 0, 5000),
 
-    {error, closed} = ssl:send(Socket, <<"something else">>),
-    {error, closed} = ssl:connection_information(Socket),
+    {error, _} = ssl:send(Socket, <<"something else">>),
+    {error, _} = ssl:connection_information(Socket),
     ok.
