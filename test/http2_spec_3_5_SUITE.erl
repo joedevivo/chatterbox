@@ -43,7 +43,7 @@ send_invalid_connection_preface(Preface, _Config) ->
 
     ssl:send(Socket, Preface),
 
-    ssl:recv(Socket, 0, 1000),
+    ssl:recv(Socket, 0, 10000),
 
     {error, closed} = ssl:send(Socket, <<"something else">>),
     {error, closed} = ssl:connection_information(Socket),
