@@ -33,9 +33,9 @@ jobs:
       run: rebar3 ct --cover
     - name: Dialyzer
       run: rebar3 dialyzer
-    - name: Covertool
-      run: rebar3 covertool generate
+    # - name: Covertool
+    #   run: rebar3 covertool generate
 
-    - uses: codecov/codecov-action@v1
-      with:
-        file: _build/test/covertool/chatterbox.covertool.xml
+    # - uses: codecov/codecov-action@v1
+    #   with:
+    #     file: _build/test/covertool/chatterbox.covertool.xml
