@@ -206,7 +206,8 @@ become({Transport, Socket}, Http2Settings, ConnectionSettings) ->
 
 %% Init callback
 init({client, Transport, Host, Port, SSLOptions, Http2Settings, ConnectionSettings}) ->
-    case Transport:connect(Host, Port, client_options(Transport, SSLOptions)) of
+    ConnectTimeout = maps:get(connect_timeout, ConnectionSettings, 5000),
+    case Transport:connect(Host, Port, client_options(Transport, SSLOptions), ConnectTimeout) of
         {ok, Socket} ->
             ok = sock:setopts({Transport, Socket}, [{packet, raw}, binary, {active, once}]),
             Transport:send(Socket, <<?PREFACE>>),
@@ -226,10 +227,11 @@ init({client, Transport, Host, Port, SSLOptions, Http2Settings, ConnectionSettin
              send_settings(Http2Settings, InitialState),
              4500};
         {error, Reason} ->
-            {stop, Reason}
+            {stop, {shutdown, Reason}}
     end;
 init({client_ssl_upgrade, Host, Port, InitialMessage, SSLOptions, Http2Settings, ConnectionSettings}) ->
-    case gen_tcp:connect(Host, Port, [{active, false}]) of
+    ConnectTimeout = maps:get(connect_timeout, ConnectionSettings, 5000),
+    case gen_tcp:connect(Host, Port, [{active, false}], ConnectTimeout) of
         {ok, TCP} ->
             gen_tcp:send(TCP, InitialMessage),
             case ssl:connect(TCP, client_options(ssl, SSLOptions)) of
@@ -252,10 +254,10 @@ init({client_ssl_upgrade, Host, Port, InitialMessage, SSLOptions, Http2Settings,
                      send_settings(Http2Settings, InitialState),
                      4500};
                 {error, Reason} ->
-                    {stop, Reason}
+                    {stop, {shutdown, Reason}}
             end;
         {error, Reason} ->
-            {stop, Reason}
+            {stop, {shutdown, Reason}}
     end;
 init({server, {Transport, ListenSocket}, SSLOptions, Http2Settings}) ->
     %% prim_inet:async_accept is dope. It says just hang out here and
@@ -274,7 +276,7 @@ init({server, {Transport, ListenSocket}, SSLOptions, Http2Settings}) ->
                 server_settings = Http2Settings
                }}; %% No timeout here, it's just a listener
         {error, Reason} ->
-            {stop, Reason}
+            {stop, {shutdown, Reason}}
     end.
 
 callback_mode() ->

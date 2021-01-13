@@ -16,7 +16,8 @@ all() ->
 
 groups() -> [{default_handler,  [complex_request,
                                  upgrade_tcp_connection,
-                                 basic_push]},
+                                 basic_push,
+                                 connect_timeout]},
              {peer_handler, [get_peer_in_handler]},
              {double_body_handler, [send_body_opts]},
              {echo_handler, [echo_body]}
@@ -140,6 +141,12 @@ wait_for_n_notifications(N) ->
         2000 ->
             ok
     end.
+
+connect_timeout(_Config) ->
+    {ok, Port} = application:get_env(chatterbox, port),
+    ?assertMatch({error, {shutdown, timeout}},
+                 h2_client:start(http, "localhost", Port, [], #{connect_timeout => 0})),
+    ok.
 
 get_peer_in_handler(_Config) ->
     {ok, Client} = h2_client:start_link(),
