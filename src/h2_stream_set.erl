@@ -676,10 +676,11 @@ s_send_what_we_can(SWS, _, #active_stream{queued_data=Data,
   when is_atom(Data) ->
     {SWS, S};
 s_send_what_we_can(SWS, _, #active_stream{queued_data=Data,
+                                          id=_StreamId,
                                           pid=Pid,
                                           trailers=Trailers}=S)
   when is_atom(Data) ->
-    [h2_stream:send_data(Pid, Frame) || Frame <- Trailers],
+    h2_stream:send_trailers(Pid, Trailers),
     {SWS, S#active_stream{trailers=undefined}};
 s_send_what_we_can(SWS, MFS, #active_stream{}=Stream) ->
     %% We're coming in here with three numbers we need to look at:
@@ -760,7 +761,7 @@ s_send_what_we_can(SWS, MFS, #active_stream{}=Stream) ->
                 #active_stream{pid=Pid,
                                queued_data=done,
                                trailers=Trailers1} ->
-                    [h2_stream:send_data(Pid, Trailer) || Trailer <- Trailers1],
+                    h2_stream:send_trailers(Pid, Trailers1),
                     NewS#active_stream{trailers=undefined};
                 _ ->
                     NewS
