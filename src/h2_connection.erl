@@ -22,6 +22,7 @@
          send_headers/4,
          send_trailers/3,
          send_trailers/4,
+         actually_send_trailers/3,
          send_body/3,
          send_body/4,
          send_request/3,
@@ -306,6 +307,10 @@ send_trailers(Pid, StreamId, Trailers) ->
 -spec send_trailers(pid(), stream_id(), hpack:headers(), send_opts()) -> ok.
 send_trailers(Pid, StreamId, Trailers, Opts) ->
     gen_statem:cast(Pid, {send_trailers, StreamId, Trailers, Opts}),
+    ok.
+
+actually_send_trailers(Pid, StreamId, Trailers) ->
+    gen_statem:cast(Pid, {actually_send_trailers, StreamId, Trailers}),
     ok.
 
 -spec send_body(pid(), stream_id(), binary()) -> ok.
@@ -995,9 +1000,25 @@ handle_event(_, {update_settings, Http2Settings},
      send_settings(Http2Settings, Conn)};
 handle_event(_, {send_headers, StreamId, Headers, Opts}, Conn) ->
     send_headers_(StreamId, Headers, Opts, Conn);
+handle_event(_, {actually_send_trailers, StreamId, Trailers}, Conn=#connection{encode_context=EncodeContext,
+                                                                               streams=Streams,
+                                                                               socket=Socket}) ->
+    Stream = h2_stream_set:get(StreamId, Streams),
+    {FramesToSend, NewContext} =
+        h2_frame_headers:to_frames(h2_stream_set:stream_id(Stream),
+                                   Trailers,
+                                   EncodeContext,
+                                   (Conn#connection.peer_settings)#settings.max_frame_size,
+                                   true
+                                  ),
+   
+    [sock:send(Socket, h2_frame:to_binary(Frame)) || Frame <- FramesToSend],
+    {keep_state,
+     Conn#connection{
+       encode_context=NewContext
+      }};
 handle_event(_, {send_trailers, StreamId, Headers, Opts},
              #connection{
-                encode_context=EncodeContext,
                 streams = Streams,
                 socket = _Socket
                }=Conn
@@ -1007,14 +1028,7 @@ handle_event(_, {send_trailers, StreamId, Headers, Opts},
     Stream = h2_stream_set:get(StreamId, Streams),
     case h2_stream_set:type(Stream) of
         active ->
-            {FramesToSend, NewContext} =
-                h2_frame_headers:to_frames(h2_stream_set:stream_id(Stream),
-                                           Headers,
-                                           EncodeContext,
-                                           (Conn#connection.peer_settings)#settings.max_frame_size,
-                                           true
-                                          ),
-            NewS = h2_stream_set:update_trailers(FramesToSend, Stream),
+            NewS = h2_stream_set:update_trailers(Headers, Stream),
             {NewSWS, NewStreams} =
                 h2_stream_set:send_what_we_can(
                   StreamId,
@@ -1025,9 +1039,9 @@ handle_event(_, {send_trailers, StreamId, Headers, Opts},
                     Conn#connection.streams)),
 
             send_t(Stream, Headers),
+
             {keep_state,
              Conn#connection{
-               encode_context=NewContext,
                send_window_size=NewSWS,
                streams=NewStreams
               }};

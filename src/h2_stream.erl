@@ -7,6 +7,7 @@
          send_event/2,
          send_pp/2,
          send_data/2,
+         send_trailers/2,
          stream_id/0,
          call/2,
          connection/0,
@@ -128,6 +129,11 @@ send_pp(Pid, Headers) ->
                         ok | flow_control.
 send_data(Pid, Frame) ->
     gen_statem:cast(Pid, {send_data, Frame}).
+
+-spec send_trailers(pid(), hpack:headers()) -> ok.
+send_trailers(Pid, Trailers) ->
+    gen_statem:cast(Pid, {send_trailers, Trailers}),
+    ok.
 
 -spec stream_id() -> stream_id().
 stream_id() ->
@@ -491,6 +497,8 @@ open(cast, {send_data,
                 open
         end,
     {next_state, NextState, Stream};
+open(_, {send_trailers, Trailers}, Stream) ->
+    send_trailers(open, Trailers, Stream);
 open(cast,
   {send_h, Headers},
   #stream_state{}=Stream) ->
@@ -570,7 +578,8 @@ half_closed_remote(cast,
             {next_state, closed, Stream, 0}
     end;
 
-
+half_closed_remote(_Type, {send_trailers, Trailers}, State) ->
+    send_trailers(half_closed_remote, Trailers, State);
 half_closed_remote(cast, _,
        #stream_state{}=Stream) ->
     rst_stream_(?STREAM_CLOSED, Stream);
@@ -704,6 +713,16 @@ closed(_, _,
     rst_stream_(?STREAM_CLOSED, Stream);
 closed(Type, Event, State) ->
     handle_event(Type, Event, State).
+
+send_trailers(State, Trailers, Stream=#stream_state{connection=Pid,
+                                                    stream_id=StreamId}) ->
+    h2_connection:actually_send_trailers(Pid, StreamId, Trailers),
+    case State of
+        half_closed_remote ->
+            {next_state, closed, Stream};
+        open ->
+            {next_state, half_closed_local, Stream}
+    end.
 
 handle_event(_, {send_window_update, 0},
              #stream_state{}=Stream) ->
