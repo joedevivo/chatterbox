@@ -155,7 +155,7 @@ send_connection_window_update(Size) ->
     gen_statem:cast(self(), {send_connection_window_update, Size}).
 
 rst_stream(Pid, Code) ->
-    gen_statem:call(Pid, {rst_stream, Code}).
+    gen_statem:cast(Pid, {rst_stream, Code}).
 
 -spec stop(pid()) -> ok.
 stop(Pid) ->
@@ -708,6 +708,11 @@ closed(timeout, _,
                      Stream#stream_state.response_body,
                      Stream#stream_state.response_trailers}),
     {stop, normal, Stream};
+closed(cast,
+  {send_t, Headers},
+  #stream_state{connection=_Pid,
+                stream_id=_StreamId}=Stream) ->
+   {keep_state,Stream#stream_state{response_trailers=Headers}, 0};
 closed(_, _,
        #stream_state{}=Stream) ->
     rst_stream_(?STREAM_CLOSED, Stream);
@@ -740,8 +745,6 @@ handle_event(_, {send_connection_window_update, Size},
                  }=State) ->
     h2_connection:send_window_update(ConnPid, Size),
     {keep_state, State};
-handle_event({call,  From}, {rst_stream, ErrorCode}, State=#stream_state{}) ->
-    {keep_state, State, [{reply, From, {ok, rst_stream_(ErrorCode, State)}}]};
 handle_event({call, From}, stream_id, State=#stream_state{stream_id=StreamId}) ->
     {keep_state, State, [{reply, From, StreamId}]};
 handle_event({call, From}, connection, State=#stream_state{connection=Conn}) ->
@@ -750,6 +753,8 @@ handle_event({call, From}, Event, State=#stream_state{callback_mod=CB,
                                                       callback_state=CallbackState}) ->
     {ok, Reply, CallbackState1} = CB:handle_call(Event, CallbackState),
     {keep_state, State#stream_state{callback_state=CallbackState1}, [{reply, From, Reply}]};
+handle_event(cast, {rst_stream, ErrorCode}, State=#stream_state{}) ->
+    rst_stream_(ErrorCode, State);
 handle_event(cast, Event, State=#stream_state{callback_mod=CB,
                                               callback_state=CallbackState}) ->
     CallbackState1 = CB:handle_info(Event, CallbackState),
