@@ -7,18 +7,18 @@
 %%-behaviour(ranch_protocol).
 
 -export([
-         start_link/4,
-         init/4
+         start_link/3,
+         init/3
         ]).
 
-start_link(Ref, Socket, Transport, Opts) ->
-    Pid = proc_lib:spawn_link(?MODULE, init, [Ref, Socket, Transport, Opts]),
+start_link(Ref, Transport, Opts) ->
+    Pid = proc_lib:spawn_link(?MODULE, init, [Ref, Transport, Opts]),
     {ok, Pid}.
 
-init(Ref, Socket, T, Opts) ->
-    ok = ranch:accept_ack(Ref),
+init(Ref, Transport, Opts) ->
+    {ok, Socket} = ranch:handshake(Ref),
     Http2Settings = proplists:get_value(http2_settings, Opts, chatterbox:settings(server)),
-    h2_connection:become({transport(T), Socket}, Http2Settings).
+    h2_connection:become({transport(Transport), Socket}, Http2Settings).
 
 transport(ranch_ssl) ->
     ssl;
