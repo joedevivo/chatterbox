@@ -16,7 +16,7 @@ start_link(Ref, Socket, Transport, Opts) ->
     {ok, Pid}.
 
 init(Ref, Socket, T, Opts) ->
-    ok = ranch:accept_ack(Ref),
+    {ok, _} = ranch:handshake(Ref),
     Http2Settings = proplists:get_value(http2_settings, Opts, chatterbox:settings(server)),
     h2_connection:become({transport(T), Socket}, Http2Settings).
 

@@ -62,7 +62,7 @@
         ]).
 
 -record(h2_listening_state, {
-          ssl_options   :: [ssl:ssl_option()],
+          ssl_options   :: [ssl:tls_option()],
           listen_socket :: ssl:sslsocket() | inet:socket(),
           transport     :: gen_tcp | ssl,
           listen_ref    :: non_neg_integer(),
@@ -117,7 +117,7 @@
 -spec start_client_link(gen_tcp | ssl,
                         inet:ip_address() | inet:hostname(),
                         inet:port_number(),
-                        [ssl:ssl_option()],
+                        [ssl:tls_option()],
                         settings()
                        ) ->
                                {ok, pid()} | ignore | {error, term()}.
@@ -127,7 +127,7 @@ start_client_link(Transport, Host, Port, SSLOptions, Http2Settings) ->
 -spec start_client(gen_tcp | ssl,
                         inet:ip_address() | inet:hostname(),
                         inet:port_number(),
-                        [ssl:ssl_option()],
+                        [ssl:tls_option()],
                         settings()
                        ) ->
                                {ok, pid()} | ignore | {error, term()}.
@@ -151,7 +151,7 @@ start_client({Transport, Socket}, Http2Settings) ->
 -spec start_ssl_upgrade_link(inet:ip_address() | inet:hostname(),
                              inet:port_number(),
                              binary(),
-                             [ssl:ssl_option()],
+                             [ssl:tls_option()],
                              settings()
                             ) ->
                                     {ok, pid()} | ignore | {error, term()}.
@@ -159,7 +159,7 @@ start_ssl_upgrade_link(Host, Port, InitialMessage, SSLOptions, Http2Settings) ->
     gen_statem:start_link(?MODULE, {client_ssl_upgrade, Host, Port, InitialMessage, SSLOptions, Http2Settings}, []).
 
 -spec start_server_link(socket(),
-                        [ssl:ssl_option()],
+                        [ssl:tls_option()],
                         settings()) ->
                                {ok, pid()} | ignore | {error, term()}.
 start_server_link({Transport, ListenSocket}, SSLOptions, Http2Settings) ->
@@ -173,7 +173,7 @@ become(Socket) ->
 become(Socket, Http2Settings) ->
     become(Socket, Http2Settings, #{}).
 
--spec become(socket(), settings(), maps:map()) -> no_return().
+-spec become(socket(), settings(), map()) -> no_return().
 become({Transport, Socket}, Http2Settings, ConnectionSettings) ->
     ok = sock:setopts({Transport, Socket}, [{packet, raw}, binary]),
     case start_http2_server(Http2Settings,

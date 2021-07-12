@@ -70,7 +70,7 @@ start_link(https,Host) ->
 %% both.
 -spec start_link(http | https,
                  string(),
-                 non_neg_integer() | [ssl:ssl_option()]) ->
+                 non_neg_integer() | [ssl:tls_option()]) ->
                         {ok, pid()}
                       | ignore
                       | {error, term()}.
@@ -98,7 +98,7 @@ start_link(https, Host, SSLOptions)
 -spec start_link(http | https,
                  string(),
                  non_neg_integer(),
-                 [ssl:ssl_option()]) ->
+                 [ssl:tls_option()]) ->
                         {ok, pid()}
                       | ignore
                       | {error, term()}.
@@ -112,7 +112,7 @@ start_link(Transport, Host, Port, SSLOptions) ->
 -spec start(http | https,
                  string(),
                  non_neg_integer(),
-                 [ssl:ssl_option()]) ->
+                 [ssl:tls_option()]) ->
                         {ok, pid()}
                       | ignore
                       | {error, term()}.
