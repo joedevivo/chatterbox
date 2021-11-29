@@ -121,7 +121,7 @@
 			// Dispatches all reveal.js events to the parent window through postMessage
 			postMessageEvents: false,
 
-			// Focuses body when page changes visiblity to ensure keyboard shortcuts work
+			// Focuses body when page changes visibility to ensure keyboard shortcuts work
 			focusBodyOnPageVisibilityChange: true,
 
 			// Transition style
@@ -4666,7 +4666,7 @@
 			}
 		},
 
-		// Programatically triggers a keyboard event
+		// Programmatically triggers a keyboard event
 		triggerKey: function( keyCode ) {
 			onDocumentKeyDown( { keyCode: keyCode } );
 		}

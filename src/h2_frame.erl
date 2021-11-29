@@ -43,7 +43,7 @@
     {ok, payload(), Remainder::binary()}
   | {error, stream_id(), error_code(), binary()}.
 
-%% For io:formating
+%% For io:formatting
 -callback format(payload()) -> iodata().
 
 %% convert payload to binary

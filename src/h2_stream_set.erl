@@ -78,7 +78,7 @@
      % Data that is in queue to send on this stream, if flow control
      % hasn't allowed it to be sent yet
      queued_data           :: undefined | done | binary(),
-     % Has the body been completely recieved.
+     % Has the body been completely received.
      body_complete = false :: boolean(),
      trailers = undefined  :: [h2_frame:frame()] | undefined
     }).
@@ -86,7 +86,7 @@
 
 %% The closed_stream record is way more important to a client than a
 %% server. It's a way of holding on to a response that has been
-%% recieved, but not processed by the client yet.
+%% received, but not processed by the client yet.
 -record(
    closed_stream, {
      id               :: stream_id(),
@@ -113,7 +113,7 @@
 -type idle_stream() :: #idle_stream{}.
 
 %% So a stream can be any of these things. And it will be something
-%% that you can pass back into serveral functions here in this module.
+%% that you can pass back into several functions here in this module.
 -type stream() :: active_stream()
                 | closed_stream()
                 | idle_stream().
@@ -678,7 +678,7 @@ s_send_what_we_can(SWS, MFS, #active_stream{}=Stream) ->
     %% We're coming in here with three numbers we need to look at:
     %% * Connection send window size
     %% * Stream send window size
-    %% * Maximimum frame size
+    %% * Maximum frame size
 
     %% If none of them are zero, we have to send something, so we're
     %% going to figure out what's the biggest number we can send. If

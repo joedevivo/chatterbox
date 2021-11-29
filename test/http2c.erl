@@ -53,7 +53,7 @@ start_link() ->
 
 %% Three API levels:
 %% 1: lowest: Send a frame or set of frames
-%% 2: middle: Here's some hastily constucted frames, do some setup of frame header flags.
+%% 2: middle: Here's some hastily constructed frames, do some setup of frame header flags.
 %% 3: highest: a semantic http request: **NOT IMPLEMENTED HERE*
 
 %% send_binary/2 is the lowest level API. It just puts bits on the
@@ -64,8 +64,8 @@ send_binary(Pid, Binary) ->
 
 %% send_unaltered_frames is the raw version of the middle level. You
 %% can put frames directly as constructed on the wire. This is
-%% desgined for testing error conditions by giving you the freedom to
-%% create bad sets of frames. This will problably only be exported
+%% designed for testing error conditions by giving you the freedom to
+%% create bad sets of frames. This will probably only be exported
 %% ifdef(TEST)
 -spec send_unaltered_frames(pid(), [h2_frame:frame()]) -> ok.
 send_unaltered_frames(Pid, Frames) ->
