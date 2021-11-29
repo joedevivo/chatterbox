@@ -79,7 +79,7 @@
               | ?FLAG_PADDED
               | ?FLAG_PRIORITY.
 
-%% These are macros because they're used in guards alot
+%% These are macros because they're used in guards a lot
 -define(IS_FLAG(Flags, Flag), Flags band Flag =:= Flag).
 -define(NOT_FLAG(Flags, Flag), Flags band Flag =/= Flag).
 

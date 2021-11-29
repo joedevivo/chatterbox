@@ -1057,7 +1057,7 @@ handle_event(_, {send_body, StreamId, Body, Opts},
               }};
         idle ->
             %% Sending DATA frames on an idle stream?  It's a
-            %% Connection level protocol error on reciept, but If we
+            %% Connection level protocol error on receipt, but If we
             %% have no active stream what can we even do?
             {keep_state, Conn};
         closed ->
