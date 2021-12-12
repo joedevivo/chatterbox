@@ -5,11 +5,17 @@
 %% Start/Stop API
 -export([
          start_client/2,
+         start_client/3,
          start_client/5,
+         start_client/6,
          start_client_link/2,
+         start_client_link/3,
          start_client_link/5,
+         start_client_link/6,
          start_ssl_upgrade_link/5,
+         start_ssl_upgrade_link/6,
          start_server_link/3,
+         start_server_link/4,
          become/1,
          become/2,
          become/3,
@@ -82,6 +88,7 @@
 -record(connection, {
           type = undefined :: client | server | undefined,
           ssl_options = [],
+          statem_options = [] :: [gen_statem:start_opt()],
           listen_ref :: non_neg_integer() | undefined,
           socket = undefined :: sock:socket(),
           peer_settings = #settings{} :: settings(),
@@ -122,7 +129,20 @@
                        ) ->
                                {ok, pid()} | ignore | {error, term()}.
 start_client_link(Transport, Host, Port, SSLOptions, Http2Settings) ->
-    gen_statem:start_link(?MODULE, {client, Transport, Host, Port, SSLOptions, Http2Settings}, []).
+    start_client_link(Transport, Host, Port, SSLOptions, Http2Settings, []).
+
+-spec start_client_link(gen_tcp | ssl,
+                        inet:ip_address() | inet:hostname(),
+                        inet:port_number(),
+                        [ssl:ssl_option()],
+                        settings(),
+                        [gen_statem:start_opt()]
+                       ) ->
+                               {ok, pid()} | ignore | {error, term()}.
+start_client_link(Transport, Host, Port, SSLOptions, Http2Settings, StatemOptions) ->
+    gen_statem:start_link(?MODULE,
+                          {client, Transport, Host, Port, SSLOptions, Http2Settings},
+                          StatemOptions).
 
 -spec start_client(gen_tcp | ssl,
                         inet:ip_address() | inet:hostname(),
@@ -132,21 +152,54 @@ start_client_link(Transport, Host, Port, SSLOptions, Http2Settings) ->
                        ) ->
                                {ok, pid()} | ignore | {error, term()}.
 start_client(Transport, Host, Port, SSLOptions, Http2Settings) ->
-    gen_statem:start(?MODULE, {client, Transport, Host, Port, SSLOptions, Http2Settings}, []).
+    start_client(Transport, Host, Port, SSLOptions, Http2Settings, []).
+
+-spec start_client(gen_tcp | ssl,
+                   inet:ip_address() | inet:hostname(),
+                   inet:port_number(),
+                   [ssl:ssl_option()],
+                   settings(),
+                   [gen_statem:start_opt()]
+                  ) ->
+                               {ok, pid()} | ignore | {error, term()}.
+start_client(Transport, Host, Port, SSLOptions, Http2Settings, StatemOptions) ->
+    gen_statem:start(?MODULE,
+                     {client, Transport, Host, Port, SSLOptions, Http2Settings},
+                     StatemOptions).
 
 -spec start_client_link(socket(),
                         settings()
                        ) ->
                                {ok, pid()} | ignore | {error, term()}.
 start_client_link({Transport, Socket}, Http2Settings) ->
-    gen_statem:start_link(?MODULE, {client, {Transport, Socket}, Http2Settings}, []).
+    start_client_link({Transport, Socket}, Http2Settings, []).
 
--spec start_client(socket(),
-                        settings()
+-spec start_client_link(socket(),
+                        settings(),
+                        [gen_statem:start_opt()]
                        ) ->
                                {ok, pid()} | ignore | {error, term()}.
+start_client_link({Transport, Socket}, Http2Settings, StatemOptions) ->
+    gen_statem:start_link(?MODULE,
+                          {client, {Transport, Socket}, Http2Settings},
+                          StatemOptions).
+
+-spec start_client(socket(),
+                   settings()
+                  ) ->
+                               {ok, pid()} | ignore | {error, term()}.
 start_client({Transport, Socket}, Http2Settings) ->
-    gen_statem:start(?MODULE, {client, {Transport, Socket}, Http2Settings}, []).
+    start_client({Transport, Socket}, Http2Settings, []).
+
+-spec start_client(socket(),
+                   settings(),
+                   [gen_statem:start_opt()]
+                  ) ->
+                               {ok, pid()} | ignore | {error, term()}.
+start_client({Transport, Socket}, Http2Settings, StatemOptions) ->
+    gen_statem:start(?MODULE,
+                     {client, {Transport, Socket}, Http2Settings},
+                     StatemOptions).
 
 -spec start_ssl_upgrade_link(inet:ip_address() | inet:hostname(),
                              inet:port_number(),
@@ -156,14 +209,37 @@ start_client({Transport, Socket}, Http2Settings) ->
                             ) ->
                                     {ok, pid()} | ignore | {error, term()}.
 start_ssl_upgrade_link(Host, Port, InitialMessage, SSLOptions, Http2Settings) ->
-    gen_statem:start_link(?MODULE, {client_ssl_upgrade, Host, Port, InitialMessage, SSLOptions, Http2Settings}, []).
+    start_ssl_upgrade_link(Host, Port, InitialMessage, SSLOptions, Http2Settings, []).
+
+-spec start_ssl_upgrade_link(inet:ip_address() | inet:hostname(),
+                             inet:port_number(),
+                             binary(),
+                             [ssl:ssl_option()],
+                             settings(),
+                             [gen_statem:start_opt()]
+                            ) ->
+                                    {ok, pid()} | ignore | {error, term()}.
+start_ssl_upgrade_link(Host, Port, InitialMessage, SSLOptions, Http2Settings, StatemOptions) ->
+    gen_statem:start_link(?MODULE,
+                          {client_ssl_upgrade, Host, Port, InitialMessage, SSLOptions, Http2Settings},
+                          StatemOptions).
 
 -spec start_server_link(socket(),
                         [ssl:ssl_option()],
                         settings()) ->
                                {ok, pid()} | ignore | {error, term()}.
 start_server_link({Transport, ListenSocket}, SSLOptions, Http2Settings) ->
-    gen_statem:start_link(?MODULE, {server, {Transport, ListenSocket}, SSLOptions, Http2Settings}, []).
+    start_server_link({Transport, ListenSocket}, SSLOptions, Http2Settings, []).
+
+-spec start_server_link(socket(),
+                        [ssl:ssl_option()],
+                        settings(),
+                        [gen_statem:start_opt()]) ->
+                               {ok, pid()} | ignore | {error, term()}.
+start_server_link({Transport, ListenSocket}, SSLOptions, Http2Settings, StatemOptions) ->
+    gen_statem:start_link(?MODULE,
+                          {server, {Transport, ListenSocket}, SSLOptions, Http2Settings},
+                          StatemOptions).
 
 -spec become(socket()) -> no_return().
 become(Socket) ->
@@ -185,7 +261,8 @@ become({Transport, Socket}, Http2Settings, ConnectionSettings) ->
                                   maps:get(stream_callback_opts, ConnectionSettings,
                                            application:get_env(chatterbox, stream_callback_opts, [])),
                               streams = h2_stream_set:new(server),
-                              socket = {Transport, Socket}
+                              socket = {Transport, Socket},
+                              statem_options = application:get_env(chatterbox, statem_server_options, [])
                              }) of
         {_, handshake, NewState} ->
             gen_statem:enter_loop(?MODULE,
@@ -214,7 +291,8 @@ init({client, {Transport, Socket}, Http2Settings}) ->
            streams = h2_stream_set:new(client),
            socket = {Transport, Socket},
            next_available_stream_id=1,
-           flow_control=application:get_env(chatterbox, client_flow_control, auto)
+           flow_control=application:get_env(chatterbox, client_flow_control, auto),
+           statem_options=application:get_env(chatterbox, statem_client_options, [])
           },
     {ok,
      handshake,
@@ -660,7 +738,8 @@ route_frame({#frame_header{type=?HEADERS}=FH, _Payload}=Frame,
                       Conn#connection.socket,
                       (Conn#connection.peer_settings)#settings.initial_window_size,
                       (Conn#connection.self_settings)#settings.initial_window_size,
-                      Streams) of
+                      Streams,
+                      Conn#connection.statem_options) of
                     {error, ErrorCode, NewStream} ->
                         rst_stream(NewStream, ErrorCode, Conn),
                         {none, Conn};
@@ -769,7 +848,8 @@ route_frame({H=#frame_header{
           Conn#connection.socket,
           (Conn#connection.peer_settings)#settings.initial_window_size,
           (Conn#connection.self_settings)#settings.initial_window_size,
-          Streams),
+          Streams,
+          Conn#connection.statem_options),
 
     Continuation = #continuation_state{
                       stream_id=StreamId,
@@ -1172,7 +1252,8 @@ handle_event({call, From}, {new_stream, NotifyPid},
               Conn#connection.socket,
               Conn#connection.peer_settings#settings.initial_window_size,
               Conn#connection.self_settings#settings.initial_window_size,
-              Streams)
+              Streams,
+              Conn#connection.statem_options)
         of
             {error, Code, _NewStream} ->
                 %% TODO: probably want to have events like this available for metrics
@@ -1683,7 +1764,8 @@ send_request(NextId, NotifyPid, Conn, Streams, Headers, Body) ->
             Conn#connection.socket,
             Conn#connection.peer_settings#settings.initial_window_size,
             Conn#connection.self_settings#settings.initial_window_size,
-            Streams)
+            Streams,
+            Conn#connection.statem_options)
     of
         {error, Code, _NewStream} ->
             %% error creating new stream
