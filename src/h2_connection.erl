@@ -587,6 +587,10 @@ route_frame({H, _Payload},
                         ok;
                     NewIWS ->
                         Delta = NewIWS - OldIWS,
+                        case Delta > 0 of
+                            true -> send_window_update(self(), Delta);
+                            false -> ok
+                        end,
                         h2_stream_set:update_all_recv_windows(Delta, Streams)
                 end,
 
