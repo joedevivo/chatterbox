@@ -586,7 +586,7 @@ route_frame({H, _Payload},
                     undefined ->
                         ok;
                     NewIWS ->
-                        Delta = OldIWS - NewIWS,
+                        Delta = NewIWS - OldIWS,
                         h2_stream_set:update_all_recv_windows(Delta, Streams)
                 end,
 
