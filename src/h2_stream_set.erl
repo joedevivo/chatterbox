@@ -575,7 +575,7 @@ update_all_recv_windows_subset(Delta, PeerSubset) ->
 update_all_send_windows(Delta, Streams) ->
     Streams#stream_set{
       theirs=update_all_send_windows_subset(Delta, Streams#stream_set.theirs),
-      mine=update_all_recv_windows_subset(Delta, Streams#stream_set.mine)
+      mine=update_all_send_windows_subset(Delta, Streams#stream_set.mine)
      }.
 
 update_all_send_windows_subset(Delta, PeerSubset) ->
