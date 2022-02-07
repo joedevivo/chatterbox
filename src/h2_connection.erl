@@ -656,7 +656,9 @@ route_frame(F={H=#frame_header{
                     recv_data(Stream, F),
                     {next_state,
                      connected,
-                     Conn};
+                     Conn#connection{
+                       recv_window_size=CRWS-L
+                      }};
                 %% Either
                 %% {false, auto, true} or
                 %% {false, manual, _DoesntMatter}
