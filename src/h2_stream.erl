@@ -719,7 +719,7 @@ send_trailers(State, Trailers, Stream=#stream_state{connection=Pid,
     h2_connection:actually_send_trailers(Pid, StreamId, Trailers),
     case State of
         half_closed_remote ->
-            {next_state, closed, Stream};
+            {next_state, closed, Stream, 0};
         open ->
             {next_state, half_closed_local, Stream}
     end.
