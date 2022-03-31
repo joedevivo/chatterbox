@@ -989,11 +989,16 @@ handle_event(_, {send_window_update, Size},
                 recv_window_size=CRWS,
                 socket=Socket
                 }=Conn) ->
-    ok = h2_frame_window_update:send(Socket, Size, 0),
-    {keep_state,
-     Conn#connection{
-       recv_window_size=CRWS+Size
-      }};
+    try
+        ok = h2_frame_window_update:send(Socket, Size, 0),
+        {keep_state,
+            Conn#connection{
+            recv_window_size=CRWS+Size
+        }}
+    catch
+        _:_  ->
+            handle_socket_error(failed_to_send_window_update, Conn)
+    end;
 handle_event(_, {update_settings, Http2Settings},
              #connection{}=Conn) ->
     {keep_state,
