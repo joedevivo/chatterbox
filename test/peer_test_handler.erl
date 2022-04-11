@@ -14,7 +14,7 @@
 
 -record(state, {conn_pid :: pid(),
                 stream_id :: stream_id(),
-                peer = undefined :: undefined | {inet:ip_addres(),
+                peer = undefined :: undefined | {inet:ip_address(),
                                                  inet:port_number()}
                }).
 

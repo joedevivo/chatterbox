@@ -75,9 +75,8 @@ start(Config) ->
     {ok, _RanchPid} =
         ranch:start_listener(
           chatterbox_ranch_protocol,
-          10,
           ranch_ssl,
-          [{port, 8081}|proplists:get_value(ssl_options, Settings)],
+          #{ socket_opts => [{port, 8081}|proplists:get_value(ssl_options, Settings)] },
           chatterbox_ranch_protocol,
           []),
     Config.

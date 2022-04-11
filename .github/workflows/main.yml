@@ -15,15 +15,16 @@ jobs:
 
     strategy:
       matrix:
-        otp_version: ['23.2.1', '22.3.4.2']
+        otp_version: ['24', '23', '22']
         os: [ubuntu-latest]
 
     steps:
     - uses: actions/checkout@v2
 
-    - uses: bajankristof/setup-erlang@master
+    - uses: erlef/setup-beam@v1
       with:
-        otp-version: ${{ matrix.otp_version }}
+        otp-version: ${{matrix.otp_version}}
+        rebar3-version: '3.16'
 
     - name: Compile
       run: rebar3 compile
@@ -32,7 +33,9 @@ jobs:
     - name: Tests
       run: rebar3 ct --cover
     - name: Dialyzer
-      run: rebar3 dialyzer
+      run: rebar3 as check dialyzer
+    - name: Xref
+      run: rebar3 as check xref
     # - name: Covertool
     #   run: rebar3 covertool generate
 
