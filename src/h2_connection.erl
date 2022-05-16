@@ -39,7 +39,8 @@
          get_streams/1,
          send_window_update/2,
          update_settings/2,
-         send_frame/2
+         send_frame/2,
+         rst_stream/3
         ]).
 
 %% gen_statem callbacks
@@ -202,7 +203,7 @@ become({Transport, Socket}, Http2Settings, ConnectionSettings) ->
                                   NewState);
         {_, closing, _NewState} ->
             sock:close({Transport, Socket}),
-            exit(invalid_preface)
+            exit(normal)
     end.
 
 %% Init callback
@@ -297,6 +298,11 @@ send_headers(Pid, StreamId, Headers) ->
 -spec send_headers(pid(), stream_id(), hpack:headers(), send_opts()) -> ok.
 send_headers(Pid, StreamId, Headers, Opts) ->
     gen_statem:cast(Pid, {send_headers, StreamId, Headers, Opts}),
+    ok.
+
+-spec rst_stream(pid(), stream_id(), error_code()) -> ok.
+rst_stream(Pid, StreamId, ErrorCode) ->
+    gen_statem:cast(Pid, {rst_stream, StreamId, ErrorCode}),
     ok.
 
 -spec send_trailers(pid(), stream_id(), hpack:headers()) -> ok.
@@ -637,7 +643,7 @@ route_frame(F={H=#frame_header{
               L > 0
              } of
                 {true, _, _} ->
-                    rst_stream(Stream,
+                    rst_stream_(Stream,
                                ?FLOW_CONTROL_ERROR,
                                Conn);
                 %% If flow control is set to auto, and L > 0, send
@@ -705,7 +711,7 @@ route_frame({#frame_header{type=?HEADERS}=FH, _Payload}=Frame,
                       Conn#connection.type,
                       Streams) of
                     {error, ErrorCode, NewStream} ->
-                        rst_stream(NewStream, ErrorCode, Conn),
+                        rst_stream_(NewStream, ErrorCode, Conn),
                         {none, Conn};
                     {_, NewStreams} ->
                         {headers, Conn#connection{streams=NewStreams}}
@@ -911,14 +917,14 @@ route_frame(
         idle ->
             go_away(?PROTOCOL_ERROR, Conn);
         closed ->
-            rst_stream(Stream, ?STREAM_CLOSED, Conn);
+            rst_stream_(Stream, ?STREAM_CLOSED, Conn);
         active ->
             SWS = Conn#connection.send_window_size,
             NewSSWS = h2_stream_set:send_window_size(Stream)+WSI,
 
             case NewSSWS > 2147483647 of
                 true ->
-                    rst_stream(Stream, ?FLOW_CONTROL_ERROR, Conn);
+                    rst_stream_(Stream, ?FLOW_CONTROL_ERROR, Conn);
                 false ->
                     {RemainingSendWindow, NewStreams}
                         = h2_stream_set:send_what_we_can(
@@ -1016,12 +1022,20 @@ handle_event(_, {actually_send_trailers, StreamId, Trailers}, Conn=#connection{e
                                    (Conn#connection.peer_settings)#settings.max_frame_size,
                                    true
                                   ),
-   
+
     [sock:send(Socket, h2_frame:to_binary(Frame)) || Frame <- FramesToSend],
     {keep_state,
      Conn#connection{
        encode_context=NewContext
       }};
+handle_event(_, {rst_stream, StreamId, ErrorCode},
+             #connection{
+                streams = Streams,
+                socket = _Socket
+               }=Conn
+            ) ->
+    Stream = h2_stream_set:get(StreamId, Streams),
+    rst_stream_(Stream, ErrorCode, Conn);
 handle_event(_, {send_trailers, StreamId, Headers, Opts},
              #connection{
                 streams = Streams,
@@ -1092,7 +1106,6 @@ handle_event(_, {send_body, StreamId, Body, Opts},
         closed ->
             {keep_state, Conn}
     end;
-
 handle_event(_, {send_request, NotifyPid, Headers, Body},
         #connection{
             streams=Streams,
@@ -1107,7 +1120,6 @@ handle_event(_, {send_request, NotifyPid, Headers, Body},
         {error, _Code} ->
             {keep_state, Conn}
     end;
-
 handle_event(_, {send_promise, StreamId, NewStreamId, Headers},
              #connection{
                 streams=Streams,
@@ -1140,7 +1152,6 @@ handle_event(_, {send_promise, StreamId, NewStreamId, Headers},
         _ ->
             {keep_state, Conn}
     end;
-
 handle_event(_, {check_settings_ack, {Ref, NewSettings}},
              #connection{
                 settings_sent=SS
@@ -1417,17 +1428,17 @@ go_away(ErrorCode,
     gen_statem:cast(self(), io_lib:format("GO_AWAY: ErrorCode ~p", [ErrorCode])),
     {next_state, closing, Conn}.
 
-%% rst_stream/3 looks for a running process for the stream. If it
+%% rst_stream_/3 looks for a running process for the stream. If it
 %% finds one, it delegates sending the rst_stream frame to it, but if
 %% it doesn't, it seems like a waste to spawn one just to kill it
 %% after sending that frame, so we send it from here.
--spec rst_stream(
+-spec rst_stream_(
         h2_stream_set:stream(),
         error_code(),
         connection()
        ) ->
                         {next_state, connected, connection()}.
-rst_stream(Stream, ErrorCode, Conn) ->
+rst_stream_(Stream, ErrorCode, Conn) ->
     case h2_stream_set:type(Stream) of
         active ->
             %% Can this ever be undefined?
@@ -1607,7 +1618,7 @@ handle_socket_data(Data,
             go_away(Code, NewConn);
         {error, StreamId, Code, Rem} ->
             Stream = h2_stream_set:get(StreamId, Conn#connection.streams),
-            rst_stream(Stream, Code, NewConn),
+            rst_stream_(Stream, Code, NewConn),
             handle_socket_data(Rem, NewConn)
     end.
 
@@ -1659,7 +1670,7 @@ maybe_hpack(Continuation, Conn)
                          ),
                     recv_pp(Promised, Headers);
                 {trailers, false} ->
-                    rst_stream(Stream, ?PROTOCOL_ERROR, Conn);
+                    rst_stream_(Stream, ?PROTOCOL_ERROR, Conn);
                 _ -> %% headers or trailers!
                     recv_h(Stream, Conn, Headers)
             end,
@@ -1698,12 +1709,12 @@ recv_h(Stream,
             h2_stream:send_event(Pid, {recv_h, Headers});
         closed ->
             %% If the stream is closed, there's no running FSM
-            rst_stream(Stream, ?STREAM_CLOSED, Conn);
+            rst_stream_(Stream, ?STREAM_CLOSED, Conn);
         idle ->
             %% If we're calling this function, we've already activated
             %% a stream FSM (probably). On the off chance we didn't,
             %% we'll throw this
-            rst_stream(Stream, ?STREAM_CLOSED, Conn)
+            rst_stream_(Stream, ?STREAM_CLOSED, Conn)
     end.
 
 -spec send_h(
@@ -1742,9 +1753,9 @@ recv_es(Stream, Conn) ->
             Pid = h2_stream_set:pid(Stream),
             h2_stream:send_event(Pid, recv_es);
         closed ->
-            rst_stream(Stream, ?STREAM_CLOSED, Conn);
+            rst_stream_(Stream, ?STREAM_CLOSED, Conn);
         idle ->
-            rst_stream(Stream, ?STREAM_CLOSED, Conn)
+            rst_stream_(Stream, ?STREAM_CLOSED, Conn)
     end.
 
 -spec recv_pp(h2_stream_set:stream(),
