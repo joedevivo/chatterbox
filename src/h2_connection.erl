@@ -106,6 +106,8 @@
           garbage_on_end = false :: boolean()
 }).
 
+-define(HIBERNATE_AFTER_DEFAULT_MS, infinity).
+
 -type connection() :: #connection{}.
 
 -type send_option() :: {send_end_stream, boolean()}.
@@ -128,7 +130,8 @@
                        ) ->
                                {ok, pid()} | ignore | {error, term()}.
 start_client_link(Transport, Host, Port, SSLOptions, Http2Settings, ConnectionSettings) ->
-    gen_statem:start_link(?MODULE, {client, Transport, Host, Port, SSLOptions, Http2Settings, ConnectionSettings}, []).
+    HibernateAfterTimeout = maps:get(hibernate_after, ConnectionSettings, ?HIBERNATE_AFTER_DEFAULT_MS),
+    gen_statem:start_link(?MODULE, {client, Transport, Host, Port, SSLOptions, Http2Settings, ConnectionSettings}, [{hibernate_after, HibernateAfterTimeout}]).
 
 -spec start_client(gen_tcp | ssl,
                         inet:ip_address() | inet:hostname(),
@@ -139,21 +142,24 @@ start_client_link(Transport, Host, Port, SSLOptions, Http2Settings, ConnectionSe
                        ) ->
                                {ok, pid()} | ignore | {error, term()}.
 start_client(Transport, Host, Port, SSLOptions, Http2Settings, ConnectionSettings) ->
-    gen_statem:start(?MODULE, {client, Transport, Host, Port, SSLOptions, Http2Settings, ConnectionSettings}, []).
+    HibernateAfterTimeout = maps:get(hibernate_after, ConnectionSettings, ?HIBERNATE_AFTER_DEFAULT_MS),
+    gen_statem:start(?MODULE, {client, Transport, Host, Port, SSLOptions, Http2Settings, ConnectionSettings}, [{hibernate_after, HibernateAfterTimeout}]).
 
 -spec start_client_link(socket(),
                         settings()
                        ) ->
                                {ok, pid()} | ignore | {error, term()}.
 start_client_link({Transport, Socket}, Http2Settings) ->
-    gen_statem:start_link(?MODULE, {client, {Transport, Socket}, Http2Settings}, []).
+    HibernateAfterTimeout = ?HIBERNATE_AFTER_DEFAULT_MS,
+    gen_statem:start_link(?MODULE, {client, {Transport, Socket}, Http2Settings}, [{hibernate_after, HibernateAfterTimeout}]).
 
 -spec start_client(socket(),
                         settings()
                        ) ->
                                {ok, pid()} | ignore | {error, term()}.
 start_client({Transport, Socket}, Http2Settings) ->
-    gen_statem:start(?MODULE, {client, {Transport, Socket}, Http2Settings}, []).
+    HibernateAfterTimeout = ?HIBERNATE_AFTER_DEFAULT_MS,
+    gen_statem:start(?MODULE, {client, {Transport, Socket}, Http2Settings}, [{hibernate_after, HibernateAfterTimeout}]).
 
 -spec start_ssl_upgrade_link(inet:ip_address() | inet:hostname(),
                              inet:port_number(),
@@ -164,14 +170,16 @@ start_client({Transport, Socket}, Http2Settings) ->
                             ) ->
                                     {ok, pid()} | ignore | {error, term()}.
 start_ssl_upgrade_link(Host, Port, InitialMessage, SSLOptions, Http2Settings, ConnectionSettings) ->
-    gen_statem:start_link(?MODULE, {client_ssl_upgrade, Host, Port, InitialMessage, SSLOptions, Http2Settings, ConnectionSettings}, []).
+    HibernateAfterTimeout = maps:get(hibernate_after, ConnectionSettings, ?HIBERNATE_AFTER_DEFAULT_MS),
+    gen_statem:start_link(?MODULE, {client_ssl_upgrade, Host, Port, InitialMessage, SSLOptions, Http2Settings, ConnectionSettings}, [{hibernate_after, HibernateAfterTimeout}]).
 
 -spec start_server_link(socket(),
                         [ssl:tls_option()],
                         settings()) ->
                                {ok, pid()} | ignore | {error, term()}.
 start_server_link({Transport, ListenSocket}, SSLOptions, Http2Settings) ->
-    gen_statem:start_link(?MODULE, {server, {Transport, ListenSocket}, SSLOptions, Http2Settings}, []).
+    HibernateAfterTimeout = ?HIBERNATE_AFTER_DEFAULT_MS,
+    gen_statem:start_link(?MODULE, {server, {Transport, ListenSocket}, SSLOptions, Http2Settings}, [{hibernate_after, HibernateAfterTimeout}]).
 
 -spec become(socket()) -> no_return().
 become(Socket) ->
