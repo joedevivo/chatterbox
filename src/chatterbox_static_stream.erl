@@ -9,7 +9,8 @@
          on_receive_headers/2,
          on_send_push_promise/2,
          on_receive_data/2,
-         on_end_stream/1
+         on_end_stream/1,
+         terminate/1
         ]).
 
 -record(cb_static, {
@@ -146,6 +147,9 @@ on_end_stream(State=#cb_static{connection_pid=ConnPid,
     end,
 
     {ok, State}.
+
+terminate(_State) ->
+    ok.
 
 %% Internal
 
