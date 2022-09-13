@@ -594,7 +594,11 @@ route_frame({H, _Payload},
                     undefined ->
                         ok;
                     NewIWS ->
-                        Delta = OldIWS - NewIWS,
+                        Delta = NewIWS - OldIWS,
+                        case Delta > 0 of
+                            true -> send_window_update(self(), Delta);
+                            false -> ok
+                        end,
                         h2_stream_set:update_all_recv_windows(Delta, Streams)
                 end,
 
@@ -660,7 +664,9 @@ route_frame(F={H=#frame_header{
                     recv_data(Stream, F),
                     {next_state,
                      connected,
-                     Conn};
+                     Conn#connection{
+                       recv_window_size=CRWS-L
+                      }};
                 %% Either
                 %% {false, auto, true} or
                 %% {false, manual, _DoesntMatter}
