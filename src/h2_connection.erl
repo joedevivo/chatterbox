@@ -1564,7 +1564,7 @@ handle_socket_data(Data,
                       buffer=Buffer
                      }=Conn) ->
     More =
-        case sock:recv(Socket, 0, 1) of %% fail fast
+        case sock:recv(Socket, 0, 0) of %% fail fast
             {ok, Rest} ->
                 Rest;
             %% It's not really an error, it's what we want
