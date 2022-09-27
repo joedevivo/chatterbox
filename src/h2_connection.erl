@@ -216,9 +216,14 @@ become({Transport, Socket}, Http2Settings, ConnectionSettings) ->
 %% Init callback
 init({client, Transport, Host, Port, SSLOptions, Http2Settings, ConnectionSettings}) ->
     ConnectTimeout = maps:get(connect_timeout, ConnectionSettings, 5000),
+    TcpUserTimeout = maps:get(tcp_user_timeout, ConnectionSettings, 0),
     case Transport:connect(Host, Port, client_options(Transport, SSLOptions), ConnectTimeout) of
         {ok, Socket} ->
             ok = sock:setopts({Transport, Socket}, [{packet, raw}, binary, {active, once}]),
+            case TcpUserTimeout of
+                0 -> ok;
+                _ -> sock:setopts({Transport, Socket}, [{raw,6,18,<<TcpUserTimeout:32/native>>}])
+            end,
             Transport:send(Socket, <<?PREFACE>>),
             InitialState =
                 #connection{
@@ -1627,7 +1632,7 @@ handle_socket_closed(Conn) ->
     {stop, normal, Conn}.
 
 handle_socket_error(Reason, Conn) ->
-    {stop, Reason, Conn}.
+    {stop, {shutdown, Reason}, Conn}.
 
 socksend(#connection{
             socket=Socket
