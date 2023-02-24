@@ -217,7 +217,8 @@ become({Transport, Socket}, Http2Settings, ConnectionSettings) ->
 init({client, Transport, Host, Port, SSLOptions, Http2Settings, ConnectionSettings}) ->
     ConnectTimeout = maps:get(connect_timeout, ConnectionSettings, 5000),
     TcpUserTimeout = maps:get(tcp_user_timeout, ConnectionSettings, 0),
-    case Transport:connect(Host, Port, client_options(Transport, SSLOptions), ConnectTimeout) of
+    SocketOptions = maps:get(socket_options, ConnectionSettings, []),
+    case Transport:connect(Host, Port, client_options(Transport, SSLOptions, SocketOptions), ConnectTimeout) of
         {ok, Socket} ->
             ok = sock:setopts({Transport, Socket}, [{packet, raw}, binary, {active, once}]),
             case TcpUserTimeout of
@@ -245,10 +246,11 @@ init({client, Transport, Host, Port, SSLOptions, Http2Settings, ConnectionSettin
     end;
 init({client_ssl_upgrade, Host, Port, InitialMessage, SSLOptions, Http2Settings, ConnectionSettings}) ->
     ConnectTimeout = maps:get(connect_timeout, ConnectionSettings, 5000),
+    SocketOptions = maps:get(socket_options, ConnectionSettings, []),
     case gen_tcp:connect(Host, Port, [{active, false}], ConnectTimeout) of
         {ok, TCP} ->
             gen_tcp:send(TCP, InitialMessage),
-            case ssl:connect(TCP, client_options(ssl, SSLOptions)) of
+            case ssl:connect(TCP, client_options(ssl, SSLOptions, SocketOptions)) of
                 {ok, Socket} ->
                     ok = ssl:setopts(Socket, [{packet, raw}, binary, {active, once}]),
                     ssl:send(Socket, <<?PREFACE>>),
@@ -1490,18 +1492,22 @@ send_ack_timeout(SS) ->
 active_once(Socket) ->
     sock:setopts(Socket, [{active, once}]).
 
-client_options(Transport, SSLOptions) ->
-    ClientSocketOptions = [
+client_options(Transport, SSLOptions, SocketOptions) ->
+    DefaultSocketOptions = [
                            binary,
                            {packet, raw},
                            {active, false}
                           ],
+    ClientSocketOptions = merge_options(DefaultSocketOptions, SocketOptions),
     case Transport of
         ssl ->
             [{alpn_advertised_protocols, [<<"h2">>]}|ClientSocketOptions ++ SSLOptions];
         gen_tcp ->
             ClientSocketOptions
     end.
+
+merge_options(A, B) ->
+    proplists:from_map(maps:merge(proplists:to_map(A), proplists:to_map(B))).
 
 start_http2_server(
   Http2Settings,
