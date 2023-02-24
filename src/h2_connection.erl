@@ -1494,7 +1494,7 @@ active_once(Socket) ->
 
 client_options(Transport, SSLOptions, SocketOptions) ->
     DefaultSocketOptions = [
-                           binary,
+                           {mode, binary},
                            {packet, raw},
                            {active, false}
                           ],
