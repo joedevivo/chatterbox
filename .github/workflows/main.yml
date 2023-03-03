@@ -15,7 +15,7 @@ jobs:
 
     strategy:
       matrix:
-        otp_version: ['24', '23', '22']
+        otp_version: ['25.2.3', '24.3.4', '23.3.4']
         os: [ubuntu-latest]
 
     steps:
@@ -24,8 +24,8 @@ jobs:
     - uses: erlef/setup-beam@v1
       with:
         otp-version: ${{matrix.otp_version}}
-        rebar3-version: '3.16'
-
+        rebar3-version: '3.19'
+        version-type: 'strict'
     - name: Compile
       run: rebar3 compile
     - name: Unit Tests
