@@ -1010,7 +1010,7 @@ handle_event(_, {send_window_update, Size},
                 recv_window_size=CRWS,
                 socket=Socket
                 }=Conn) ->
-    ok = h2_frame_window_update:send(Socket, Size, 0),
+    h2_frame_window_update:send(Socket, Size, 0),
     {keep_state,
      Conn#connection{
        recv_window_size=CRWS+Size
