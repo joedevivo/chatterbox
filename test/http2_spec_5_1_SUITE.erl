@@ -8,7 +8,8 @@
 all() ->
     [
      sends_rst_stream_to_idle,
-     half_closed_remote_sends_headers,
+     %half_closed_remote_sends_headers,
+     closed_receives_headers,
      sends_window_update_to_idle,
      client_sends_even_stream_id,
      exceeds_max_concurrent_streams,
@@ -245,6 +246,59 @@ half_closed_remote_sends_headers(_Config) ->
              (_) -> false
           end,
           Resp),
+    ?assert(length(RstStreams) > 0),
+    {RstStreamH, RstStream} = hd(RstStreams),
+    ?assertEqual(?RST_STREAM, (RstStreamH#frame_header.type)),
+    ?assertEqual(?STREAM_CLOSED, (h2_frame_rst_stream:error_code(RstStream))),
+    ok.
+
+closed_receives_headers(_Config) ->
+    {ok, Client} = http2c:start_link(),
+    RequestHeaders =
+        [
+         {<<":method">>, <<"GET">>},
+         {<<":path">>, <<"/index.html">>},
+         {<<":scheme">>, <<"https">>},
+         {<<":authority">>, <<"localhost:8080">>},
+         {<<"accept">>, <<"*/*">>},
+         {<<"accept-encoding">>, <<"gzip, deflate">>},
+         {<<"user-agent">>, <<"chattercli/0.0.1 :D">>}
+        ],
+
+    {H1, EC} =
+        h2_frame_headers:to_frames(1,
+                                   RequestHeaders,
+                                   hpack:new_context(),
+                                   16384,
+                                   true),
+
+    http2c:send_unaltered_frames(Client, H1),
+
+    Resp = http2c:wait_for_n_frames(Client, 1, 2),
+    ct:pal("Resp: ~p", [Resp]),
+
+    %% The stream should be closed now
+
+    {H2, _EC2} =
+        h2_frame_headers:to_frames(1,
+                                   RequestHeaders,
+                                   EC,
+                                   16384,
+                                   true),
+
+    http2c:send_unaltered_frames(Client, H2),
+    RstResp = http2c:wait_for_n_frames(Client, 1, 1),
+    ct:pal("RstResp: ~p", [RstResp]),
+    ?assertEqual(true, (length(RstResp) >= 1)),
+
+    %% We need to find if one of these things are a RstStream
+    RstStreams =
+        lists:filter(
+          fun({#frame_header{type=?RST_STREAM},_}) ->
+                  true;
+             (_) -> false
+          end,
+          RstResp),
     ?assert(length(RstStreams) > 0),
     {RstStreamH, RstStream} = hd(RstStreams),
     ?assertEqual(?RST_STREAM, (RstStreamH#frame_header.type)),

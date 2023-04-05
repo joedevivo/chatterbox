@@ -97,6 +97,10 @@
             CallbackState :: callback_state()) ->
     {ok, NewState :: callback_state()}.
 
+-callback terminate(
+            CallbackState :: callback_state()) ->
+    any().
+
 %% Public API
 -spec start_link(
         StreamId :: stream_id(),
@@ -724,7 +728,7 @@ send_trailers(State, Trailers, Stream=#stream_state{connection=Pid,
     h2_connection:actually_send_trailers(Pid, StreamId, Trailers),
     case State of
         half_closed_remote ->
-            {next_state, closed, Stream};
+            {next_state, closed, Stream, 0};
         open ->
             {next_state, half_closed_local, Stream}
     end.
@@ -769,9 +773,13 @@ handle_event(_, _Event, State) ->
 code_change(_OldVsn, StateName, State, _Extra) ->
     {ok, StateName, State}.
 
-terminate(normal, _StateName, _State) ->
+terminate(normal, _StateName, _State=#stream_state{callback_mod=CB,
+                                                  callback_state=CallbackState}) ->
+    callback(CB, terminate, [], CallbackState),
     ok;
-terminate(_Reason, _StateName, _State) ->
+terminate(_Reason, _StateName, _State=#stream_state{callback_mod=CB,
+                                                  callback_state=CallbackState}) ->
+    callback(CB, terminate, [], CallbackState),
     ok.
 
 -spec rst_stream_(error_code(), state()) ->

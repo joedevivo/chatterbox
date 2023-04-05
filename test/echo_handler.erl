@@ -9,7 +9,8 @@
          on_receive_headers/2,
          on_send_push_promise/2,
          on_receive_data/2,
-         on_end_stream/1
+         on_end_stream/1,
+         terminate/1
         ]).
 
 -record(state, {conn_pid :: pid(),
@@ -50,3 +51,6 @@ on_end_stream(State=#state{conn_pid=ConnPid,
     h2_connection:send_headers(ConnPid, StreamId, ResponseHeaders),
     h2_connection:send_body(ConnPid, StreamId, Buffer),
     {ok, State}.
+
+terminate(_State) ->
+    ok.
