@@ -103,7 +103,6 @@
           stream_callback_opts :: list() | undefined,
           buffer = empty :: empty | {binary, binary()} | {frame, h2_frame:header(), binary()},
           continuation = undefined :: undefined | #continuation_state{},
-          flow_control = auto :: auto | manual,
           pings = #{} :: #{binary() => {pid(), non_neg_integer()}},
           %% if true then set a stream as garbage in the stream_set
           garbage_on_end = false :: boolean()
@@ -230,7 +229,8 @@ init({client, Transport, Host, Port, SSLOptions, Http2Settings, ConnectionSettin
             end,
             Transport:send(Socket, <<?PREFACE>>),
             Streams = h2_stream_set:new(client),
-            Receiver = spawn_data_receiver({Transport, Socket}, Streams),
+            Flow = application:get_env(chatterbox, client_flow_control, auto),
+            Receiver = spawn_data_receiver({Transport, Socket}, Streams, Flow),
             InitialState =
                 #connection{
                    type = client,
@@ -239,8 +239,7 @@ init({client, Transport, Host, Port, SSLOptions, Http2Settings, ConnectionSettin
                    stream_callback_mod = maps:get(stream_callback_mod, ConnectionSettings, undefined),
                    stream_callback_opts = maps:get(stream_callback_opts, ConnectionSettings, []),
                    streams = Streams,
-                   socket = {Transport, Socket},
-                   flow_control=application:get_env(chatterbox, client_flow_control, auto)
+                   socket = {Transport, Socket}
                   },
             {ok,
              handshake,
@@ -260,7 +259,8 @@ init({client_ssl_upgrade, Host, Port, InitialMessage, SSLOptions, Http2Settings,
                     ok = ssl:setopts(Socket, [{packet, raw}, binary, {active, false}]),
                     ssl:send(Socket, <<?PREFACE>>),
                     Streams = h2_stream_set:new(client),
-                    Receiver = spawn_data_receiver({ssl, Socket}, Streams),
+                    Flow = application:get_env(chatterbox, client_flow_control, auto),
+                    Receiver = spawn_data_receiver({ssl, Socket}, Streams, Flow),
                     InitialState =
                         #connection{
                            type = client,
@@ -269,8 +269,7 @@ init({client_ssl_upgrade, Host, Port, InitialMessage, SSLOptions, Http2Settings,
                            stream_callback_mod = maps:get(stream_callback_mod, ConnectionSettings, undefined),
                            stream_callback_opts = maps:get(stream_callback_opts, ConnectionSettings, []),
                            streams = Streams,
-                           socket = {ssl, Socket},
-                           flow_control=application:get_env(chatterbox, client_flow_control, auto)
+                           socket = {ssl, Socket}
                           },
                     {ok,
                      handshake,
@@ -653,65 +652,6 @@ route_frame({H, _Payload},
 %% Stream level frames
 %%
 
-%% receive data frame bigger than connection recv window
-route_frame({H,_Payload}, Conn)
-    when H#frame_header.type == ?DATA,
-         H#frame_header.length > Conn#connection.recv_window_size ->
-    go_away(?FLOW_CONTROL_ERROR, Conn);
-
-route_frame(F={H=#frame_header{
-                    length=L,
-                    stream_id=StreamId}, _Payload},
-            #connection{
-               recv_window_size=CRWS,
-               streams=Streams
-              }=Conn)
-    when H#frame_header.type == ?DATA ->
-    Stream = h2_stream_set:get(StreamId, Streams),
-
-    case h2_stream_set:type(Stream) of
-        active ->
-            case {
-              h2_stream_set:recv_window_size(Stream) < L,
-              Conn#connection.flow_control,
-              L > 0
-             } of
-                {true, _, _} ->
-                    rst_stream_(Stream,
-                               ?FLOW_CONTROL_ERROR,
-                               Conn);
-                %% If flow control is set to auto, and L > 0, send
-                %% window updates back to the peer. If L == 0, we're
-                %% not allowed to send window_updates of size 0, so we
-                %% hit the next clause
-                {false, auto, true} ->
-                    %% Make window size great again
-                    h2_frame_window_update:send(Conn#connection.socket,
-                                                L, StreamId),
-                    send_window_update(self(), L),
-                    recv_data(Stream, F),
-                    {next_state,
-                     connected,
-                     Conn#connection{
-                       recv_window_size=CRWS-L
-                      }};
-                %% Either
-                %% {false, auto, true} or
-                %% {false, manual, _DoesntMatter}
-                _Tried ->
-                    recv_data(Stream, F),
-                    {next_state,
-                     connected,
-                     Conn#connection{
-                       recv_window_size=CRWS-L,
-                       streams=h2_stream_set:upsert(
-                                 h2_stream_set:decrement_recv_window(L, Stream),
-                                 Streams)
-                      }}
-            end;
-        _ ->
-            go_away(?PROTOCOL_ERROR, Conn)
-    end;
 
 route_frame({#frame_header{type=?HEADERS}=FH, _Payload},
             #connection{}=Conn)
@@ -1523,10 +1463,11 @@ send_ack_timeout(SS) ->
 
 %% private socket handling
 
-spawn_data_receiver(Socket, Streams) ->
+spawn_data_receiver(Socket, Streams, Flow) ->
     Connection = self(),
+    RecvWindowSize = ?DEFAULT_INITIAL_WINDOW_SIZE,
     spawn_link(fun() ->
-                       fun F(S, St) ->
+                       fun F(S, St, WS) ->
                                case h2_frame:read(Socket, infinity) of
                                    {error, Reason} ->
                                        exit(Reason);
@@ -1536,14 +1477,62 @@ spawn_data_receiver(Socket, Streams) ->
                                    {stream_error, StreamId, Code} ->
                                        Stream = h2_stream_set:get(StreamId, St),
                                        rst_stream__(Stream, Code, S),
-                                       F(S, St);
-                                   Frame ->
+                                       F(S, St, WS);
+                                   {Header, _Payload} = Frame ->
                                        %% TODO move some of the cases of route_frame into here
                                        %% so we can send frames directly to the stream pids
-                                       gen_statem:cast(Connection, {frame, Frame}),
-                                       F(S, St)
+                                       case Header#frame_header.type of
+                                           ?DATA ->
+                                               L = Header#frame_header.length,
+                                               case L > WS andalso false of
+                                                   true ->
+                                                       ct:pal("window size violation ~p ~p", [L, WS]),
+                                                       go_away(?FLOW_CONTROL_ERROR, S, St);
+                                                   false ->
+                                                       Stream = h2_stream_set:get(Header#frame_header.stream_id, Streams),
+
+                                                       case h2_stream_set:type(Stream) of
+                                                           active ->
+                                                               case {
+                                                                 h2_stream_set:recv_window_size(Stream) < L,
+                                                                 Flow,
+                                                                 L > 0
+                                                                } of
+                                                                   {true, _, _} ->
+                                                                       rst_stream__(Stream,
+                                                                                   ?FLOW_CONTROL_ERROR,
+                                                                                   S);
+                                                                   %% If flow control is set to auto, and L > 0, send
+                                                                   %% window updates back to the peer. If L == 0, we're
+                                                                   %% not allowed to send window_updates of size 0, so we
+                                                                   %% hit the next clause
+                                                                   {false, auto, true} ->
+                                                                       %% Make window size great again
+                                                                       h2_frame_window_update:send(S,
+                                                                                                   L, Header#frame_header.stream_id),
+                                                                       send_window_update(self(), L),
+                                                                       recv_data(Stream, Frame),
+                                                                       F(S, St, WS-L);
+                                                                   %% Either
+                                                                   %% {false, auto, true} or
+                                                                   %% {false, manual, _DoesntMatter}
+                                                                   _Tried ->
+                                                                       recv_data(Stream, Frame),
+                                                                       h2_stream_set:upsert(
+                                                                         h2_stream_set:decrement_recv_window(L, Stream),
+                                                                         Streams),
+                                                                       F(S, St, WS-L)
+                                                               end;
+                                                           _ ->
+                                                               go_away(?PROTOCOL_ERROR, S, St)
+                                                       end
+                                               end;
+                                           _ ->
+                                               gen_statem:cast(Connection, {frame, Frame}),
+                                               F(S, St, WS)
+                                       end
                                end
-                       end(Socket, Streams)
+                       end(Socket, Streams, RecvWindowSize)
                end).
 
 client_options(Transport, SSLOptions, SocketOptions) ->
@@ -1570,12 +1559,12 @@ start_http2_server(
     }=Conn) ->
     case accept_preface(Socket) of
         ok ->
-            Receiver = spawn_data_receiver(Socket, Conn#connection.streams),
+            Flow = application:get_env(chatterbox, server_flow_control, auto),
+            Receiver = spawn_data_receiver(Socket, Conn#connection.streams, Flow),
             NewState =
                 Conn#connection{
                   type=server,
-                  receiver=Receiver,
-                  flow_control=application:get_env(chatterbox, server_flow_control, auto)
+                  receiver=Receiver
                  },
             {next_state,
              handshake,
