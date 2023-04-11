@@ -33,6 +33,7 @@
          new_stream/2,
          new_stream/4,
          new_stream/6,
+         new_stream/7,
          send_promise/4,
          get_response/2,
          get_peer/1,
@@ -397,6 +398,10 @@ new_stream(Pid, CallbackMod, CallbackOpts, NotifyPid) ->
 -spec new_stream(pid(), module(), term(), hpack:headers(), send_opts(), pid()) -> {stream_id(), pid()} | {error, error_code()}.
 new_stream(Pid, CallbackMod, CallbackOpts, Headers, Opts, NotifyPid) ->
     gen_statem:call(Pid, {new_stream, CallbackMod, CallbackOpts, Headers, Opts, NotifyPid}).
+
+-spec new_stream(pid(), module(), term(), hpack:headers(), any(), send_opts(), pid()) -> {stream_id(), pid()} | {error, error_code()}.
+new_stream(Pid, CallbackMod, CallbackOpts, Headers, Body, Opts, NotifyPid) ->
+    gen_statem:call(Pid, {new_stream, CallbackMod, CallbackOpts, Headers, Body, Opts, NotifyPid}).
 
 -spec send_promise(pid(), stream_id(), stream_id(), hpack:headers()) -> ok.
 send_promise(Pid, StreamId, NewStreamId, Headers) ->
@@ -1200,6 +1205,8 @@ handle_event({call, From}, {new_stream, CallbackMod, CallbackState, NotifyPid}, 
     new_stream_(From, CallbackMod, CallbackState, NotifyPid, Conn);
 handle_event({call, From}, {new_stream, CallbackMod, CallbackState, Headers, Opts, NotifyPid}, Conn) ->
     new_stream_(From, CallbackMod, CallbackState, Headers, Opts, NotifyPid, Conn);
+handle_event({call, From}, {new_stream, CallbackMod, CallbackState, Headers, Body, Opts, NotifyPid}, Conn) ->
+    new_stream_(From, CallbackMod, CallbackState, Headers, Body, Opts, NotifyPid, Conn);
 handle_event({call, From}, is_push,
                   #connection{
                      peer_settings=#settings{enable_push=Push}
@@ -1370,6 +1377,42 @@ new_stream_(From, CallbackMod, CallbackState, Headers, Opts, NotifyPid, Conn=#co
                     NewConn
             end,
     {keep_state, Conn2, [{reply, From, Reply}]}.
+
+new_stream_(From, CallbackMod, CallbackState, Headers, Body, Opts, NotifyPid, Conn=#connection{streams=Streams}) ->
+    {Reply, NewStreams} =
+        case
+            h2_stream_set:new_stream(
+              next,
+              NotifyPid,
+              CallbackMod,
+              CallbackState,
+              Conn#connection.socket,
+              Conn#connection.peer_settings#settings.initial_window_size,
+              Conn#connection.self_settings#settings.initial_window_size,
+              Conn#connection.type,
+              Streams)
+        of
+            {error, Code, _NewStream} ->
+                %% TODO: probably want to have events like this available for metrics
+                %% tried to create new_stream but there are too many
+                {{error, Code}, Streams};
+            {Pid, NextId, GoodStreamSet} ->
+                {{NextId, Pid}, GoodStreamSet}
+        end,
+
+    Conn1 = Conn#connection{
+              streams=NewStreams
+             },
+    Conn2 = case Reply of
+                {error, _Code} ->
+                    Conn1;
+                {NextId0, _Pid} ->
+                    NewConn = send_headers_(NextId0, Headers, Opts, Conn1),
+                    NewConn1 = send_body_(NextId0, Body, Opts, NewConn),
+                    NewConn1
+            end,
+    {keep_state, Conn2, [{reply, From, Reply}]}.
+
 
 send_headers_(StreamId, Headers, Opts, #connection{encode_context=EncodeContext,
                                                    streams = Streams,
