@@ -910,7 +910,8 @@ route_frame(
         false ->
             %% TODO: Priority Sort! Right now, it's just sorting on
             %% lowest stream_id first
-            Streams = h2_stream_set:sort(Conn#connection.streams),
+            %Streams = h2_stream_set:sort(Conn#connection.streams),
+            Streams = Conn#connection.streams,
 
             {RemainingSendWindow, UpdatedStreams} =
                 h2_stream_set:send_what_we_can(

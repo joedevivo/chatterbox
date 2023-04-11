@@ -1,5 +1,6 @@
 -module(h2_stream_set).
 -include("http2.hrl").
+-include_lib("stdlib/include/ms_transform.hrl").
 
 %% This module exists to manage a set of all streams for a given
 %% connection. When a connection starts, a stream set logically
@@ -13,10 +14,12 @@
    {
      %% Type determines which streams are mine, and which are theirs
      type :: client | server,
+
+     table = ets:new(?MODULE, [public, {keypos, 2}]) :: ets:tab()
      %% Streams initiated by this peer
-     mine :: peer_subset(),
+     %% mine :: peer_subset(),
      %% Streams initiated by the other peer
-     theirs :: peer_subset()
+     %% theirs :: peer_subset()
    }).
 -type stream_set() :: #stream_set{}.
 -export_type([stream_set/0]).
@@ -31,6 +34,7 @@
 -record(
    peer_subset,
    {
+     type :: mine | theirs,
      %% Provided by the connection settings, we can check against this
      %% every time we try to add a stream to this subset
      max_active = unlimited :: unlimited | pos_integer(),
@@ -48,13 +52,7 @@
      %% for a stream with this id or higher, the stream type returned
      %% must be idle. Any stream id lower than this that isn't active
      %% must be of type closed.
-     next_available_stream_id :: stream_id(),
-
-     %% A bit of a misnomer, active is actually the set of streams
-     %% that are active in MEMORY not the connection. This will
-     %% include *ALL* active streams, and possibly some closed streams
-     %% as well that have yet to be garbage collected.
-     active = [] :: [stream()]
+     next_available_stream_id :: stream_id()
    }).
 -type peer_subset() :: #peer_subset{}.
 
@@ -127,8 +125,7 @@
     new/1,
     new_stream/9,
     get/2,
-    upsert/2,
-    sort/1
+    upsert/2
    ]).
 
 %% Accessors
@@ -172,37 +169,41 @@
         client | server
        ) -> stream_set().
 new(client) ->
-    #stream_set{
-       type=client,
-       %% I'm a client, so mine are always odd numbered
-       mine=
-           #peer_subset{
-              lowest_stream_id=0,
-              next_available_stream_id=1
-             },
-       %% And theirs are always even
-       theirs=
-           #peer_subset{
-              lowest_stream_id=0,
-              next_available_stream_id=2
-             }
-      };
+    StreamSet = #stream_set{
+       type=client},
+    %% I'm a client, so mine are always odd numbered
+    ets:insert_new(StreamSet#stream_set.table,
+                   #peer_subset{
+                      type=mine,
+                      lowest_stream_id=0,
+                      next_available_stream_id=1
+                     }),
+    %% And theirs are always even
+     ets:insert_new(StreamSet#stream_set.table, 
+                    #peer_subset{
+                       type=theirs,
+                       lowest_stream_id=0,
+                       next_available_stream_id=2
+                      }),
+    StreamSet;
 new(server) ->
-    #stream_set{
-       type=server,
-       %% I'm a server, so mine are always even
-       mine=
-           #peer_subset{
-              lowest_stream_id=0,
-              next_available_stream_id=2
-             },
-       %% And theirs are always odd.
-       theirs=
-           #peer_subset{
-              lowest_stream_id=0,
-              next_available_stream_id=1
-             }
-      }.
+    StreamSet = #stream_set{
+       type=server},
+    %% I'm a server, so mine are always even numbered
+    ets:insert_new(StreamSet#stream_set.table,
+                   #peer_subset{
+                      type=mine,
+                      lowest_stream_id=0,
+                      next_available_stream_id=2
+                     }),
+    %% And theirs are always odd
+     ets:insert_new(StreamSet#stream_set.table, 
+                    #peer_subset{
+                       type=theirs,
+                       lowest_stream_id=0,
+                       next_available_stream_id=1
+                      }),
+    StreamSet.
 
 -spec new_stream(
         StreamId :: stream_id(),
@@ -273,13 +274,51 @@ new_stream(
 get_peer_subset(Id, StreamSet) ->
     case {Id rem 2, StreamSet#stream_set.type} of
         {0, client} ->
-            StreamSet#stream_set.theirs;
+            get_their_peers(StreamSet);
         {1, client} ->
-            StreamSet#stream_set.mine;
+            get_my_peers(StreamSet);
         {0, server} ->
-            StreamSet#stream_set.mine;
+            get_my_peers(StreamSet);
         {1, server} ->
-            StreamSet#stream_set.theirs
+            get_their_peers(StreamSet)
+    end.
+
+-spec get_my_peers(stream_set()) -> peer_subset().
+get_my_peers(StreamSet) ->
+    hd(ets:lookup(StreamSet#stream_set.table, mine)).
+
+-spec get_their_peers(stream_set()) -> peer_subset().
+get_their_peers(StreamSet) ->
+    hd(ets:lookup(StreamSet#stream_set.table, theirs)).
+
+set_my_peers(StreamSet, Peers) ->
+    ets:insert(StreamSet#stream_set.table, Peers).
+
+set_their_peers(StreamSet, Peers) ->
+    ets:insert(StreamSet#stream_set.table, Peers).
+
+get_my_active_streams(StreamSet) ->
+    case StreamSet#stream_set.type of
+        client ->
+            ets:select(StreamSet#stream_set.table, ets:fun2ms(fun(S=#active_stream{id=Id}) when Id rem 2 == 1 ->
+                                                                      S
+                                                              end));
+        server ->
+            ets:select(StreamSet#stream_set.table, ets:fun2ms(fun(S=#active_stream{id=Id}) when Id rem 2 == 0 ->
+                                                                      S
+                                                              end))
+    end.
+
+get_their_active_streams(StreamSet) ->
+    case StreamSet#stream_set.type of
+        client ->
+            ets:select(StreamSet#stream_set.table, ets:fun2ms(fun(S=#active_stream{id=Id}) when Id rem 2 == 0 ->
+                                                                      S
+                                                              end));
+        server ->
+            ets:select(StreamSet#stream_set.table, ets:fun2ms(fun(S=#active_stream{id=Id}) when Id rem 2 == 1 ->
+                                                                      S
+                                                              end))
     end.
 
 -spec set_peer_subset(
@@ -288,25 +327,9 @@ get_peer_subset(Id, StreamSet) ->
         NewPeerSubset :: peer_subset()
                          ) ->
                              stream_set().
-set_peer_subset(Id, StreamSet, NewPeerSubset) ->
-    case {Id rem 2, StreamSet#stream_set.type} of
-        {0, client} ->
-            StreamSet#stream_set{
-              theirs=NewPeerSubset
-             };
-        {1, client} ->
-            StreamSet#stream_set{
-              mine=NewPeerSubset
-             };
-        {0, server} ->
-            StreamSet#stream_set{
-              mine=NewPeerSubset
-             };
-        {1, server} ->
-            StreamSet#stream_set{
-              theirs=NewPeerSubset
-             }
-    end.
+set_peer_subset(_Id, StreamSet, NewPeerSubset) ->
+    ets:insert(StreamSet#stream_set.table, NewPeerSubset),
+    StreamSet.
 
 %% get/2 gets a stream. The logic in here basically just chooses which
 %% subset.
@@ -317,30 +340,32 @@ get(Id, StreamSet) ->
     get_from_subset(Id,
                     get_peer_subset(
                       Id,
-                      StreamSet)).
+                      StreamSet), StreamSet).
+
 
 -spec get_from_subset(
         Id :: stream_id(),
-        PeerSubset :: peer_subset())
+        PeerSubset :: peer_subset(),
+        StreamSet :: stream_set())
                      ->
-                             stream().
+    stream().
 get_from_subset(Id,
                 #peer_subset{
                    lowest_stream_id=Lowest
-                  })
+                  }, _StreamSet)
   when Id < Lowest ->
     #closed_stream{id=Id};
 get_from_subset(Id,
                 #peer_subset{
                    next_available_stream_id=Next
-                  })
+                  }, _StreamSet)
   when Id >= Next ->
     #idle_stream{id=Id};
-get_from_subset(Id, PeerSubset) ->
-    case lists:keyfind(Id, 2, PeerSubset#peer_subset.active) of
-        false ->
+get_from_subset(Id, _PeerSubset, StreamSet) ->
+    case ets:lookup(StreamSet#stream_set.table, Id)  of
+        [] ->
             #closed_stream{id=Id};
-        Stream ->
+        [Stream] ->
             Stream
     end.
 
@@ -355,18 +380,22 @@ upsert(#idle_stream{}, StreamSet) ->
 upsert(Stream, StreamSet) ->
     StreamId = stream_id(Stream),
     PeerSubset = get_peer_subset(StreamId, StreamSet),
-    case upsert_peer_subset(Stream, PeerSubset) of
+    case upsert_peer_subset(Stream, PeerSubset, StreamSet) of
         {error, Code} ->
             {error, Code};
+        unchanged ->
+            StreamSet;
         NewPeerSubset ->
             set_peer_subset(StreamId, StreamSet, NewPeerSubset)
     end.
 
 -spec upsert_peer_subset(
         Stream :: closed_stream() | active_stream(),
-        PeerSubset :: peer_subset()
+        PeerSubset :: peer_subset(),
+        StreamSet :: stream_set()
                       ) ->
                     peer_subset()
+                  | unchanged
                   | {error, error_code()}.
 %% Case 1: We're upserting a closed stream, it contains garbage we
 %% don't care about and it's in the range of streams we're actively
@@ -376,10 +405,10 @@ upsert_peer_subset(
      id=Id,
      garbage=true
     },
-  PeerSubset)
+  PeerSubset, StreamSet)
   when Id >= PeerSubset#peer_subset.lowest_stream_id,
        Id < PeerSubset#peer_subset.next_available_stream_id ->
-    OldStream = get_from_subset(Id, PeerSubset),
+    OldStream = get(Id, StreamSet),
     OldType = type(OldStream),
     ActiveDiff =
         case OldType of
@@ -387,24 +416,22 @@ upsert_peer_subset(
             active -> -1
         end,
 
-    NewActive = lists:keydelete(Id, 2, PeerSubset#peer_subset.active),
+    ets:delete(StreamSet#stream_set.table, Id),
     %% NewActive could now have a #closed_stream with no information
     %% in it as the lowest active stream, so we should drop those.
-    OptimizedNewActive = drop_unneeded_streams(NewActive),
+    NewActive = drop_unneeded_streams(StreamSet, Id),
 
-    case OptimizedNewActive of
+    case NewActive of
         [] ->
             PeerSubset#peer_subset{
               lowest_stream_id=PeerSubset#peer_subset.next_available_stream_id,
-              active_count=0,
-              active=[]
+              active_count=0
              };
         [NewLowestStream|_] ->
             NewLowest = stream_id(NewLowestStream),
             PeerSubset#peer_subset{
               lowest_stream_id=NewLowest,
-              active_count=PeerSubset#peer_subset.active_count+ActiveDiff,
-              active=OptimizedNewActive
+              active_count=PeerSubset#peer_subset.active_count+ActiveDiff
              }
     end;
 %% Case 2: Like case 1, but it's not garbage
@@ -413,10 +440,10 @@ upsert_peer_subset(
      id=Id,
      garbage=false
     }=Closed,
-  PeerSubset)
+  PeerSubset, StreamSet)
   when Id >= PeerSubset#peer_subset.lowest_stream_id,
        Id < PeerSubset#peer_subset.next_available_stream_id ->
-    OldStream = get_from_subset(Id, PeerSubset),
+    OldStream = get(Id, StreamSet),
     OldType = type(OldStream),
     ActiveDiff =
         case OldType of
@@ -424,38 +451,36 @@ upsert_peer_subset(
             active -> -1
         end,
 
-    NewActive = lists:keyreplace(Id, 2, PeerSubset#peer_subset.active, Closed),
+    ets:insert(StreamSet#stream_set.table, Closed),
     PeerSubset#peer_subset{
-      active_count=PeerSubset#peer_subset.active_count+ActiveDiff,
-      active=NewActive
+      active_count=PeerSubset#peer_subset.active_count+ActiveDiff
      };
 %% Case 3: It's closed, but greater than or equal to next available:
 upsert_peer_subset(
   #closed_stream{
      id=Id
     } = Closed,
-  PeerSubset)
+  PeerSubset, StreamSet)
  when Id >= PeerSubset#peer_subset.next_available_stream_id ->
+    ets:insert(StreamSet#stream_set.table, Closed),
     PeerSubset#peer_subset{
-      next_available_stream_id=Id+2,
-      active=lists:keystore(Id, 2, PeerSubset#peer_subset.active, Closed)
+      next_available_stream_id=Id+2
      };
 %% Case 4: It's active, and in the range we're working with
 upsert_peer_subset(
   #active_stream{
      id=Id
     }=Stream,
-  PeerSubset)
+  PeerSubset, StreamSet)
   when Id >= PeerSubset#peer_subset.lowest_stream_id,
        Id < PeerSubset#peer_subset.next_available_stream_id ->
-    PeerSubset#peer_subset{
-      active = lists:keystore(Id, 2, PeerSubset#peer_subset.active, Stream)
-     };
+    ets:insert(StreamSet#stream_set.table, Stream),
+    unchanged;
 %% Case 5: It's active, but it wasn't active before and activating it
 %% would exceed our concurrent stream limits
 upsert_peer_subset(
   #active_stream{},
-  PeerSubset)
+  PeerSubset, _StreamSet)
   when PeerSubset#peer_subset.max_active =/= unlimited,
        PeerSubset#peer_subset.active_count >= PeerSubset#peer_subset.max_active ->
     {error, ?REFUSED_STREAM};
@@ -464,32 +489,44 @@ upsert_peer_subset(
   #active_stream{
      id=Id
     }=Stream,
-  PeerSubset)
+  PeerSubset, StreamSet)
  when Id >= PeerSubset#peer_subset.next_available_stream_id ->
+    ets:insert(StreamSet#stream_set.table, Stream),
     PeerSubset#peer_subset{
       next_available_stream_id=Id+2,
-      active_count=PeerSubset#peer_subset.active_count+1,
-      active = lists:keystore(Id, 2, PeerSubset#peer_subset.active, Stream)
+      active_count=PeerSubset#peer_subset.active_count+1
      };
 %% Catch All
 %% TODO: remove this match and crash instead?
 upsert_peer_subset(
   _Stream,
-  PeerSubset) ->
-    PeerSubset.
+  _PeerSubset, _StreamSet) ->
+    unchanged.
 
 
-drop_unneeded_streams(Streams) ->
+drop_unneeded_streams(StreamSet, Id) ->
+    Streams = case {StreamSet#stream_set.type, Id rem 2} of
+                  {client, 0} ->
+                      %% their streams
+                      their_active_streams(StreamSet);
+                  {client, 1} ->
+                      %% my streams
+                      my_active_streams(StreamSet);
+                  {server, 0} ->
+                      %% my streams
+                      my_active_streams(StreamSet);
+                  {server, 1} ->
+                      %% their streams
+                      their_active_streams(StreamSet)
+              end,
     SortedStreams = lists:keysort(2, Streams),
-    lists:dropwhile(
-      fun(#closed_stream{
-             garbage=true
-            }) ->
-              true;
-         (_) ->
-              false
-      end,
-      SortedStreams).
+    drop_unneeded_streams_(SortedStreams, StreamSet).
+
+drop_unneeded_streams_([#closed_stream{garbage=true, id=Id}|T], StreamSet) ->
+    ets:delete(StreamSet#stream_set.table, Id),
+    drop_unneeded_streams_(T, StreamSet);
+drop_unneeded_streams_(Other, _StreamSet) ->
+    Other.
 
 -spec close(
         Stream :: stream(),
@@ -534,84 +571,42 @@ close(#active_stream{
                },
     {Closed, upsert(Closed, Streams)}.
 
-%% TODO: Change sort to send peer_initiated first!
--spec sort(StreamSet::stream_set()) -> stream_set().
-sort(StreamSet) ->
-    StreamSet#stream_set{
-      theirs = sort_peer_subset(StreamSet#stream_set.theirs),
-      mine = sort_peer_subset(StreamSet#stream_set.mine)
-     }.
-
-sort_peer_subset(PeerSubset) ->
-    PeerSubset#peer_subset{
-      active=lists:keysort(2, PeerSubset#peer_subset.active)
-     }.
-
 -spec update_all_recv_windows(Delta :: integer(),
                               Streams:: stream_set()) ->
                                      stream_set().
 update_all_recv_windows(Delta, Streams) ->
-    Streams#stream_set{
-      theirs=update_all_recv_windows_subset(Delta, Streams#stream_set.theirs),
-      mine=update_all_recv_windows_subset(Delta, Streams#stream_set.mine)
-     }.
 
-update_all_recv_windows_subset(Delta, PeerSubset) ->
-    NewActive = lists:map(
-                  fun(#active_stream{}=S) ->
-                          S#active_stream{
-                            recv_window_size=S#active_stream.recv_window_size+Delta
-                           };
-                     (S) -> S
-                  end,
-                  PeerSubset#peer_subset.active),
-    PeerSubset#peer_subset{
-      active=NewActive
-     }.
+    ets:select_replace(Streams#stream_set.table,
+      ets:fun2ms(fun(S=#active_stream{recv_window_size=Size}) ->
+                         S#active_stream{recv_window_size=Size+Delta}
+                 end)),
+    Streams.
 
 -spec update_all_send_windows(Delta :: integer(),
                               Streams:: stream_set()) ->
                                      stream_set().
 update_all_send_windows(Delta, Streams) ->
-    Streams#stream_set{
-      theirs=update_all_send_windows_subset(Delta, Streams#stream_set.theirs),
-      mine=update_all_send_windows_subset(Delta, Streams#stream_set.mine)
-     }.
-
-update_all_send_windows_subset(Delta, PeerSubset) ->
-    NewActive = lists:map(
-                  fun(#active_stream{}=S) ->
-                          S#active_stream{
-                            send_window_size=S#active_stream.send_window_size+Delta
-                           };
-                     (S) -> S
-                  end,
-                  PeerSubset#peer_subset.active),
-    PeerSubset#peer_subset{
-      active=NewActive
-     }.
+    ets:select_replace(Streams#stream_set.table,
+      ets:fun2ms(fun(S=#active_stream{send_window_size=Size}) ->
+                         S#active_stream{send_window_size=Size+Delta}
+                 end)),
+    Streams.
 
 -spec update_their_max_active(NewMax :: non_neg_integer() | unlimited,
                              Streams :: stream_set()) ->
                                     stream_set().
-update_their_max_active(NewMax,
-                       #stream_set{
-                          theirs=Theirs
-                         }=Streams) ->
-    Streams#stream_set{
-      theirs=Theirs#peer_subset{max_active=NewMax}
-     }.
+update_their_max_active(NewMax, Streams) ->
+    Theirs = get_their_peers(Streams),
+    set_their_peers(Streams, Theirs#peer_subset{max_active=NewMax}),
+    Streams.
 
 -spec update_my_max_active(NewMax :: non_neg_integer() | unlimited,
                              Streams :: stream_set()) ->
                                     stream_set().
-update_my_max_active(NewMax,
-                       #stream_set{
-                          mine=Mine
-                         }=Streams) ->
-    Streams#stream_set{
-      mine=Mine#peer_subset{max_active=NewMax}
-     }.
+update_my_max_active(NewMax, Streams) ->
+    Mine = get_my_peers(Streams),
+    set_my_peers(Streams, Mine#peer_subset{max_active=NewMax}),
+    Streams.
 
 -spec send_what_we_can(StreamId :: all | stream_id(),
                        ConnSendWindowSize :: integer(),
@@ -620,24 +615,22 @@ update_my_max_active(NewMax,
                               {NewConnSendWindowSize :: integer(),
                                NewStreams :: stream_set()}.
 send_what_we_can(all, ConnSendWindowSize, MaxFrameSize, Streams) ->
-    {AfterPeerWindowSize,
-     NewPeerInitiated} = c_send_what_we_can(
-                           ConnSendWindowSize,
-                           MaxFrameSize,
-                           Streams#stream_set.theirs#peer_subset.active,
-                           []),
-    {AfterAfterWindowSize,
-     NewSelfInitiated} = c_send_what_we_can(
-                           AfterPeerWindowSize,
-                           MaxFrameSize,
-                           Streams#stream_set.mine#peer_subset.active,
-                           []),
+    AfterPeerWindowSize = c_send_what_we_can(
+                            ConnSendWindowSize,
+                            MaxFrameSize,
+                            get_their_active_streams(Streams),
+                            Streams),
+    AfterAfterWindowSize = c_send_what_we_can(
+                             AfterPeerWindowSize,
+                             MaxFrameSize,
+                             get_my_active_streams(Streams),
+                             Streams),
 
     {AfterAfterWindowSize,
-     Streams#stream_set{
-       theirs=Streams#stream_set.theirs#peer_subset{active=NewPeerInitiated},
-       mine=Streams#stream_set.mine#peer_subset{active=NewSelfInitiated}
-      }
+     Streams%#stream_set{ TODO
+       %theirs=Streams#stream_set.theirs#peer_subset{active=NewPeerInitiated},
+       %mine=Streams#stream_set.mine#peer_subset{active=NewSelfInitiated}
+      %}
     };
 send_what_we_can(StreamId, ConnSendWindowSize, MaxFrameSize, Streams) ->
     {NewConnSendWindowSize, NewStream} =
@@ -651,20 +644,21 @@ send_what_we_can(StreamId, ConnSendWindowSize, MaxFrameSize, Streams) ->
 -spec c_send_what_we_can(ConnSendWindowSize :: integer(),
                          MaxFrameSize :: non_neg_integer(),
                          Streams :: [stream()],
-                         Acc :: [stream()]
+                         StreamSet :: stream_set()
                         ) ->
-                                {integer(), [stream()]}.
+                                integer().
 %% If we hit =< 0, done
-c_send_what_we_can(ConnSendWindowSize, _MFS, Streams, Acc)
+c_send_what_we_can(ConnSendWindowSize, _MFS, _Streams, _StreamSet)
   when ConnSendWindowSize =< 0 ->
-    {ConnSendWindowSize, lists:reverse(Acc) ++ Streams};
+    ConnSendWindowSize;
 %% If we hit end of streams list, done
-c_send_what_we_can(SWS, _MFS, [], Acc) ->
-    {SWS, lists:reverse(Acc)};
+c_send_what_we_can(SWS, _MFS, [], _StreamSet) ->
+    SWS;
 %% Otherwise, try sending on the working stream
-c_send_what_we_can(SWS, MFS, [S|Streams], Acc) ->
+c_send_what_we_can(SWS, MFS, [S|Streams], StreamSet) ->
     {NewSWS, NewS} = s_send_what_we_can(SWS, MFS, S),
-    c_send_what_we_can(NewSWS, MFS, Streams, [NewS|Acc]).
+    ets:insert(StreamSet#stream_set.table, NewS),
+    c_send_what_we_can(NewSWS, MFS, Streams, StreamSet).
 
 %% Send at the stream level
 -spec s_send_what_we_can(SWS :: integer(),
@@ -903,29 +897,47 @@ notify_pid(#closed_stream{notify_pid=Pid}) ->
 %% The number of #active_stream records
 -spec my_active_count(stream_set()) -> non_neg_integer().
 my_active_count(SS) ->
-    SS#stream_set.mine#peer_subset.active_count.
+    (get_my_peers(SS))#peer_subset.active_count.
 
 %% The number of #active_stream records
 -spec their_active_count(stream_set()) -> non_neg_integer().
 their_active_count(SS) ->
-    SS#stream_set.theirs#peer_subset.active_count.
+    (get_their_peers(SS))#peer_subset.active_count.
 
 %% The list of #active_streams, and un gc'd #closed_streams
 -spec my_active_streams(stream_set()) -> [stream()].
 my_active_streams(SS) ->
-    SS#stream_set.mine#peer_subset.active.
+    case SS#stream_set.type of
+        client ->
+            ets:select(SS#stream_set.table, ets:fun2ms(fun(S=#active_stream{id=Id}) when Id rem 2 == 1 -> S;
+                                                          (S=#closed_stream{id=Id}) when Id rem 2 == 1 -> S
+                                                       end));
+        server ->
+            ets:select(SS#stream_set.table, ets:fun2ms(fun(S=#active_stream{id=Id}) when Id rem 2 == 0 -> S;
+                                                          (S=#closed_stream{id=Id}) when Id rem 2 == 0 -> S
+                                                       end))
+    end.
 
 %% The list of #active_streams, and un gc'd #closed_streams
 -spec their_active_streams(stream_set()) -> [stream()].
 their_active_streams(SS) ->
-    SS#stream_set.theirs#peer_subset.active.
+    case SS#stream_set.type of
+        client ->
+            ets:select(SS#stream_set.table, ets:fun2ms(fun(S=#active_stream{id=Id}) when Id rem 2 == 0 -> S;
+                                                          (S=#closed_stream{id=Id}) when Id rem 2 == 0 -> S
+                                                       end));
+        server ->
+            ets:select(SS#stream_set.table, ets:fun2ms(fun(S=#active_stream{id=Id}) when Id rem 2 == 1 -> S;
+                                                          (S=#closed_stream{id=Id}) when Id rem 2 == 1 -> S
+                                                       end))
+    end.
 
 %% My MCS (max_active)
 -spec my_max_active(stream_set()) -> non_neg_integer().
 my_max_active(SS) ->
-    SS#stream_set.mine#peer_subset.max_active.
+    (get_my_peers(SS))#peer_subset.max_active.
 
 %% Their MCS (max_active)
 -spec their_max_active(stream_set()) -> non_neg_integer().
 their_max_active(SS) ->
-    SS#stream_set.theirs#peer_subset.max_active.
+    (get_their_peers(SS))#peer_subset.max_active.
