@@ -6,6 +6,7 @@
          recv/1,
          read/1,
          read/2,
+         read_header/2,
          read_binary_frame_header/1,
          read_binary_payload/2,
          from_binary/1,
@@ -75,18 +76,22 @@ recv({Header, PayloadBin}) ->
         Error -> Error
     end.
 
--spec read(socket()) -> frame().
+-spec read(socket()) -> frame() | {stream_error, integer(), integer()}.
 read(Socket) ->
     read(Socket, infinity).
 
--spec read(socket(), timeout()) -> frame() | {error, closed|inet:posix()}.
+-spec read(socket(), timeout()) -> frame() | {stream_error, integer(), integer()} | {error, closed|inet:posix()}.
 read(Socket, Timeout) ->
     case read_header(Socket, Timeout) of
         {error, Reason} ->
             {error, Reason};
         FrameHeader ->
-            {ok, Payload} = read_payload(Socket, FrameHeader, Timeout),
-            {FrameHeader, Payload}
+            case read_payload(Socket, FrameHeader, Timeout) of
+                {ok, Payload} ->
+                    {FrameHeader, Payload};
+                Other ->
+                    Other
+            end
     end.
 
 %% Hi, it's been a while. We need to massage the API here into
@@ -133,15 +138,19 @@ read_binary_frame_header(<<Length:24,Type:8,Flags:8,_R:1,StreamId:31,Rem/bits>>)
     {Header, Rem}.
 
 -spec read_payload(socket(), header(), timeout()) ->
-    {ok, payload()} | {error, closed|inet:posix()}.
+    {ok, payload()} | {stream_error, integer(), integer()} | {error, closed|inet:posix()}.
 read_payload(_, Header=#frame_header{length=0}, _Timeout) ->
     {ok, FramePayload, <<>>} = read_binary_payload(<<>>, Header),
     {ok, FramePayload};
 read_payload({Transport, Socket}, Header=#frame_header{length=L}, Timeout) ->
     case Transport:recv(Socket, L, Timeout) of
         {ok, DataBin} ->
-            {ok, FramePayload, <<>>} = read_binary_payload(DataBin, Header),
-            {ok, FramePayload};
+            case read_binary_payload(DataBin, Header) of
+                {ok, FramePayload, <<>>} ->
+                    {ok, FramePayload};
+                {error, StreamId, Code, <<>>} ->
+                    {stream_error, StreamId, Code}
+            end;
         E -> E
     end.
 

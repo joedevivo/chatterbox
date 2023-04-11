@@ -85,6 +85,7 @@
 
 -record(connection, {
           type = undefined :: client | server | undefined,
+          receiver :: pid() | undefined,
           ssl_options = [],
           listen_ref :: non_neg_integer() | undefined,
           socket = undefined :: sock:socket(),
@@ -95,7 +96,6 @@
           decode_context = hpack:new_context() :: hpack:context(),
           encode_context = hpack:new_context() :: hpack:context(),
           settings_sent = queue:new() :: queue:queue(),
-          next_available_stream_id = 2 :: stream_id(),
           streams :: h2_stream_set:stream_set(),
           stream_callback_mod :: module() | undefined,
           stream_callback_opts :: list() | undefined,
@@ -221,21 +221,23 @@ init({client, Transport, Host, Port, SSLOptions, Http2Settings, ConnectionSettin
     SocketOptions = maps:get(socket_options, ConnectionSettings, []),
     case Transport:connect(Host, Port, client_options(Transport, SSLOptions, SocketOptions), ConnectTimeout) of
         {ok, Socket} ->
-            ok = sock:setopts({Transport, Socket}, [{packet, raw}, binary, {active, once}]),
+            ok = sock:setopts({Transport, Socket}, [{packet, raw}, binary, {active, false}]),
             case TcpUserTimeout of
                 0 -> ok;
                 _ -> sock:setopts({Transport, Socket}, [{raw,6,18,<<TcpUserTimeout:32/native>>}])
             end,
             Transport:send(Socket, <<?PREFACE>>),
+            Streams = h2_stream_set:new(client),
+            Receiver = spawn_data_receiver({Transport, Socket}, Streams),
             InitialState =
                 #connection{
                    type = client,
+                   receiver=Receiver,
                    garbage_on_end = maps:get(garbage_on_end, ConnectionSettings, false),
                    stream_callback_mod = maps:get(stream_callback_mod, ConnectionSettings, undefined),
                    stream_callback_opts = maps:get(stream_callback_opts, ConnectionSettings, []),
-                   streams = h2_stream_set:new(client),
+                   streams = Streams,
                    socket = {Transport, Socket},
-                   next_available_stream_id=1,
                    flow_control=application:get_env(chatterbox, client_flow_control, auto)
                   },
             {ok,
@@ -253,17 +255,19 @@ init({client_ssl_upgrade, Host, Port, InitialMessage, SSLOptions, Http2Settings,
             gen_tcp:send(TCP, InitialMessage),
             case ssl:connect(TCP, client_options(ssl, SSLOptions, SocketOptions)) of
                 {ok, Socket} ->
-                    ok = ssl:setopts(Socket, [{packet, raw}, binary, {active, once}]),
+                    ok = ssl:setopts(Socket, [{packet, raw}, binary, {active, false}]),
                     ssl:send(Socket, <<?PREFACE>>),
+                    Streams = h2_stream_set:new(client),
+                    Receiver = spawn_data_receiver({ssl, Socket}, Streams),
                     InitialState =
                         #connection{
                            type = client,
+                           receiver=Receiver,
                            garbage_on_end = maps:get(garbage_on_end, ConnectionSettings, false),
                            stream_callback_mod = maps:get(stream_callback_mod, ConnectionSettings, undefined),
                            stream_callback_opts = maps:get(stream_callback_opts, ConnectionSettings, []),
-                           streams = h2_stream_set:new(client),
+                           streams = Streams,
                            socket = {ssl, Socket},
-                           next_available_stream_id=1,
                            flow_control=application:get_env(chatterbox, client_flow_control, auto)
                           },
                     {ok,
@@ -734,7 +738,7 @@ route_frame({#frame_header{type=?HEADERS}=FH, _Payload}=Frame,
                     {error, ErrorCode, NewStream} ->
                         rst_stream_(NewStream, ErrorCode, Conn),
                         {none, Conn};
-                    {_, NewStreams} ->
+                    {_, _, NewStreams} ->
                         {headers, Conn#connection{streams=NewStreams}}
                 end;
             {active, server} ->
@@ -830,7 +834,7 @@ route_frame({H=#frame_header{
     %% reserved(local) and reserved(remote) aren't technically
     %% 'active', but they're being counted that way right now. Again,
     %% that only matters if Server Push is enabled.
-    {_, NewStreams} =
+    {_, _, NewStreams} =
         h2_stream_set:new_stream(
           PSID,
           NotifyPid,
@@ -1125,13 +1129,11 @@ handle_event(_, {send_body, StreamId, Body, Opts},
     end;
 handle_event(_, {send_request, NotifyPid, Headers, Body},
         #connection{
-            streams=Streams,
-            next_available_stream_id=NextId
+            streams=Streams
         }=Conn) ->
-    case send_request(NextId, NotifyPid, Conn, Streams, Headers, Body) of
+    case send_request(NotifyPid, Conn, Streams, Headers, Body) of
         {ok, GoodStreamSet} ->
             {keep_state, Conn#connection{
-                next_available_stream_id=NextId+2,
                 streams=GoodStreamSet
             }};
         {error, _Code} ->
@@ -1255,13 +1257,11 @@ handle_event({call, From}, get_peercert,
     end;
 handle_event({call, From}, {send_request, NotifyPid, Headers, Body},
         #connection{
-            streams=Streams,
-            next_available_stream_id=NextId
+            streams=Streams
         }=Conn) ->
-    case send_request(NextId, NotifyPid, Conn, Streams, Headers, Body) of
+    case send_request(NotifyPid, Conn, Streams, Headers, Body) of
         {ok, GoodStreamSet} ->
             {keep_state, Conn#connection{
-                next_available_stream_id=NextId+2,
                 streams=GoodStreamSet
             }, [{reply, From, ok}]};
         {error, Code} ->
@@ -1284,18 +1284,6 @@ handle_event({call, From}, {send_ping, NotifyPid},
     end;
 
 %% Socket Messages
-%% {tcp, Socket, Data}
-handle_event(info, {tcp, Socket, Data},
-            #connection{
-               socket={gen_tcp,Socket}
-              }=Conn) ->
-    handle_socket_data(Data, Conn);
-%% {ssl, Socket, Data}
-handle_event(info, {ssl, Socket, Data},
-            #connection{
-               socket={ssl,Socket}
-              }=Conn) ->
-    handle_socket_data(Data, Conn);
 %% {tcp_passive, Socket}
 handle_event(info, {tcp_passive, Socket},
             #connection{
@@ -1342,12 +1330,11 @@ terminate(_Reason, _StateName, _Conn=#connection{}) ->
 terminate(_Reason, _StateName, _State) ->
     ok.
 
-new_stream_(From, CallbackMod, CallbackState, NotifyPid, Conn=#connection{streams=Streams,
-                                                                          next_available_stream_id=NextId}) ->
+new_stream_(From, CallbackMod, CallbackState, NotifyPid, Conn=#connection{streams=Streams}) ->
     {Reply, NewStreams} =
         case
             h2_stream_set:new_stream(
-              NextId,
+              next,
               NotifyPid,
               CallbackMod,
               CallbackState,
@@ -1361,20 +1348,18 @@ new_stream_(From, CallbackMod, CallbackState, NotifyPid, Conn=#connection{stream
                 %% TODO: probably want to have events like this available for metrics
                 %% tried to create new_stream but there are too many
                 {{error, Code}, Streams};
-            {Pid, GoodStreamSet} ->
+            {Pid, NextId, GoodStreamSet} ->
                 {{NextId, Pid}, GoodStreamSet}
         end,
     {keep_state, Conn#connection{
-                                 next_available_stream_id=NextId+2,
                                  streams=NewStreams
                                 }, [{reply, From, Reply}]}.
 
-new_stream_(From, CallbackMod, CallbackState, Headers, Opts, NotifyPid, Conn=#connection{streams=Streams,
-                                                                                         next_available_stream_id=NextId}) ->
+new_stream_(From, CallbackMod, CallbackState, Headers, Opts, NotifyPid, Conn=#connection{streams=Streams}) ->
     {Reply, NewStreams} =
         case
             h2_stream_set:new_stream(
-              NextId,
+              next,
               NotifyPid,
               CallbackMod,
               CallbackState,
@@ -1388,16 +1373,20 @@ new_stream_(From, CallbackMod, CallbackState, Headers, Opts, NotifyPid, Conn=#co
                 %% TODO: probably want to have events like this available for metrics
                 %% tried to create new_stream but there are too many
                 {{error, Code}, Streams};
-            {Pid, GoodStreamSet} ->
+            {Pid, NextId, GoodStreamSet} ->
                 {{NextId, Pid}, GoodStreamSet}
         end,
 
     Conn1 = Conn#connection{
-              next_available_stream_id=NextId+2,
               streams=NewStreams
              },
-    {keep_state, Conn2} = send_headers_(NextId, Headers, Opts, Conn1),
-
+    Conn2 = case Reply of
+                {error, _Code} ->
+                    Conn1;
+                {NextId0, _Pid} ->
+                    {keep_state, NewConn} = send_headers_(NextId0, Headers, Opts, Conn1),
+                    NewConn
+            end,
     {keep_state, Conn2, [{reply, From, Reply}]}.
 
 send_headers_(StreamId, Headers, Opts, #connection{encode_context=EncodeContext,
@@ -1431,19 +1420,21 @@ send_headers_(StreamId, Headers, Opts, #connection{encode_context=EncodeContext,
             {keep_state, Conn}
     end.
 
--spec go_away(error_code(), connection()) -> {next_state, closing, connection()}.
-go_away(ErrorCode,
-        #connection{
-           next_available_stream_id=NAS
-          }=Conn) ->
+go_away(ErrorCode, Conn) ->
+    go_away(ErrorCode, Conn#connection.socket, Conn#connection.streams),
+    %% TODO: why is this sending a string?
+    gen_statem:cast(self(), io_lib:format("GO_AWAY: ErrorCode ~p", [ErrorCode])),
+    {next_state, closing, Conn}.
+
+-spec go_away(error_code(), sock:socket(), h2_stream_set:stream_set()) -> ok.
+go_away(ErrorCode, Socket, Streams) ->
+    NAS = h2_stream_set:get_next_available_stream_id(Streams),
     GoAway = h2_frame_goaway:new(NAS, ErrorCode),
     GoAwayBin = h2_frame:to_binary({#frame_header{
                                        stream_id=0
                                       }, GoAway}),
-    socksend(Conn, GoAwayBin),
-    %% TODO: why is this sending a string?
-    gen_statem:cast(self(), io_lib:format("GO_AWAY: ErrorCode ~p", [ErrorCode])),
-    {next_state, closing, Conn}.
+    sock:send(Socket, GoAwayBin),
+    ok.
 
 %% rst_stream_/3 looks for a running process for the stream. If it
 %% finds one, it delegates sending the rst_stream frame to it, but if
@@ -1453,9 +1444,17 @@ go_away(ErrorCode,
         h2_stream_set:stream(),
         error_code(),
         connection()
-       ) ->
-                        {next_state, connected, connection()}.
+       ) -> {next_state, connected, connection()}.
 rst_stream_(Stream, ErrorCode, Conn) ->
+    rst_stream__(Stream, ErrorCode, Conn#connection.socket),
+    {next_state, connected, Conn}.
+
+-spec rst_stream__(
+        h2_stream_set:stream(),
+        error_code(),
+        sock:sock()
+       ) -> ok.
+rst_stream__(Stream, ErrorCode, Sock) ->
     case h2_stream_set:type(Stream) of
         active ->
             %% Can this ever be undefined?
@@ -1463,8 +1462,7 @@ rst_stream_(Stream, ErrorCode, Conn) ->
             %% h2_stream's rst_stream will take care of letting us know
             %% this stream is closed and will send us a message to close the
             %% stream somewhere else
-            h2_stream:rst_stream(Pid, ErrorCode),
-            {next_state, connected, Conn};
+            h2_stream:rst_stream(Pid, ErrorCode);
         _ ->
             StreamId = h2_stream_set:stream_id(Stream),
             RstStream = h2_frame_rst_stream:new(ErrorCode),
@@ -1473,8 +1471,7 @@ rst_stream_(Stream, ErrorCode, Conn) ->
                               stream_id=StreamId
                              },
                            RstStream}),
-            sock:send(Conn#connection.socket, RstStreamBin),
-            {next_state, connected, Conn}
+            sock:send(Sock, RstStreamBin)
     end.
 
 -spec send_settings(settings(), connection()) -> connection().
@@ -1501,8 +1498,29 @@ send_ack_timeout(SS) ->
     spawn_link(SendAck).
 
 %% private socket handling
-active_once(Socket) ->
-    sock:setopts(Socket, [{active, once}]).
+
+spawn_data_receiver(Socket, Streams) ->
+    Connection = self(),
+    spawn_link(fun() ->
+                       fun F(S, St) ->
+                               case h2_frame:read(Socket, infinity) of
+                                   {error, Reason} ->
+                                       exit(Reason);
+                                   {stream_error, 0, Code} ->
+                                       %% Remaining Bytes don't matter, we're closing up shop.
+                                       go_away(Code, S, St);
+                                   {stream_error, StreamId, Code} ->
+                                       Stream = h2_stream_set:get(StreamId, St),
+                                       rst_stream__(Stream, Code, S),
+                                       F(S, St);
+                                   Frame ->
+                                       %% TODO move some of the cases of route_frame into here
+                                       %% so we can send frames directly to the stream pids
+                                       gen_statem:cast(Connection, {frame, Frame}),
+                                       F(S, St)
+                               end
+                       end(Socket, Streams)
+               end).
 
 client_options(Transport, SSLOptions, SocketOptions) ->
     DefaultSocketOptions = [
@@ -1528,11 +1546,11 @@ start_http2_server(
     }=Conn) ->
     case accept_preface(Socket) of
         ok ->
-            ok = active_once(Socket),
+            Receiver = spawn_data_receiver(Socket, Conn#connection.streams),
             NewState =
                 Conn#connection{
                   type=server,
-                  next_available_stream_id=2,
+                  receiver=Receiver,
                   flow_control=application:get_env(chatterbox, server_flow_control, auto)
                  },
             {next_state,
@@ -1581,67 +1599,6 @@ accept_preface(Socket, <<Char:8,Rem/binary>>) ->
 %% won't block the gen_server on Transport:read(L), but it will wake
 %% up and do something every time Data comes in.
 
-handle_socket_data(<<>>,
-                   #connection{
-                      socket=Socket
-                     }=Conn) ->
-    active_once(Socket),
-    {keep_state, Conn};
-handle_socket_data(Data,
-                   #connection{
-                      socket=Socket,
-                      buffer=Buffer
-                     }=Conn) ->
-    More =
-        case sock:recv(Socket, 0, 0) of %% fail fast
-            {ok, Rest} ->
-                Rest;
-            %% It's not really an error, it's what we want
-            {error, timeout} ->
-                <<>>;
-            _ ->
-                <<>>
-    end,
-    %% What is buffer?
-    %% empty - nothing, yay
-    %% {frame, h2_frame:header(), binary()} - Frame Header processed, Payload not big enough
-    %% {binary, binary()} - If we're here, it must mean that Bin was too small to even be a header
-    ToParse = case Buffer of
-        empty ->
-            <<Data/binary,More/binary>>;
-        {frame, FHeader, BufferBin} ->
-            {FHeader, <<BufferBin/binary,Data/binary,More/binary>>};
-        {binary, BufferBin} ->
-            <<BufferBin/binary,Data/binary,More/binary>>
-    end,
-    %% Now that the buffer has been merged, it's best to make sure any
-    %% further state references don't have one
-    NewConn = Conn#connection{buffer=empty},
-
-    case h2_frame:recv(ToParse) of
-        %% We got a full frame, ship it off to the FSM
-        {ok, Frame, Rem} ->
-            gen_statem:cast(self(), {frame, Frame}),
-            handle_socket_data(Rem, NewConn);
-        %% Not enough bytes left to make a header :(
-        {not_enough_header, Bin} ->
-            %% This is a situation where more bytes should come soon,
-            %% so let's switch back to active, once
-            active_once(Socket),
-            {keep_state, NewConn#connection{buffer={binary, Bin}}};
-        %% Not enough bytes to make a payload
-        {not_enough_payload, Header, Bin} ->
-            %% This too
-            active_once(Socket),
-            {keep_state, NewConn#connection{buffer={frame, Header, Bin}}};
-        {error, 0, Code, _Rem} ->
-            %% Remaining Bytes don't matter, we're closing up shop.
-            go_away(Code, NewConn);
-        {error, StreamId, Code, Rem} ->
-            Stream = h2_stream_set:get(StreamId, Conn#connection.streams),
-            rst_stream_(Stream, Code, NewConn),
-            handle_socket_data(Rem, NewConn)
-    end.
 
 handle_socket_passive(Conn) ->
     {keep_state, Conn}.
@@ -1805,10 +1762,10 @@ recv_data(Stream, Frame) ->
             h2_stream:send_event(Pid, {recv_data, Frame})
     end.
 
-send_request(NextId, NotifyPid, Conn, Streams, Headers, Body) ->
+send_request(NotifyPid, Conn, Streams, Headers, Body) ->
     case
         h2_stream_set:new_stream(
-            NextId,
+          next,
             NotifyPid,
             Conn#connection.stream_callback_mod,
             Conn#connection.stream_callback_opts,
@@ -1821,7 +1778,7 @@ send_request(NextId, NotifyPid, Conn, Streams, Headers, Body) ->
         {error, Code, _NewStream} ->
             %% error creating new stream
             {error, Code};
-        {_, GoodStreamSet} ->
+        {_Pid, NextId, GoodStreamSet} ->
             send_headers(self(), NextId, Headers),
             send_body(self(), NextId, Body),
 

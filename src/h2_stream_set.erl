@@ -149,7 +149,8 @@
     my_active_streams/1,
     their_active_streams/1,
     my_max_active/1,
-    their_max_active/1
+    their_max_active/1,
+    get_next_available_stream_id/1
    ]
   ).
 
@@ -206,7 +207,7 @@ new(server) ->
     StreamSet.
 
 -spec new_stream(
-        StreamId :: stream_id(),
+        StreamId :: stream_id() | next,
         NotifyPid :: pid(),
         CBMod :: module(),
         CBOpts :: list(),
@@ -215,10 +216,10 @@ new(server) ->
         InitialRecvWindow :: integer(),
         Type :: client | server,
         StreamSet :: stream_set()) ->
-                        {pid(), stream_set()}
+                        {pid(), stream_id(), stream_set()}
                             | {error, error_code(), closed_stream()}.
 new_stream(
-          StreamId,
+          StreamId0,
           NotifyPid,
           CBMod,
           CBOpts,
@@ -227,7 +228,15 @@ new_stream(
           InitialRecvWindow,
           Type,
           StreamSet) ->
-    PeerSubset = get_peer_subset(StreamId, StreamSet),
+
+    {PeerSubset, StreamId} = case StreamId0 of 
+                                 next ->
+                                     P0 = get_my_peers(StreamSet),
+                                     {P0, P0#peer_subset.next_available_stream_id};
+                                 Id ->
+                                     {get_peer_subset(Id, StreamSet), Id}
+                             end,
+
     case PeerSubset#peer_subset.max_active =/= unlimited andalso
          PeerSubset#peer_subset.active_count >= PeerSubset#peer_subset.max_active
     of
@@ -263,7 +272,7 @@ new_stream(
                     h2_stream:stop(Pid),
                     {error, ?REFUSED_STREAM, #closed_stream{id=StreamId}};
                 NewStreamSet ->
-                    {Pid, NewStreamSet}
+                    {Pid, StreamId, NewStreamSet}
             end
     end.
 
@@ -599,6 +608,9 @@ update_their_max_active(NewMax, Streams) ->
     Theirs = get_their_peers(Streams),
     set_their_peers(Streams, Theirs#peer_subset{max_active=NewMax}),
     Streams.
+
+get_next_available_stream_id(Streams) ->
+    (get_my_peers(Streams))#peer_subset.next_available_stream_id.
 
 -spec update_my_max_active(NewMax :: non_neg_integer() | unlimited,
                              Streams :: stream_set()) ->
