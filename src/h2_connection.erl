@@ -26,6 +26,7 @@
          send_body/3,
          send_body/4,
          send_request/3,
+         send_request/5,
          send_ping/1,
          is_push/1,
          new_stream/1,
@@ -350,6 +351,11 @@ send_body(Pid, StreamId, Body, Opts) ->
 -spec send_request(pid(), hpack:headers(), binary()) -> ok.
 send_request(Pid, Headers, Body) ->
     gen_statem:call(Pid, {send_request, self(), Headers, Body}, infinity),
+    ok.
+
+-spec send_request(pid(), hpack:headers(), binary(), atom(), list()) -> ok.
+send_request(Pid, Headers, Body, CallbackMod, CallbackOpts) ->
+    gen_statem:call(Pid, {send_request, self(), Headers, Body, CallbackMod, CallbackOpts}, infinity),
     ok.
 
 -spec send_ping(pid()) -> ok.
@@ -1031,7 +1037,7 @@ handle_event(_, {update_settings, Http2Settings},
     {keep_state,
      send_settings(Http2Settings, Conn)};
 handle_event(_, {send_headers, StreamId, Headers, Opts}, Conn) ->
-    send_headers_(StreamId, Headers, Opts, Conn);
+    {keep_state, send_headers_(StreamId, Headers, Opts, Conn)};
 handle_event(_, {actually_send_trailers, StreamId, Trailers}, Conn=#connection{encode_context=EncodeContext,
                                                                                streams=Streams,
                                                                                socket=Socket}) ->
@@ -1095,47 +1101,15 @@ handle_event(_, {send_trailers, StreamId, Headers, Opts},
     end;
 handle_event(_, {send_body, StreamId, Body, Opts},
              #connection{}=Conn) ->
-    BodyComplete = proplists:get_value(send_end_stream, Opts, true),
 
-    Stream = h2_stream_set:get(StreamId, Conn#connection.streams),
-    case h2_stream_set:type(Stream) of
-        active ->
-            OldBody = h2_stream_set:queued_data(Stream),
-            NewBody = case is_binary(OldBody) of
-                          true -> <<OldBody/binary, Body/binary>>;
-                          false -> Body
-                      end,
-            {NewSWS, NewStreams} =
-                h2_stream_set:send_what_we_can(
-                  StreamId,
-                  Conn#connection.send_window_size,
-                  (Conn#connection.peer_settings)#settings.max_frame_size,
-                  h2_stream_set:upsert(
-                    h2_stream_set:update_data_queue(NewBody, BodyComplete, Stream),
-                    Conn#connection.streams)),
-
-            {keep_state,
-             Conn#connection{
-               send_window_size=NewSWS,
-               streams=NewStreams
-              }};
-        idle ->
-            %% Sending DATA frames on an idle stream?  It's a
-            %% Connection level protocol error on reciept, but If we
-            %% have no active stream what can we even do?
-            {keep_state, Conn};
-        closed ->
-            {keep_state, Conn}
-    end;
+    {keep_state, send_body_(StreamId, Body, Opts, Conn)};
 handle_event(_, {send_request, NotifyPid, Headers, Body},
         #connection{
             streams=Streams
         }=Conn) ->
-    case send_request(NotifyPid, Conn, Streams, Headers, Body) of
-        {ok, GoodStreamSet} ->
-            {keep_state, Conn#connection{
-                streams=GoodStreamSet
-            }};
+    case send_request_(NotifyPid, Conn, Streams, Headers, Body) of
+        {ok, NewConn} ->
+            {keep_state, NewConn};
         {error, _Code} ->
             {keep_state, Conn}
     end;
@@ -1259,11 +1233,19 @@ handle_event({call, From}, {send_request, NotifyPid, Headers, Body},
         #connection{
             streams=Streams
         }=Conn) ->
-    case send_request(NotifyPid, Conn, Streams, Headers, Body) of
-        {ok, GoodStreamSet} ->
-            {keep_state, Conn#connection{
-                streams=GoodStreamSet
-            }, [{reply, From, ok}]};
+    case send_request_(NotifyPid, Conn, Streams, Headers, Body) of
+        {ok, NewConn} ->
+            {keep_state, NewConn, [{reply, From, ok}]};
+        {error, Code} ->
+            {keep_state, Conn, [{reply, From, {error, Code}}]}
+    end;
+handle_event({call, From}, {send_request, NotifyPid, Headers, Body, CallbackMod, CallbackOpts},
+        #connection{
+            streams=Streams
+        }=Conn) ->
+    case send_request_(NotifyPid, Conn, Streams, Headers, Body, CallbackMod, CallbackOpts) of
+        {ok, NewConn} ->
+            {keep_state, NewConn, [{reply, From, ok}]};
         {error, Code} ->
             {keep_state, Conn, [{reply, From, {error, Code}}]}
     end;
@@ -1384,7 +1366,7 @@ new_stream_(From, CallbackMod, CallbackState, Headers, Opts, NotifyPid, Conn=#co
                 {error, _Code} ->
                     Conn1;
                 {NextId0, _Pid} ->
-                    {keep_state, NewConn} = send_headers_(NextId0, Headers, Opts, Conn1),
+                    NewConn = send_headers_(NextId0, Headers, Opts, Conn1),
                     NewConn
             end,
     {keep_state, Conn2, [{reply, From, Reply}]}.
@@ -1407,17 +1389,16 @@ send_headers_(StreamId, Headers, Opts, #connection{encode_context=EncodeContext,
                                           ),
             [sock:send(Socket, h2_frame:to_binary(Frame)) || Frame <- FramesToSend],
             send_h(Stream, Headers),
-            {keep_state,
-             Conn#connection{
+            Conn#connection{
                encode_context=NewContext
-              }};
+              };
         idle ->
             %% In theory this is a client maybe activating a stream,
             %% but in practice, we've already activated the stream in
             %% new_stream/1
-            {keep_state, Conn};
+            Conn;
         closed ->
-            {keep_state, Conn}
+            Conn
     end.
 
 go_away(ErrorCode, Conn) ->
@@ -1762,13 +1743,16 @@ recv_data(Stream, Frame) ->
             h2_stream:send_event(Pid, {recv_data, Frame})
     end.
 
-send_request(NotifyPid, Conn, Streams, Headers, Body) ->
+send_request_(NotifyPid, Conn, Streams, Headers, Body) ->
+    send_request_(NotifyPid, Conn, Streams, Headers, Body, Conn#connection.stream_callback_mod, Conn#connection.stream_callback_opts).
+
+send_request_(NotifyPid, Conn, Streams, Headers, Body, CallbackMod, CallbackOpts) ->
     case
         h2_stream_set:new_stream(
           next,
             NotifyPid,
-            Conn#connection.stream_callback_mod,
-            Conn#connection.stream_callback_opts,
+            CallbackMod,
+            CallbackOpts,
             Conn#connection.socket,
             Conn#connection.peer_settings#settings.initial_window_size,
             Conn#connection.self_settings#settings.initial_window_size,
@@ -1779,8 +1763,42 @@ send_request(NotifyPid, Conn, Streams, Headers, Body) ->
             %% error creating new stream
             {error, Code};
         {_Pid, NextId, GoodStreamSet} ->
-            send_headers(self(), NextId, Headers),
-            send_body(self(), NextId, Body),
+            Conn1 = send_headers_(NextId, Headers, [], Conn),
+            Conn2 = send_body_(NextId, Body, [], Conn1),
 
-            {ok, GoodStreamSet}
+            {ok, Conn2#connection{streams=GoodStreamSet}}
     end.
+
+send_body_(StreamId, Body, Opts, Conn) ->
+    BodyComplete = proplists:get_value(send_end_stream, Opts, true),
+
+    Stream = h2_stream_set:get(StreamId, Conn#connection.streams),
+    case h2_stream_set:type(Stream) of
+        active ->
+            OldBody = h2_stream_set:queued_data(Stream),
+            NewBody = case is_binary(OldBody) of
+                          true -> <<OldBody/binary, Body/binary>>;
+                          false -> Body
+                      end,
+            {NewSWS, NewStreams} =
+                h2_stream_set:send_what_we_can(
+                  StreamId,
+                  Conn#connection.send_window_size,
+                  (Conn#connection.peer_settings)#settings.max_frame_size,
+                  h2_stream_set:upsert(
+                    h2_stream_set:update_data_queue(NewBody, BodyComplete, Stream),
+                    Conn#connection.streams)),
+
+             Conn#connection{
+               send_window_size=NewSWS,
+               streams=NewStreams
+              };
+        idle ->
+            %% Sending DATA frames on an idle stream?  It's a
+            %% Connection level protocol error on reciept, but If we
+            %% have no active stream what can we even do?
+            Conn;
+        closed ->
+            Conn
+    end.
+
