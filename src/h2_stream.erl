@@ -188,14 +188,13 @@ init([
       Type,
       Socket
      ]) ->
-    %% TODO: Check for CB implementing this behaviour
-    {ok, NewCBState} = callback(CB, init, [ConnectionPid, StreamId], [Socket | CBOptions]),
+    %% don't block stream init with a slow callback init
+    self() ! {init_callback, CBOptions},
     {ok, idle, #stream_state{
                   callback_mod=CB,
                   socket=Socket,
                   stream_id=StreamId,
                   connection=ConnectionPid,
-                  callback_state=NewCBState,
                   type = Type
                  }}.
 
@@ -224,6 +223,17 @@ callback(Mod, Fun, Args, State) ->
         false ->
             {ok, State}
     end.
+
+idle(info, {init_callback, CBOptions},
+     #stream_state{
+        callback_mod=CB,
+        socket=Socket,
+        stream_id=StreamId,
+        connection=ConnectionPid
+       }=Stream) ->
+    %% TODO: Check for CB implementing this behaviour
+    {ok, NewCBState} = callback(CB, init, [ConnectionPid, StreamId], [Socket | CBOptions]),
+    {next_state, idle, Stream#stream_state{callback_state = NewCBState}};
 
 %% Server 'RECV H'
 idle(cast, {recv_h, Headers},
