@@ -1519,9 +1519,11 @@ spawn_data_receiver(Socket, Streams, Flow) ->
                                                                        %% Make window size great again
                                                                        h2_frame_window_update:send(S,
                                                                                                    L, Header#frame_header.stream_id),
-                                                                       send_window_update(Connection, L),
+                                                                       %send_window_update(Connection, L),
                                                                        h2_stream_set:decrement_socket_recv_window(L, St),
                                                                        recv_data(Stream, Frame),
+                                                                       h2_frame_window_update:send(S, L, 0),
+                                                                       h2_stream_set:increment_socket_recv_window(L, St),
                                                                        F(S, St, false, Decoder);
                                                                    %% Either
                                                                    %% {false, auto, true} or
@@ -1564,9 +1566,6 @@ spawn_data_receiver(Socket, Streams, Flow) ->
                                                        end,
                                                        F(S, St, false, NewDecoder)
                                                end;
-
-
-
                                            ?PRIORITY when StreamId == 0 ->
                                                go_away_(?PROTOCOL_ERROR, S, St);
                                            ?PRIORITY ->
