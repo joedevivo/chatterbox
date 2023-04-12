@@ -1496,7 +1496,6 @@ spawn_data_receiver(Socket, Streams, Flow) ->
                                                L = Header#frame_header.length,
                                                case L > h2_stream_set:socket_recv_window_size(St) of
                                                    true ->
-                                                       ct:pal("window size violation ~p ~p", [L, h2_stream_set:socket_recv_window_size(St)]),
                                                        go_away_(?FLOW_CONTROL_ERROR, S, St);
                                                    false ->
                                                        Stream = h2_stream_set:get(Header#frame_header.stream_id, Streams),
@@ -1509,7 +1508,6 @@ spawn_data_receiver(Socket, Streams, Flow) ->
                                                                  L > 0
                                                                 } of
                                                                    {true, _, _} ->
-                                                                       ct:pal("stream window violation, resetting stream"),
                                                                        rst_stream__(Stream,
                                                                                    ?FLOW_CONTROL_ERROR,
                                                                                    S);
@@ -1537,7 +1535,6 @@ spawn_data_receiver(Socket, Streams, Flow) ->
                                                                        F(S, St, false, Decoder)
                                                                end;
                                                            _ ->
-                                                               ct:pal("not active stream ~p", [Stream]),
                                                                go_away_(?PROTOCOL_ERROR, S, St)
                                                        end
                                                end;
@@ -1601,7 +1598,6 @@ spawn_data_receiver(Socket, Streams, Flow) ->
                                            %% TODO ACK'd pings
                                            %% TODO stream window updates (need to share send window size)
                                            _ ->
-                                               ct:pal("other frame ~p", [Frame]),
                                                gen_statem:call(Connection, {frame, Frame}),
                                                F(S, St, false, Decoder)
                                        end
