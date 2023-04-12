@@ -79,7 +79,7 @@
 -record(continuation_state, {
           stream_id                 :: stream_id(),
           promised_id = undefined   :: undefined | stream_id(),
-          frames      = queue:new() :: queue:queue(h2_frame:frame()),
+          frames      = []          :: [h2_frame:frame()],
           type                      :: headers | push_promise | trailers,
           end_stream  = false       :: boolean(),
           end_headers = false       :: boolean()
@@ -707,7 +707,7 @@ route_frame(Event, {#frame_header{type=?HEADERS}=FH, _Payload}=Frame,
             ContinuationState =
                 #continuation_state{
                    type = ContinuationType,
-                   frames = queue:from_list([Frame]),
+                   frames = [Frame],
                    end_stream = ?IS_FLAG((FH#frame_header.flags), ?FLAG_END_STREAM),
                    end_headers = ?IS_FLAG((FH#frame_header.flags), ?FLAG_END_HEADERS),
                    stream_id = StreamId
@@ -727,7 +727,7 @@ route_frame(Event, F={H=#frame_header{
                                 } = Cont
               }=Conn) ->
     maybe_hpack(Event, Cont#continuation_state{
-                  frames=queue:in(F, CFQ),
+                  frames=[F|CFQ],
                   end_headers=?IS_FLAG((H#frame_header.flags), ?FLAG_END_HEADERS)
                  },
                 Conn);
@@ -801,7 +801,7 @@ route_frame(Event, {H=#frame_header{
     Continuation = #continuation_state{
                       stream_id=StreamId,
                       type=push_promise,
-                      frames = queue:in(Frame, queue:new()),
+                      frames = [Frame],
                       end_headers=?IS_FLAG((H#frame_header.flags), ?FLAG_END_HEADERS),
                       promised_id=PSID
                      },
@@ -1537,6 +1537,9 @@ spawn_data_receiver(Socket, Streams, Flow) ->
                                                                go_away_(?PROTOCOL_ERROR, S, St)
                                                        end
                                                end;
+                                           ?HEADERS when Type == server, StreamId rem 2 == 0 ->
+                                               go_away_(?PROTOCOL_ERROR, S, St);
+                                           %?HEADERS when Type == client, ?IS_FLAG((FH#frame_header.flags), ?FLAG_END_HEADERS) ->
                                            ?PRIORITY when StreamId == 0 ->
                                                go_away_(?PROTOCOL_ERROR, S, St);
                                            ?PRIORITY ->
@@ -1686,7 +1689,7 @@ maybe_hpack(Event, Continuation, Conn)
                Conn#connection.streams
               ),
     HeadersBin = h2_frame_headers:from_frames(
-                queue:to_list(Continuation#continuation_state.frames)
+                lists:reverse(Continuation#continuation_state.frames)
                ),
     case hpack:decode(HeadersBin, Conn#connection.decode_context) of
         {error, compression_error} ->
