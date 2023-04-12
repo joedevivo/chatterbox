@@ -94,7 +94,6 @@
           peer_settings = #settings{} :: settings(),
           self_settings = #settings{} :: settings(),
           send_window_size = ?DEFAULT_INITIAL_WINDOW_SIZE :: integer(),
-          recv_window_size = ?DEFAULT_INITIAL_WINDOW_SIZE :: integer(),
           decode_context = hpack:new_context() :: hpack:context(),
           encode_context = hpack:new_context() :: hpack:context(),
           settings_sent = queue:new() :: queue:queue(),
@@ -969,14 +968,11 @@ handle_event(_, {send_window_update, 0}, Conn) ->
     {keep_state, Conn};
 handle_event(_, {send_window_update, Size},
              #connection{
-                recv_window_size=CRWS,
                 socket=Socket
                 }=Conn) ->
     h2_frame_window_update:send(Socket, Size, 0),
-    {keep_state,
-     Conn#connection{
-       recv_window_size=CRWS+Size
-      }};
+    h2_stream_set:increment_socket_recv_window(Size, Conn#connection.streams),
+    {keep_state, Conn};
 handle_event(_, {update_settings, Http2Settings},
              #connection{}=Conn) ->
     {keep_state,
@@ -1465,9 +1461,9 @@ send_ack_timeout(SS) ->
 
 spawn_data_receiver(Socket, Streams, Flow) ->
     Connection = self(),
-    RecvWindowSize = ?DEFAULT_INITIAL_WINDOW_SIZE,
+    h2_stream_set:set_socket_recv_window_size(?DEFAULT_INITIAL_WINDOW_SIZE, Streams),
     spawn_link(fun() ->
-                       fun F(S, St, WS) ->
+                       fun F(S, St) ->
                                case h2_frame:read(Socket, infinity) of
                                    {error, Reason} ->
                                        exit(Reason);
@@ -1477,16 +1473,16 @@ spawn_data_receiver(Socket, Streams, Flow) ->
                                    {stream_error, StreamId, Code} ->
                                        Stream = h2_stream_set:get(StreamId, St),
                                        rst_stream__(Stream, Code, S),
-                                       F(S, St, WS);
+                                       F(S, St);
                                    {Header, _Payload} = Frame ->
                                        %% TODO move some of the cases of route_frame into here
                                        %% so we can send frames directly to the stream pids
                                        case Header#frame_header.type of
                                            ?DATA ->
                                                L = Header#frame_header.length,
-                                               case L > WS andalso false of
+                                               case L > h2_stream_set:socket_recv_window_size(St) of
                                                    true ->
-                                                       ct:pal("window size violation ~p ~p", [L, WS]),
+                                                       ct:pal("window size violation ~p ~p", [L, h2_stream_set:socket_recv_window_size(St)]),
                                                        go_away(?FLOW_CONTROL_ERROR, S, St);
                                                    false ->
                                                        Stream = h2_stream_set:get(Header#frame_header.stream_id, Streams),
@@ -1510,18 +1506,20 @@ spawn_data_receiver(Socket, Streams, Flow) ->
                                                                        %% Make window size great again
                                                                        h2_frame_window_update:send(S,
                                                                                                    L, Header#frame_header.stream_id),
-                                                                       send_window_update(self(), L),
+                                                                       send_window_update(Connection, L),
+                                                                       h2_stream_set:decrement_socket_recv_window(L, St),
                                                                        recv_data(Stream, Frame),
-                                                                       F(S, St, WS-L);
+                                                                       F(S, St);
                                                                    %% Either
                                                                    %% {false, auto, true} or
                                                                    %% {false, manual, _DoesntMatter}
                                                                    _Tried ->
                                                                        recv_data(Stream, Frame),
+                                                                       h2_stream_set:decrement_socket_recv_window(L, St),
                                                                        h2_stream_set:upsert(
                                                                          h2_stream_set:decrement_recv_window(L, Stream),
                                                                          Streams),
-                                                                       F(S, St, WS-L)
+                                                                       F(S, St)
                                                                end;
                                                            _ ->
                                                                go_away(?PROTOCOL_ERROR, S, St)
@@ -1529,10 +1527,10 @@ spawn_data_receiver(Socket, Streams, Flow) ->
                                                end;
                                            _ ->
                                                gen_statem:cast(Connection, {frame, Frame}),
-                                               F(S, St, WS)
+                                               F(S, St)
                                        end
                                end
-                       end(Socket, Streams, RecvWindowSize)
+                       end(Socket, Streams)
                end).
 
 client_options(Transport, SSLOptions, SocketOptions) ->

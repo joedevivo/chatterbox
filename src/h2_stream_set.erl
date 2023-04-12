@@ -15,6 +15,8 @@
      %% Type determines which streams are mine, and which are theirs
      type :: client | server,
 
+     recv_window_size = atomics:new(1, []),
+
      table = ets:new(?MODULE, [public, {keypos, 2}]) :: ets:tab()
      %% Streams initiated by this peer
      %% mine :: peer_subset(),
@@ -136,6 +138,10 @@
     update_data_queue/3,
     decrement_recv_window/2,
     recv_window_size/1,
+    decrement_socket_recv_window/2,
+    increment_socket_recv_window/2,
+    socket_recv_window_size/1,
+    set_socket_recv_window_size/2,
     response/1,
     send_window_size/1,
     increment_send_window_size/2,
@@ -877,6 +883,18 @@ decrement_recv_window(
      };
 decrement_recv_window(_, S) ->
     S.
+
+decrement_socket_recv_window(L, #stream_set{recv_window_size = Window}) ->
+    atomics:sub(Window, 1, L).
+
+increment_socket_recv_window(L, #stream_set{recv_window_size = Window}) ->
+    atomics:add(Window, 1, L).
+
+socket_recv_window_size(#stream_set{recv_window_size = Window}) ->
+    atomics:get(Window, 1).
+
+set_socket_recv_window_size(Value, #stream_set{recv_window_size = Window}) ->
+    atomics:put(Window, 1, Value).
 
 send_window_size(#active_stream{send_window_size=SWS}) ->
     SWS;
