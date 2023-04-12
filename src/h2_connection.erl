@@ -1470,6 +1470,7 @@ send_ack_timeout(SS) ->
 spawn_data_receiver(Socket, Streams, Flow) ->
     Connection = self(),
     h2_stream_set:set_socket_recv_window_size(?DEFAULT_INITIAL_WINDOW_SIZE, Streams),
+    Type = h2_stream_set:stream_set_type(Streams),
     spawn_link(fun() ->
                        fun F(S, St) ->
                                case h2_frame:read(Socket, infinity) of
@@ -1482,9 +1483,10 @@ spawn_data_receiver(Socket, Streams, Flow) ->
                                        Stream = h2_stream_set:get(StreamId, St),
                                        rst_stream__(Stream, Code, S),
                                        F(S, St);
-                                   {Header, _Payload} = Frame ->
+                                   {Header, Payload} = Frame ->
                                        %% TODO move some of the cases of route_frame into here
                                        %% so we can send frames directly to the stream pids
+                                       StreamId = Header#frame_header.stream_id,
                                        case Header#frame_header.type of
                                            ?DATA ->
                                                L = Header#frame_header.length,
@@ -1535,6 +1537,36 @@ spawn_data_receiver(Socket, Streams, Flow) ->
                                                                go_away_(?PROTOCOL_ERROR, S, St)
                                                        end
                                                end;
+                                           ?PRIORITY when StreamId == 0 ->
+                                               go_away_(?PROTOCOL_ERROR, S, St);
+                                           ?PRIORITY ->
+                                               %% seems unimplemented?
+                                               F(S, St);
+                                           ?RST_STREAM when StreamId == 0 ->
+                                               go_away_(?PROTOCOL_ERROR, S, St);
+                                           ?RST_STREAM ->
+                                               Stream = h2_stream_set:get(StreamId, St),
+                                               %% TODO: anything with this?
+                                               %% EC = h2_frame_rst_stream:error_code(Payload),
+                                               case h2_stream_set:type(Stream) of
+                                                   idle ->
+                                                       go_away_(?PROTOCOL_ERROR, S, St);
+                                                   _Stream ->
+                                                       %% TODO: RST_STREAM support
+                                                       F(S, St)
+                                               end;
+                                           ?PING when StreamId == 0 ->
+                                               go_away_(?PROTOCOL_ERROR, S, St);
+                                           ?PING when Header#frame_header.length /= 8 ->
+                                               go_away_(?FRAME_SIZE_ERROR, S, St);
+                                           ?PING when ?NOT_FLAG((Header#frame_header.flags), ?FLAG_ACK) ->
+                                               Ack = h2_frame_ping:ack(Payload),
+                                               sock:send(S, h2_frame:to_binary(Ack)),
+                                               F(S, St);
+                                           ?PUSH_PROMISE when Type == server ->
+                                               go_away_(?PROTOCOL_ERROR, S, St);
+                                           %% TODO ACK'd pings
+                                           %% TODO stream window updates (need to share send window size)
                                            _ ->
                                                ct:pal("other frame ~p", [Frame]),
                                                gen_statem:call(Connection, {frame, Frame}),

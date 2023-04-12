@@ -150,6 +150,7 @@
     stream_pid/1,
     notify_pid/1,
     type/1,
+    stream_set_type/1,
     my_active_count/1,
     their_active_count/1,
     my_active_streams/1,
@@ -813,6 +814,10 @@ pid(#active_stream{pid=Pid}) ->
     Pid;
 pid(_) ->
     undefined.
+
+-spec stream_set_type(stream_set()) -> client | server.
+stream_set_type(StreamSet) ->
+    StreamSet#stream_set.type.
 
 -spec type(stream()) -> idle | active | closed.
 type(#idle_stream{}) ->
