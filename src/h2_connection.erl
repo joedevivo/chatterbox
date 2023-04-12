@@ -1490,7 +1490,7 @@ spawn_data_receiver(Socket, Streams, Flow) ->
                                        case Header#frame_header.type of
                                            %% The first frame should be the client settings as per
                                            %% RFC-7540#3.5
-                                           Type when Type /= ?SETTINGS andalso First ->
+                                           HType when HType /= ?SETTINGS andalso First ->
                                                go_away_(?PROTOCOL_ERROR, S, St);
                                            ?DATA ->
                                                L = Header#frame_header.length,

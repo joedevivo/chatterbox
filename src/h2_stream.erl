@@ -3,7 +3,7 @@
 
 %% Public API
 -export([
-         start_link/6,
+         start_link/7,
          send_event/2,
          send_pp/2,
          send_data/2,
@@ -46,6 +46,7 @@
 
 -record(stream_state, {
           stream_id = undefined :: stream_id(),
+          streams :: h2_stream_set:steam_set(),
           connection = undefined :: undefined | pid(),
           socket = undefined :: sock:socket(),
           state = idle :: stream_state_name(),
@@ -104,6 +105,7 @@
 %% Public API
 -spec start_link(
         StreamId :: stream_id(),
+        Streams :: h2_stream_set:stream_set(),
         Connection :: pid(),
         CallbackModule :: module(),
         CallbackOptions :: list(),
@@ -111,9 +113,10 @@
         Socket :: sock:socket()
                   ) ->
                         {ok, pid()} | ignore | {error, term()}.
-start_link(StreamId, Connection, CallbackModule, CallbackOptions, Type, Socket) ->
+start_link(StreamId, Streams, Connection, CallbackModule, CallbackOptions, Type, Socket) ->
     gen_statem:start_link(?MODULE,
                           [StreamId,
+                           Streams,
                            Connection,
                            CallbackModule,
                            CallbackOptions,
@@ -167,6 +170,7 @@ stop(Pid) ->
 
 init([
       StreamId,
+      Streams,
       ConnectionPid,
       CB=undefined,
       _CBOptions,
@@ -177,11 +181,13 @@ init([
                   callback_mod=CB,
                   socket=Socket,
                   stream_id=StreamId,
+                  streams=Streams,
                   connection=ConnectionPid,
                   type = Type
                  }};
 init([
       StreamId,
+      Streams,
       ConnectionPid,
       CB,
       CBOptions,
@@ -194,6 +200,7 @@ init([
                   callback_mod=CB,
                   socket=Socket,
                   stream_id=StreamId,
+                  streams=Streams,
                   connection=ConnectionPid,
                   type = Type
                  }}.
@@ -714,14 +721,36 @@ half_closed_local(Type, Event, State) ->
     handle_event(Type, Event, State).
 
 closed(timeout, _,
-       #stream_state{}=Stream) ->
-    gen_statem:cast(Stream#stream_state.connection,
-                    {stream_finished,
-                     Stream#stream_state.stream_id,
-                     Stream#stream_state.response_headers,
-                     Stream#stream_state.response_body,
-                     Stream#stream_state.response_trailers}),
-    {stop, normal, Stream};
+       #stream_state{stream_id=StreamId, streams=Streams}=StreamState) ->
+    Stream = h2_stream_set:get(StreamId, Streams),
+    Type = h2_stream_set:stream_set_type(Streams),
+    case h2_stream_set:type(Stream) of
+        active ->
+            NotifyPid = h2_stream_set:notify_pid(Stream),
+            GarbageOnEnd = false, %% TODO maybe make this work?
+            Response =
+                case {Type, GarbageOnEnd} of
+                    {server, _} -> garbage;
+                    {client, false} -> {StreamState#stream_state.response_headers,
+                                        StreamState#stream_state.response_body,
+                                        StreamState#stream_state.response_trailers}
+                    %{client, true} -> garbage
+                end,
+            {_NewStream, _NewStreams} =
+                h2_stream_set:close(
+                  Stream,
+                  Response,
+                  Streams),
+            case {Type, is_pid(NotifyPid)} of
+                {client, true} ->
+                    NotifyPid ! {'END_STREAM', StreamId};
+                _ ->
+                    ok
+            end;
+        _ ->
+            ok
+    end,
+    {stop, normal, StreamState};
 closed(cast,
   {send_t, Headers},
   #stream_state{connection=_Pid,

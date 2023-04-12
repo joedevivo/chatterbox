@@ -252,6 +252,7 @@ new_stream(
         false ->
             {ok, Pid} = h2_stream:start_link(
                        StreamId,
+                       StreamSet,
                        self(),
                        CBMod,
                        CBOpts,
