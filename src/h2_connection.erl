@@ -503,6 +503,9 @@ continuation(Event, {frame,
                                  }
                }=Conn) ->
     route_frame(Event, Frame, Conn);
+continuation(Event, {frame, _}, Conn) ->
+    %% got a frame that's not part of the continuation
+    go_away(Event, ?PROTOCOL_ERROR, Conn);
 continuation(Type, Msg, State) ->
     handle_event(Type, Msg, State).
 
@@ -1241,14 +1244,16 @@ handle_event(info, {ssl_error, Socket, Reason},
                socket={ssl,Socket}
               }=Conn) ->
     handle_socket_error(Reason, Conn);
-handle_event(info, {_,R},
-           #connection{}=Conn) ->
-    handle_socket_error(R, Conn);
 handle_event(info, {go_away, ErrorCode}, Conn) ->
     gen_statem:cast(self(), io_lib:format("GO_AWAY: ErrorCode ~p", [ErrorCode])),
     {next_state, closing, Conn};
-handle_event(Event, _, Conn) ->
-     go_away(Event, ?PROTOCOL_ERROR, Conn).
+%handle_event(info, {_,R},
+%           #connection{}=Conn) ->
+%    handle_socket_error(R, Conn);
+handle_event(Event, Msg, Conn) ->
+    error_logger:error_msg("h2_connection received unexpected event of type ~p : ~p", [Event, Msg]),
+    %%go_away(Event, ?PROTOCOL_ERROR, Conn).
+    {keep_state, Conn}.
 
 code_change(_OldVsn, StateName, Conn, _Extra) ->
     {ok, StateName, Conn}.
