@@ -722,33 +722,37 @@ half_closed_local(Type, Event, State) ->
 
 closed(timeout, _,
        #stream_state{stream_id=StreamId, streams=Streams}=StreamState) ->
-    Stream = h2_stream_set:get(StreamId, Streams),
-    Type = h2_stream_set:stream_set_type(Streams),
-    case h2_stream_set:type(Stream) of
-        active ->
-            NotifyPid = h2_stream_set:notify_pid(Stream),
-            GarbageOnEnd = false, %% TODO maybe make this work?
-            Response =
+    try 
+        Stream = h2_stream_set:get(StreamId, Streams),
+        Type = h2_stream_set:stream_set_type(Streams),
+        case h2_stream_set:type(Stream) of
+            active ->
+                NotifyPid = h2_stream_set:notify_pid(Stream),
+                GarbageOnEnd = false, %% TODO maybe make this work?
+                Response =
                 case {Type, GarbageOnEnd} of
                     {server, _} -> garbage;
                     {client, false} -> {StreamState#stream_state.response_headers,
                                         StreamState#stream_state.response_body,
                                         StreamState#stream_state.response_trailers}
-                    %{client, true} -> garbage
+                                       %{client, true} -> garbage
                 end,
-            {_NewStream, _NewStreams} =
+                {_NewStream, _NewStreams} =
                 h2_stream_set:close(
                   Stream,
                   Response,
                   Streams),
-            case {Type, is_pid(NotifyPid)} of
-                {client, true} ->
-                    NotifyPid ! {'END_STREAM', StreamId};
-                _ ->
-                    ok
-            end;
-        _ ->
-            ok
+                case {Type, is_pid(NotifyPid)} of
+                    {client, true} ->
+                        NotifyPid ! {'END_STREAM', StreamId};
+                    _ ->
+                        ok
+                end;
+            _ ->
+                ok
+        end
+    catch _:_ ->
+              ok
     end,
     {stop, normal, StreamState};
 closed(cast,
