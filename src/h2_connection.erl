@@ -1598,7 +1598,7 @@ spawn_data_receiver(Socket, Streams, Flow) ->
                                                        %% TODO: RST_STREAM support
                                                        F(S, St, false, Decoder)
                                                end;
-                                           ?PING when StreamId == 0 ->
+                                           ?PING when StreamId /= 0 ->
                                                go_away_(?PROTOCOL_ERROR, S, St),
                                                Connection ! {go_away, ?PROTOCOL_ERROR};
                                            ?PING when Header#frame_header.length /= 8 ->
