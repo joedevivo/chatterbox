@@ -1244,6 +1244,9 @@ handle_event(info, {ssl_error, Socket, Reason},
 handle_event(info, {_,R},
            #connection{}=Conn) ->
     handle_socket_error(R, Conn);
+handle_event(info, {go_away, ErrorCode}, Conn) ->
+    gen_statem:cast(self(), io_lib:format("GO_AWAY: ErrorCode ~p", [ErrorCode])),
+    {next_state, closing, Conn};
 handle_event(Event, _, Conn) ->
      go_away(Event, ?PROTOCOL_ERROR, Conn).
 
@@ -1473,12 +1476,15 @@ spawn_data_receiver(Socket, Streams, Flow) ->
     Type = h2_stream_set:stream_set_type(Streams),
     spawn_link(fun() ->
                        fun F(S, St, First, Decoder) ->
-                               case h2_frame:read(Socket, infinity) of
+                               case h2_frame:read(S, infinity) of
+                                   {error, closed} ->
+                                       Connection ! socket_closed(S);
                                    {error, Reason} ->
-                                       exit(Reason);
+                                       Connection ! socket_error(S, Reason);
                                    {stream_error, 0, Code} ->
                                        %% Remaining Bytes don't matter, we're closing up shop.
-                                       go_away_(Code, S, St);
+                                       go_away_(Code, S, St),
+                                       Connection ! {go_away, Code};
                                    {stream_error, StreamId, Code} ->
                                        Stream = h2_stream_set:get(StreamId, St),
                                        rst_stream__(Stream, Code, S),
@@ -1491,12 +1497,14 @@ spawn_data_receiver(Socket, Streams, Flow) ->
                                            %% The first frame should be the client settings as per
                                            %% RFC-7540#3.5
                                            HType when HType /= ?SETTINGS andalso First ->
-                                               go_away_(?PROTOCOL_ERROR, S, St);
+                                               go_away_(?PROTOCOL_ERROR, S, St),
+                                               Connection ! {go_away, ?PROTOCOL_ERROR};
                                            ?DATA ->
                                                L = Header#frame_header.length,
                                                case L > h2_stream_set:socket_recv_window_size(St) of
                                                    true ->
-                                                       go_away_(?FLOW_CONTROL_ERROR, S, St);
+                                                       go_away_(?FLOW_CONTROL_ERROR, S, St),
+                                                       Connection ! {go_away, ?FLOW_CONTROL_ERROR};
                                                    false ->
                                                        Stream = h2_stream_set:get(Header#frame_header.stream_id, Streams),
 
@@ -1537,23 +1545,26 @@ spawn_data_receiver(Socket, Streams, Flow) ->
                                                                        F(S, St, false, Decoder)
                                                                end;
                                                            _ ->
-                                                               go_away_(?PROTOCOL_ERROR, S, St)
+                                                               go_away_(?PROTOCOL_ERROR, S, St),
+                                                               Connection ! {go_away, ?PROTOCOL_ERROR}
                                                        end
                                                end;
                                            ?HEADERS when Type == server, StreamId rem 2 == 0 ->
-                                               go_away_(?PROTOCOL_ERROR, S, St);
+                                               go_away_(?PROTOCOL_ERROR, S, St),
+                                               Connection ! {go_away, ?PROTOCOL_ERROR};
                                            ?HEADERS when Type == client ->
                                                Frames = case ?IS_FLAG((Header#frame_header.flags), ?FLAG_END_HEADERS) of
                                                             true ->
                                                                 %% complete headers frame, just do it
                                                                 [Frame];
                                                             false ->
-                                                                read_continuations(S, StreamId, St, [Frame])
+                                                                read_continuations(Connection, S, StreamId, St, [Frame])
                                                         end,
                                                HeadersBin = h2_frame_headers:from_frames(Frames),
                                                case hpack:decode(HeadersBin, Decoder) of
                                                    {error, compression_error} ->
-                                                       go_away_(?COMPRESSION_ERROR, S, St);
+                                                       go_away_(?COMPRESSION_ERROR, S, St),
+                                                       Connection ! {go_away, ?COMPRESSION_ERROR};
                                                    {ok, {Headers, NewDecoder}} ->
                                                        Stream = h2_stream_set:get(StreamId, St),
                                                        %% always headers or trailers!
@@ -1567,33 +1578,39 @@ spawn_data_receiver(Socket, Streams, Flow) ->
                                                        F(S, St, false, NewDecoder)
                                                end;
                                            ?PRIORITY when StreamId == 0 ->
-                                               go_away_(?PROTOCOL_ERROR, S, St);
+                                               go_away_(?PROTOCOL_ERROR, S, St),
+                                               Connection ! {go_away, ?PROTOCOL_ERROR};
                                            ?PRIORITY ->
                                                %% seems unimplemented?
                                                F(S, St, false, Decoder);
                                            ?RST_STREAM when StreamId == 0 ->
-                                               go_away_(?PROTOCOL_ERROR, S, St);
+                                               go_away_(?PROTOCOL_ERROR, S, St),
+                                               Connection ! {go_away, ?PROTOCOL_ERROR};
                                            ?RST_STREAM ->
                                                Stream = h2_stream_set:get(StreamId, St),
                                                %% TODO: anything with this?
                                                %% EC = h2_frame_rst_stream:error_code(Payload),
                                                case h2_stream_set:type(Stream) of
                                                    idle ->
-                                                       go_away_(?PROTOCOL_ERROR, S, St);
+                                                       go_away_(?PROTOCOL_ERROR, S, St),
+                                                       Connection ! {go_away, ?PROTOCOL_ERROR};
                                                    _Stream ->
                                                        %% TODO: RST_STREAM support
                                                        F(S, St, false, Decoder)
                                                end;
                                            ?PING when StreamId == 0 ->
-                                               go_away_(?PROTOCOL_ERROR, S, St);
+                                               go_away_(?PROTOCOL_ERROR, S, St),
+                                               Connection ! {go_away, ?PROTOCOL_ERROR};
                                            ?PING when Header#frame_header.length /= 8 ->
-                                               go_away_(?FRAME_SIZE_ERROR, S, St);
+                                               go_away_(?FRAME_SIZE_ERROR, S, St),
+                                               Connection ! {go_away, ?FRAME_SIZE_ERROR};
                                            ?PING when ?NOT_FLAG((Header#frame_header.flags), ?FLAG_ACK) ->
                                                Ack = h2_frame_ping:ack(Payload),
                                                sock:send(S, h2_frame:to_binary(Ack)),
                                                F(S, St, false, Decoder);
                                            ?PUSH_PROMISE when Type == server ->
-                                               go_away_(?PROTOCOL_ERROR, S, St);
+                                               go_away_(?PROTOCOL_ERROR, S, St),
+                                               Connection ! {go_away, ?PROTOCOL_ERROR};
                                            %% TODO ACK'd pings
                                            %% TODO stream window updates (need to share send window size)
                                            _ ->
@@ -1604,27 +1621,43 @@ spawn_data_receiver(Socket, Streams, Flow) ->
                        end(Socket, Streams, true, hpack:new_context())
                end).
 
-read_continuations(Socket, StreamId, Streams, Acc) ->
+read_continuations(Connection, Socket, StreamId, Streams, Acc) ->
     case h2_frame:read(Socket, infinity) of
+        {error, closed} ->
+            Connection ! socket_closed(Socket),
+            exit(normal);
         {error, Reason} ->
-            exit(Reason);
+            Connection ! socket_error(Socket, Reason),
+            exit(normal);
         {stream_error, _StreamId, _Code} ->
             go_away_(?PROTOCOL_ERROR, Socket, Streams),
-            exit(volatated_continuation);
+            Connection ! {go_away, ?PROTOCOL_ERROR},
+            exit(normal);
         {Header, _Payload} = Frame ->
             case Header#frame_header.type == ?CONTINUATION andalso Header#frame_header.stream_id == StreamId of
                 false ->
                     go_away_(?PROTOCOL_ERROR, Socket, Streams),
-                    exit(volatated_continuation);
+                    Connection ! {go_away, ?PROTOCOL_ERROR},
+                    exit(normal);
                 true ->
                     case ?IS_FLAG((Header#frame_header.flags), ?FLAG_END_HEADERS) of
                         true ->
                             lists:reverse([Frame|Acc]);
                         false ->
-                            read_continuations(Socket, StreamId, Streams, [Frame|Acc])
+                            read_continuations(Connection, Socket, StreamId, Streams, [Frame|Acc])
                     end
             end
     end.
+
+socket_closed({gen_tcp, Socket}) ->
+    {tcp_closed, Socket};
+socket_closed({ssl, Socket}) ->
+    {ssl_closed, Socket}.
+
+socket_error({gen_tcp, Socket}, Reason) ->
+    {tcp_error, Socket, Reason};
+socket_error({ssl, Socket}, Reason) ->
+    {ssl_error, Socket, Reason}.
 
 client_options(Transport, SSLOptions, SocketOptions) ->
     DefaultSocketOptions = [
