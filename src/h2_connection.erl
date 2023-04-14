@@ -601,7 +601,7 @@ route_frame(Event, {H, Payload},
                                       streams=UpdatedStreams2
                                      }}, ok);
         {error, Code} ->
-            go_away(Event, Code, Conn)
+            go_away(Event, Code, <<"invalid frame settings">>, Conn)
     end;
 
 %% This is the case where we got an ACK, so dequeue settings we're
@@ -1496,7 +1496,7 @@ spawn_data_receiver(Socket, Streams, Flow) ->
                                        Connection ! socket_error(S, Reason);
                                    {stream_error, 0, Code} ->
                                        %% Remaining Bytes don't matter, we're closing up shop.
-                                       go_away_(Code, S, St),
+                                       go_away_(Code, <<"stream error">>, S, St),
                                        Connection ! {go_away, Code};
                                    {stream_error, StreamId, Code} ->
                                        Stream = h2_stream_set:get(StreamId, St),
@@ -1510,7 +1510,7 @@ spawn_data_receiver(Socket, Streams, Flow) ->
                                            %% The first frame should be the client settings as per
                                            %% RFC-7540#3.5
                                            HType when HType /= ?SETTINGS andalso First ->
-                                               go_away_(?PROTOCOL_ERROR, S, St),
+                                               go_away_(?PROTOCOL_ERROR, <<"non settings frame sent first">>, S, St),
                                                Connection ! {go_away, ?PROTOCOL_ERROR};
                                            ?DATA ->
                                                L = Header#frame_header.length,
@@ -1558,12 +1558,12 @@ spawn_data_receiver(Socket, Streams, Flow) ->
                                                                        F(S, St, false, Decoder)
                                                                end;
                                                            _ ->
-                                                               go_away_(?PROTOCOL_ERROR, S, St),
+                                                               go_away_(?PROTOCOL_ERROR, <<"data on inactive stream">>, S, St),
                                                                Connection ! {go_away, ?PROTOCOL_ERROR}
                                                        end
                                                end;
                                            ?HEADERS when Type == server, StreamId rem 2 == 0 ->
-                                               go_away_(?PROTOCOL_ERROR, S, St),
+                                               go_away_(?PROTOCOL_ERROR, <<"Headers on even streamid on server">>, S, St),
                                                Connection ! {go_away, ?PROTOCOL_ERROR};
                                            ?HEADERS when Type == client ->
                                                Frames = case ?IS_FLAG((Header#frame_header.flags), ?FLAG_END_HEADERS) of
