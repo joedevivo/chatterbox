@@ -460,7 +460,7 @@ listen(info, {inet_async, ListenSocket, Ref, {ok, ClientSocket}},
          socket={Transport, Socket}
         });
 listen(timeout, _, State) ->
-    go_away(timeout, ?PROTOCOL_ERROR, State);
+    go_away(timeout, ?PROTOCOL_ERROR, <<"listen timeout">>, State);
 listen(Type, Msg, State) ->
     handle_event(Type, Msg, State).
 
@@ -469,7 +469,7 @@ listen(Type, Msg, State) ->
                      handshake|connected|closing,
                      connection()}.
 handshake(timeout, _, State) ->
-    go_away(timeout, ?PROTOCOL_ERROR, State);
+    go_away(timeout, ?PROTOCOL_ERROR, <<"handshake timeout">>, State);
 handshake(Event, {frame, {FH, _Payload}=Frame}, State) ->
     %% The first frame should be the client settings as per
     %% RFC-7540#3.5
@@ -477,7 +477,7 @@ handshake(Event, {frame, {FH, _Payload}=Frame}, State) ->
         ?SETTINGS ->
             route_frame(Event, Frame, State);
         _ ->
-            go_away(Event, ?PROTOCOL_ERROR, State)
+            go_away(Event, ?PROTOCOL_ERROR, <<"handshake frame not SETTINGS">>, State)
     end;
 handshake(Type, Msg, State) ->
     handle_event(Type, Msg, State).
@@ -505,7 +505,7 @@ continuation(Event, {frame,
     route_frame(Event, Frame, Conn);
 continuation(Event, {frame, _}, Conn) ->
     %% got a frame that's not part of the continuation
-    go_away(Event, ?PROTOCOL_ERROR, Conn);
+    go_away(Event, ?PROTOCOL_ERROR, <<"continuation violated, server">>, Conn);
 continuation(Type, Msg, State) ->
     handle_event(Type, Msg, State).
 
@@ -660,7 +660,7 @@ route_frame(Event, {#frame_header{type=?HEADERS}=FH, _Payload},
             #connection{}=Conn)
   when Conn#connection.type == server,
        FH#frame_header.stream_id rem 2 == 0 ->
-    go_away(Event, ?PROTOCOL_ERROR, Conn);
+    go_away(Event, ?PROTOCOL_ERROR, <<"HEADERS for even stream id">>, Conn);
 route_frame(Event, {#frame_header{type=?HEADERS}=FH, _Payload}=Frame,
             #connection{}=Conn) ->
     StreamId = FH#frame_header.stream_id,
@@ -739,7 +739,7 @@ route_frame(Event, {H, _Payload},
             #connection{}=Conn)
     when H#frame_header.type == ?PRIORITY,
          H#frame_header.stream_id == 0 ->
-    go_away(Event, ?PROTOCOL_ERROR, Conn);
+    go_away(Event, ?PROTOCOL_ERROR, <<"priority set on stream 0">>, Conn);
 route_frame(Event, {H, _Payload},
             #connection{} = Conn)
     when H#frame_header.type == ?PRIORITY ->
@@ -759,7 +759,7 @@ route_frame(
     Stream = h2_stream_set:get(StreamId, Streams),
     case h2_stream_set:type(Stream) of
         idle ->
-            go_away(Event, ?PROTOCOL_ERROR, Conn);
+            go_away(Event, ?PROTOCOL_ERROR, <<"RST on idle stream">>, Conn);
         _Stream ->
             %% TODO: RST_STREAM support
             maybe_reply(Event, {next_state, connected, Conn}, ok)
@@ -768,7 +768,7 @@ route_frame(Event, {H=#frame_header{}, _P},
             #connection{} =Conn)
     when H#frame_header.type == ?PUSH_PROMISE,
          Conn#connection.type == server ->
-    go_away(Event, ?PROTOCOL_ERROR, Conn);
+    go_away(Event, ?PROTOCOL_ERROR, <<"push promise sent to server">>, Conn);
 route_frame(Event, {H=#frame_header{
                   stream_id=StreamId
                  },
@@ -818,7 +818,7 @@ route_frame(Event, {H, _Payload},
             #connection{} = Conn)
     when H#frame_header.type == ?PING,
          H#frame_header.stream_id =/= 0 ->
-    go_away(Event, ?PROTOCOL_ERROR, Conn);
+    go_away(Event, ?PROTOCOL_ERROR, <<"ping on stream /= 0">>, Conn);
 %% If length != 8, FRAME_SIZE_ERROR
 %% TODO: I think this case is already covered in h2_frame now
 route_frame(Event, {H, _Payload},
@@ -896,7 +896,7 @@ route_frame(Event,
     Stream = h2_stream_set:get(StreamId, Streams),
     case h2_stream_set:type(Stream) of
         idle ->
-            go_away(Event, ?PROTOCOL_ERROR, Conn);
+            go_away(Event, ?PROTOCOL_ERROR, <<"window update on idle stream">>, Conn);
         closed ->
             rst_stream_(Event, Stream, ?STREAM_CLOSED, Conn);
         active ->
@@ -930,7 +930,8 @@ route_frame(Event, Frame, #connection{}=Conn) ->
     error_logger:error_msg("Frame condition not covered by pattern match."
                            "Please open a github issue with this output: ~s",
                            [h2_frame:format(Frame)]),
-    go_away(Event, ?PROTOCOL_ERROR, Conn).
+    F = iolist_to_binary(io_lib:format("~p", [Frame])),
+    go_away(Event, ?PROTOCOL_ERROR, <<"unhandled frame ", F/binary>>, Conn).
 
 handle_event(_, {stream_finished,
               StreamId,
@@ -1391,15 +1392,22 @@ send_headers_(StreamId, Headers, Opts, #connection{encode_context=EncodeContext,
     end.
 
 go_away(Event, ErrorCode, Conn) ->
-    go_away_(ErrorCode, Conn#connection.socket, Conn#connection.streams),
+    go_away(Event, ErrorCode, <<>>, Conn).
+
+go_away(Event, ErrorCode, Reason, Conn) ->
+    go_away_(ErrorCode, Reason, Conn#connection.socket, Conn#connection.streams),
     %% TODO: why is this sending a string?
     gen_statem:cast(self(), io_lib:format("GO_AWAY: ErrorCode ~p", [ErrorCode])),
     maybe_reply(Event, {next_state, closing, Conn}, ok).
 
+
 -spec go_away_(error_code(), sock:socket(), h2_stream_set:stream_set()) -> ok.
 go_away_(ErrorCode, Socket, Streams) ->
+    go_away_(ErrorCode, <<>>, Socket, Streams).
+
+go_away_(ErrorCode, Reason, Socket, Streams) ->
     NAS = h2_stream_set:get_next_available_stream_id(Streams),
-    GoAway = h2_frame_goaway:new(NAS, ErrorCode),
+    GoAway = h2_frame_goaway:new(NAS, ErrorCode, Reason),
     GoAwayBin = h2_frame:to_binary({#frame_header{
                                        stream_id=0
                                       }, GoAway}),
@@ -1583,13 +1591,13 @@ spawn_data_receiver(Socket, Streams, Flow) ->
                                                        F(S, St, false, NewDecoder)
                                                end;
                                            ?PRIORITY when StreamId == 0 ->
-                                               go_away_(?PROTOCOL_ERROR, S, St),
+                                               go_away_(?PROTOCOL_ERROR, <<"set priority on stream 0">>, S, St),
                                                Connection ! {go_away, ?PROTOCOL_ERROR};
                                            ?PRIORITY ->
                                                %% seems unimplemented?
                                                F(S, St, false, Decoder);
                                            ?RST_STREAM when StreamId == 0 ->
-                                               go_away_(?PROTOCOL_ERROR, S, St),
+                                               go_away_(?PROTOCOL_ERROR, <<"RST on stream 0">>, S, St),
                                                Connection ! {go_away, ?PROTOCOL_ERROR};
                                            ?RST_STREAM ->
                                                Stream = h2_stream_set:get(StreamId, St),
@@ -1597,14 +1605,14 @@ spawn_data_receiver(Socket, Streams, Flow) ->
                                                %% EC = h2_frame_rst_stream:error_code(Payload),
                                                case h2_stream_set:type(Stream) of
                                                    idle ->
-                                                       go_away_(?PROTOCOL_ERROR, S, St),
+                                                       go_away_(?PROTOCOL_ERROR, <<"RST on idle stream">>, S, St),
                                                        Connection ! {go_away, ?PROTOCOL_ERROR};
                                                    _Stream ->
                                                        %% TODO: RST_STREAM support
                                                        F(S, St, false, Decoder)
                                                end;
                                            ?PING when StreamId /= 0 ->
-                                               go_away_(?PROTOCOL_ERROR, S, St),
+                                               go_away_(?PROTOCOL_ERROR, <<"ping on stream /= 0">>, S, St),
                                                Connection ! {go_away, ?PROTOCOL_ERROR};
                                            ?PING when Header#frame_header.length /= 8 ->
                                                go_away_(?FRAME_SIZE_ERROR, S, St),
@@ -1614,7 +1622,7 @@ spawn_data_receiver(Socket, Streams, Flow) ->
                                                sock:send(S, h2_frame:to_binary(Ack)),
                                                F(S, St, false, Decoder);
                                            ?PUSH_PROMISE when Type == server ->
-                                               go_away_(?PROTOCOL_ERROR, S, St),
+                                               go_away_(?PROTOCOL_ERROR, <<"push_promise sent to server">>, S, St),
                                                Connection ! {go_away, ?PROTOCOL_ERROR};
                                            %% TODO ACK'd pings
                                            %% TODO stream window updates (need to share send window size)
@@ -1635,13 +1643,13 @@ read_continuations(Connection, Socket, StreamId, Streams, Acc) ->
             Connection ! socket_error(Socket, Reason),
             exit(normal);
         {stream_error, _StreamId, _Code} ->
-            go_away_(?PROTOCOL_ERROR, Socket, Streams),
+            go_away_(?PROTOCOL_ERROR, <<"continuation violated stream_error">>, Socket, Streams),
             Connection ! {go_away, ?PROTOCOL_ERROR},
             exit(normal);
         {Header, _Payload} = Frame ->
             case Header#frame_header.type == ?CONTINUATION andalso Header#frame_header.stream_id == StreamId of
                 false ->
-                    go_away_(?PROTOCOL_ERROR, Socket, Streams),
+                    go_away_(?PROTOCOL_ERROR, <<"continuation violated">>, Socket, Streams),
                     Connection ! {go_away, ?PROTOCOL_ERROR},
                     exit(normal);
                 true ->

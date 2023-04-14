@@ -7,6 +7,7 @@
     error_code/1,
     format/1,
     new/2,
+    new/3,
     read_binary/2,
     to_binary/1
    ]).
@@ -35,6 +36,15 @@ new(StreamId, ErrorCode) ->
        last_stream_id = StreamId,
        error_code = ErrorCode
       }.
+
+-spec new(stream_id(), error_code(), binary()) -> payload().
+new(StreamId, ErrorCode, Reason) ->
+    #goaway{
+       last_stream_id = StreamId,
+       error_code = ErrorCode,
+       additional_debug_data = Reason
+      }.
+
 
 -spec read_binary(binary(), h2_frame:header()) ->
                          {ok, payload(), binary()}
