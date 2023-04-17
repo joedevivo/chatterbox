@@ -201,7 +201,7 @@ become({Transport, Socket}, Http2Settings, ConnectionSettings) ->
                               stream_callback_opts =
                                   maps:get(stream_callback_opts, ConnectionSettings,
                                            application:get_env(chatterbox, stream_callback_opts, [])),
-                              streams = h2_stream_set:new(server),
+                              streams = h2_stream_set:new(server, {Transport, Socket}),
                               socket = {Transport, Socket}
                              }) of
         {_, handshake, NewState} ->
@@ -227,7 +227,7 @@ init({client, Transport, Host, Port, SSLOptions, Http2Settings, ConnectionSettin
                 _ -> sock:setopts({Transport, Socket}, [{raw,6,18,<<TcpUserTimeout:32/native>>}])
             end,
             Transport:send(Socket, <<?PREFACE>>),
-            Streams = h2_stream_set:new(client),
+            Streams = h2_stream_set:new(client, {Transport, Socket}),
             Flow = application:get_env(chatterbox, client_flow_control, auto),
             Receiver = spawn_data_receiver({Transport, Socket}, Streams, Flow),
             InitialState =
@@ -257,7 +257,7 @@ init({client_ssl_upgrade, Host, Port, InitialMessage, SSLOptions, Http2Settings,
                 {ok, Socket} ->
                     ok = ssl:setopts(Socket, [{packet, raw}, binary, {active, false}]),
                     ssl:send(Socket, <<?PREFACE>>),
-                    Streams = h2_stream_set:new(client),
+                    Streams = h2_stream_set:new(client, {ssl, Socket}),
                     Flow = application:get_env(chatterbox, client_flow_control, auto),
                     Receiver = spawn_data_receiver({ssl, Socket}, Streams, Flow),
                     InitialState =
@@ -456,7 +456,7 @@ listen(info, {inet_async, ListenSocket, Ref, {ok, ClientSocket}},
     start_http2_server(
       Http2Settings,
       #connection{
-         streams = h2_stream_set:new(server),
+         streams = h2_stream_set:new(server, {Transport, Socket}),
          socket={Transport, Socket}
         });
 listen(timeout, _, State) ->

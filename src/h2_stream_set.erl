@@ -9,13 +9,24 @@
 %% intensive. We're going to manage that here in this module, but to
 %% the outside, it will behave as if they all exist
 
+-define(RECV_WINDOW_SIZE, 1).
+-define(RECV_LOCK, 2).
+-define(SEND_LOCK, 3).
+-define(MY_NEXT_AVAILABLE_STREAM_ID, 4).
+
+-define(UNLOCKED, 0).
+-define(SHARED_LOCK, 1).
+-define(EXCLUSIVE_LOCK, 2).
+
 -record(
    stream_set,
    {
      %% Type determines which streams are mine, and which are theirs
      type :: client | server,
 
-     recv_window_size = atomics:new(1, []),
+     atomics = atomics:new(4, []),
+
+     socket :: sock:socket(),
 
      table = ets:new(?MODULE, [public, {keypos, 2}]) :: ets:tab()
      %% Streams initiated by this peer
@@ -25,6 +36,13 @@
    }).
 -type stream_set() :: #stream_set{}.
 -export_type([stream_set/0]).
+
+-record(lock, {
+          id :: {lock, non_neg_integer()},
+          holders = [] :: [pid()],
+          waiters = [] :: [{pid(), reference()}]
+         }
+       ).
 
 %% The stream_set needs to keep track of two subsets of streams, one
 %% for the streams that it has initiated, and one for the streams that
@@ -124,10 +142,14 @@
 %% Set Operations
 -export(
    [
-    new/1,
+    new/2,
     new_stream/9,
     get/2,
-    upsert/2
+    upsert/2,
+    take_lock/2,
+    take_exclusive_lock/2,
+    release_lock/2,
+    release_exclusive_lock/2
    ]).
 
 %% Accessors
@@ -174,11 +196,16 @@
 
 %% new/1 returns a new stream_set. This is your constructor.
 -spec new(
-        client | server
+        client | server,
+        sock:socket()
        ) -> stream_set().
-new(client) ->
+new(client, Socket) ->
     StreamSet = #stream_set{
+        socket=Socket,
        type=client},
+    ets:insert_new(StreamSet#stream_set.table, #lock{id={lock, ?SEND_LOCK}}),
+    ets:insert_new(StreamSet#stream_set.table, #lock{id={lock, ?RECV_LOCK}}),
+    atomics:put(StreamSet#stream_set.atomics, ?MY_NEXT_AVAILABLE_STREAM_ID, 1),
     %% I'm a client, so mine are always odd numbered
     ets:insert_new(StreamSet#stream_set.table,
                    #peer_subset{
@@ -194,10 +221,14 @@ new(client) ->
                        next_available_stream_id=2
                       }),
     StreamSet;
-new(server) ->
+new(server, Socket) ->
     StreamSet = #stream_set{
+       socket=Socket,
        type=server},
+    ets:insert_new(StreamSet#stream_set.table, #lock{id={lock, ?SEND_LOCK}}),
+    ets:insert_new(StreamSet#stream_set.table, #lock{id={lock, ?RECV_LOCK}}),
     %% I'm a server, so mine are always even numbered
+    atomics:put(StreamSet#stream_set.atomics, ?MY_NEXT_AVAILABLE_STREAM_ID, 2),
     ets:insert_new(StreamSet#stream_set.table,
                    #peer_subset{
                       type=mine,
@@ -238,8 +269,9 @@ new_stream(
 
     {PeerSubset, StreamId} = case StreamId0 of 
                                  next ->
+                                     Next = atomics:add_get(StreamSet#stream_set.atomics, ?MY_NEXT_AVAILABLE_STREAM_ID, 2),
                                      P0 = get_my_peers(StreamSet),
-                                     {P0, P0#peer_subset.next_available_stream_id};
+                                     {P0, Next - 2};
                                  Id ->
                                      {get_peer_subset(Id, StreamSet), Id}
                              end,
@@ -284,6 +316,8 @@ new_stream(
             end
     end.
 
+%read_socket(Fun, StreamSet) ->
+
 -spec get_peer_subset(
         stream_id(),
         stream_set()) ->
@@ -302,7 +336,8 @@ get_peer_subset(Id, StreamSet) ->
 
 -spec get_my_peers(stream_set()) -> peer_subset().
 get_my_peers(StreamSet) ->
-    hd(ets:lookup(StreamSet#stream_set.table, mine)).
+    Next = atomics:get(StreamSet#stream_set.atomics, ?MY_NEXT_AVAILABLE_STREAM_ID),
+   (hd(ets:lookup(StreamSet#stream_set.table, mine)))#peer_subset{next_available_stream_id=Next}.
 
 -spec get_their_peers(stream_set()) -> peer_subset().
 get_their_peers(StreamSet) ->
@@ -890,17 +925,17 @@ decrement_recv_window(
 decrement_recv_window(_, S) ->
     S.
 
-decrement_socket_recv_window(L, #stream_set{recv_window_size = Window}) ->
-    atomics:sub(Window, 1, L).
+decrement_socket_recv_window(L, #stream_set{atomics = Atomics}) ->
+    atomics:sub(Atomics, ?RECV_WINDOW_SIZE, L).
 
-increment_socket_recv_window(L, #stream_set{recv_window_size = Window}) ->
-    atomics:add(Window, 1, L).
+increment_socket_recv_window(L, #stream_set{atomics = Atomics}) ->
+    atomics:add(Atomics, ?RECV_WINDOW_SIZE, L).
 
-socket_recv_window_size(#stream_set{recv_window_size = Window}) ->
-    atomics:get(Window, 1).
+socket_recv_window_size(#stream_set{atomics = Atomics}) ->
+    atomics:get(Atomics, ?RECV_WINDOW_SIZE).
 
-set_socket_recv_window_size(Value, #stream_set{recv_window_size = Window}) ->
-    atomics:put(Window, 1, Value).
+set_socket_recv_window_size(Value, #stream_set{atomics = Atomics}) ->
+    atomics:put(Atomics, ?RECV_WINDOW_SIZE, Value).
 
 send_window_size(#active_stream{send_window_size=SWS}) ->
     SWS;
@@ -977,3 +1012,85 @@ my_max_active(SS) ->
 -spec their_max_active(stream_set()) -> non_neg_integer().
 their_max_active(SS) ->
     (get_their_peers(SS))#peer_subset.max_active.
+
+take_lock(Index, StreamSet=#stream_set{atomics=Atomics}) ->
+    case atomics:compare_exchange(Atomics, Index, ?UNLOCKED, ?SHARED_LOCK) of
+        ok ->
+            hold_lock(Index, StreamSet),
+            ok;
+        ?SHARED_LOCK ->
+            %% someone else already has a shared lock, this is fine
+            hold_lock(Index, StreamSet),
+            ok;
+        ?EXCLUSIVE_LOCK ->
+            %% need to wait for the exclusive access to be released
+            wait_lock(Index, StreamSet)
+    end.
+
+take_exclusive_lock(Index, StreamSet=#stream_set{atomics=Atomics}) ->
+    case atomics:compare_exchange(Atomics, Index, ?UNLOCKED, ?EXCLUSIVE_LOCK) of
+        ok ->
+            hold_lock(Index, StreamSet),
+            ok;
+        ?SHARED_LOCK ->
+            %% someone else already has a shared lock, this is fine
+            wait_lock(Index, StreamSet),
+            take_exclusive_lock(Index, StreamSet);
+        ?EXCLUSIVE_LOCK ->
+            %% need to wait for the exclusive access to be released
+            wait_lock(Index, StreamSet),
+            take_exclusive_lock(Index, StreamSet)
+    end.
+
+
+hold_lock(Index, StreamSet) ->
+    Self = self(),
+    1 = ets:select_replace(StreamSet#stream_set.table,
+                       ets:fun2ms(fun(#lock{id={lock, I}, holders=H}=Lock) when I == Index -> Lock#lock{holders=[Self|H]} end)).
+
+wait_lock(Index, StreamSet) ->
+    Self = self(),
+    Ref = make_ref(),
+    1 = ets:select_replace(StreamSet#stream_set.table,
+                       ets:fun2ms(fun(#lock{id={lock, I}, waiters=H}=Lock) when I == Index -> Lock#lock{waiters=[{Self, Ref}|H]} end)),
+    receive
+        {Ref, unlocked} ->
+            ok
+    end.
+
+release_lock(Index, StreamSet) ->
+    case ets:lookup(StreamSet#stream_set.table, {lock, Index}) of
+        [#lock{holders=Holders, waiters=Waiters}] ->
+            Self = self(),
+            %% filter out any dead holders and ourself
+            case [ P || P <- Holders, erlang:is_process_alive(P), P /= Self ] of
+                [] ->
+                    %% we were the last holder
+                    case ets:select_replace(StreamSet#stream_set.table, ets:fun2ms(fun(#lock{id={lock, I}, holders=H}=Lock) when I == Index, H == Holders -> Lock#lock{waiters=[], holders=[]} end)) of
+                        1 ->
+                            [ Pid ! {Ref, unlocked} || {Pid, Ref} <- Waiters ],
+                            ok = atomics:compare_exchange(StreamSet#stream_set.atomics, Index, ?SHARED_LOCK, ?UNLOCKED)
+                    end;
+                OtherHolders ->
+                    case ets:select_replace(StreamSet#stream_set.table, ets:fun2ms(fun(#lock{id={lock, I}, holders=H}=Lock) when I == Index, H == Holders -> Lock#lock{holders=OtherHolders} end)) of
+                        1 ->
+                            ok;
+                        _ ->
+                            release_lock(Index, StreamSet)
+                    end
+            end
+    end.
+
+release_exclusive_lock(Index, StreamSet) ->
+    Self = self(),
+    1 = ets:select_replace(StreamSet#stream_set.table, 
+                       ets:fun2ms(fun(#lock{id={lock, I}, holders=H}=Lock) when I == Index, H == [Self] -> Lock#lock{holders=[]} end)),
+    case ets:lookup(StreamSet#stream_set.table, {lock, Index}) of
+        [#lock{waiters=[]}] ->
+            ok;
+        [#lock{waiters=Waiters}] ->
+            1 = ets:select_replace(StreamSet#stream_set.table, ets:fun2ms(fun(#lock{id={lock, I}}=Lock) when I == Index -> Lock#lock{waiters=[], holders=[]} end)),
+            [ Pid ! {Ref, unlocked} || {Pid, Ref} <- Waiters ],
+            ok = atomics:compare_exchange(StreamSet#stream_set.atomics, Index, ?EXCLUSIVE_LOCK, ?UNLOCKED),
+            ok
+    end.
