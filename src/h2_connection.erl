@@ -1403,6 +1403,7 @@ go_away_(ErrorCode, Socket, Streams) ->
     go_away_(ErrorCode, <<>>, Socket, Streams).
 
 go_away_(ErrorCode, Reason, Socket, Streams) ->
+    ct:pal("sending goaway ~p ~p", [ErrorCode, Reason]),
     NAS = h2_stream_set:get_next_available_stream_id(Streams),
     GoAway = h2_frame_goaway:new(NAS, ErrorCode, Reason),
     GoAwayBin = h2_frame:to_binary({#frame_header{
