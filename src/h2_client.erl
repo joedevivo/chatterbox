@@ -112,7 +112,13 @@ start_link(Transport, Host, Port, SSLOptions, ConnectionSettings) ->
                http -> gen_tcp;
                https -> ssl
            end,
-    h2_connection:start_client_link(NewT, Host, Port, SSLOptions, chatterbox:settings(client), ConnectionSettings).
+    case h2_connection:start_client_link(NewT, Host, Port, SSLOptions, chatterbox:settings(client), ConnectionSettings) of
+        {ok, Pid} ->
+            Streams = h2_connection:get_streams(Pid),
+            {ok, Streams};
+        Other ->
+            Other
+    end.
 
 -spec start(http | https,
                  string(),
@@ -126,7 +132,14 @@ start(Transport, Host, Port, SSLOptions) ->
                http -> gen_tcp;
                https -> ssl
            end,
-    h2_connection:start_client(NewT, Host, Port, SSLOptions, chatterbox:settings(client), #{}).
+    case h2_connection:start_client(NewT, Host, Port, SSLOptions, chatterbox:settings(client), #{}) of
+        {ok, Pid} ->
+            Streams = h2_connection:get_streams(Pid),
+            {ok, Streams};
+        Other ->
+            Other
+    end.
+
 
 -spec start(http | https,
             string(),
@@ -141,26 +154,40 @@ start(Transport, Host, Port, SSLOptions, ConnectionSettings) ->
                http -> gen_tcp;
                https -> ssl
            end,
-    h2_connection:start_client(NewT, Host, Port, SSLOptions, chatterbox:settings(client), ConnectionSettings).
+    case h2_connection:start_client(NewT, Host, Port, SSLOptions, chatterbox:settings(client), ConnectionSettings) of
+        {ok, Pid} ->
+            Streams = h2_connection:get_streams(Pid),
+            {ok, Streams};
+        Other ->
+            Other
+    end.
 
 start_ssl_upgrade_link(Host, Port, InitialMessage, SSLOptions) ->
-    h2_connection:start_ssl_upgrade_link(Host, Port, InitialMessage, SSLOptions, chatterbox:settings(client), #{}).
+    case h2_connection:start_ssl_upgrade_link(Host, Port, InitialMessage, SSLOptions, chatterbox:settings(client), #{}) of
+        {ok, Pid} ->
+            Streams = h2_connection:get_streams(Pid),
+            {ok, Streams};
+        Other ->
+            Other
+    end.
 
--spec stop(pid()) -> ok.
+-spec stop(h2_stream_set:stream_set()) -> ok.
 stop(Pid) ->
     h2_connection:stop(Pid).
 
 -spec sync_request(CliPid, Headers, Body) -> Result when
-      CliPid :: pid(), Headers :: hpack:headers(), Body :: binary(),
+      CliPid :: h2_stream_set:stream_set(), Headers :: hpack:headers(), Body :: binary(),
       Result :: {ok, {hpack:headers(), iodata()}}
                  | {error, error_code() | timeout}.
 sync_request(CliPid, Headers, Body) ->
     case send_request(CliPid, Headers, Body) of
         {ok, StreamId} ->
+            ct:pal("waiting for END_STREAM ~p ~p", [StreamId, self()]),
             receive
                 {'END_STREAM', StreamId} ->
                     h2_connection:get_response(CliPid, StreamId)
             after 5000 ->
+                      ct:pal("timed out waiting for END_STREAM ~p ~p", [StreamId, self()]),
                       {error, timeout}
             end;
         Error ->
@@ -168,22 +195,25 @@ sync_request(CliPid, Headers, Body) ->
     end.
 
 -spec send_request(CliPid, Headers, Body) -> Result when
-      CliPid :: pid(), Headers :: hpack:headers(), Body :: binary(),
+      CliPid :: h2_stream_set:stream_set(), Headers :: hpack:headers(), Body :: binary(),
       Result :: {ok, stream_id()} | {error, error_code()}.
 send_request(CliPid, Headers, Body) ->
     case h2_connection:new_stream(CliPid) of
         {error, _Code} = Err ->
             Err;
         {StreamId, _} ->
+            ct:pal("spawned new stream ~p", [StreamId]),
             h2_connection:send_headers(CliPid, StreamId, Headers),
+            ct:pal("sent headers ~p", [StreamId]),
             h2_connection:send_body(CliPid, StreamId, Body),
+            ct:pal("sent body"),
             {ok, StreamId}
     end.
 
 send_ping(CliPid) ->
     h2_connection:send_ping(CliPid).
 
--spec get_response(pid(), stream_id()) ->
+-spec get_response(h2_stream_set:stream_set(), stream_id()) ->
                           {ok, {hpack:headers(), iodata(), hpack:headers()}}
                            | not_ready
                            | {error, term()}.

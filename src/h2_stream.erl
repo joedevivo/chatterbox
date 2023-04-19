@@ -3,7 +3,8 @@
 
 %% Public API
 -export([
-         start_link/7,
+         start_link/5,
+         start/5,
          send_event/2,
          send_pp/2,
          send_data/2,
@@ -73,7 +74,7 @@
 -export_type([state/0, callback_state/0]).
 
 -callback init(
-            Conn :: pid(),
+            Conn :: h2_stream_set:stream_set(),
             StreamId :: stream_id(),
             CallbackOptions :: list()
            ) ->
@@ -108,20 +109,35 @@
         Streams :: h2_stream_set:stream_set(),
         Connection :: pid(),
         CallbackModule :: module(),
-        CallbackOptions :: list(),
-        Type :: client | server,
-        Socket :: sock:socket()
+        CallbackOptions :: list()
                   ) ->
                         {ok, pid()} | ignore | {error, term()}.
-start_link(StreamId, Streams, Connection, CallbackModule, CallbackOptions, Type, Socket) ->
+start_link(StreamId, Streams, Connection, CallbackModule, CallbackOptions) ->
     gen_statem:start_link(?MODULE,
                           [StreamId,
                            Streams,
                            Connection,
                            CallbackModule,
-                           CallbackOptions,
-                           Type,
-                           Socket],
+                           CallbackOptions],
+                          []).
+
+
+-spec start(
+        StreamId :: stream_id(),
+        Streams :: h2_stream_set:stream_set(),
+        Connection :: pid(),
+        CallbackModule :: module(),
+        CallbackOptions :: list()
+                  ) ->
+                        {ok, pid()} | ignore | {error, term()}.
+start(StreamId, Streams, Connection, CallbackModule, CallbackOptions) ->
+    gen_statem:start(?MODULE,
+                          [link_connection,
+                           StreamId,
+                           Streams,
+                           Connection,
+                           CallbackModule,
+                           CallbackOptions],
                           []).
 
 send_event(Pid, Event) ->
@@ -173,37 +189,44 @@ init([
       Streams,
       ConnectionPid,
       CB=undefined,
-      _CBOptions,
-      Type,
-      Socket
+      _CBOptions
      ]) ->
     {ok, idle, #stream_state{
                   callback_mod=CB,
-                  socket=Socket,
                   stream_id=StreamId,
                   streams=Streams,
                   connection=ConnectionPid,
-                  type = Type
+                  socket=h2_stream_set:socket(Streams),
+                  type=h2_stream_set:stream_set_type(Streams)
                  }};
 init([
       StreamId,
       Streams,
       ConnectionPid,
       CB,
-      CBOptions,
-      Type,
-      Socket
+      CBOptions
      ]) ->
     %% don't block stream init with a slow callback init
     self() ! {init_callback, CBOptions},
     {ok, idle, #stream_state{
                   callback_mod=CB,
-                  socket=Socket,
                   stream_id=StreamId,
                   streams=Streams,
                   connection=ConnectionPid,
-                  type = Type
-                 }}.
+                  socket=h2_stream_set:socket(Streams),
+                  type=h2_stream_set:stream_set_type(Streams)
+                 }};
+init([
+      link_connection,
+      _StreamId,
+      _Streams,
+      ConnectionPid,
+      _CB,
+      _CBOptions
+     ]=Args) ->
+    link(ConnectionPid),
+    init(tl(Args)).
+
 
 callback_mode() ->
     state_functions.
@@ -236,10 +259,10 @@ idle(info, {init_callback, CBOptions},
         callback_mod=CB,
         socket=Socket,
         stream_id=StreamId,
-        connection=ConnectionPid
+        streams=Streams
        }=Stream) ->
     %% TODO: Check for CB implementing this behaviour
-    {ok, NewCBState} = callback(CB, init, [ConnectionPid, StreamId], [Socket | CBOptions]),
+    {ok, NewCBState} = callback(CB, init, [Streams, StreamId], [Socket | CBOptions]),
     {next_state, idle, Stream#stream_state{callback_state = NewCBState}};
 
 %% Server 'RECV H'
@@ -281,6 +304,7 @@ idle(cast, {send_pp, Headers},
 idle(cast, {recv_pp, Headers},
      #stream_state{
        }=Stream) ->
+    ct:pal("got pp"),
     {next_state,
      reserved_remote,
      Stream#stream_state{
@@ -386,6 +410,7 @@ open(cast, {recv_data,
        }=Stream)
   when ?NOT_FLAG(Flags, ?FLAG_END_STREAM) ->
     Bin = h2_frame_data:data(Payload),
+    ct:pal("recv data ~p", [F]),
     case CB of
         undefined ->
             {next_state,
@@ -418,6 +443,7 @@ open(cast, {recv_data,
        }=Stream)
   when ?IS_FLAG(Flags, ?FLAG_END_STREAM) ->
     Bin = h2_frame_data:data(Payload),
+    ct:pal("recv data END ~p", [F]),
     case CB of
         undefined ->
             NewStream =
@@ -490,6 +516,7 @@ open(cast, {send_data,
      #stream_state{
         socket=Socket
        }=Stream) ->
+    ct:pal("sending header ~p", [F]),
     sock:send(Socket, h2_frame:to_binary(F)),
 
     NextState =
@@ -517,6 +544,8 @@ open(cast, {send_data,
             _ ->
                 open
         end,
+
+    ct:pal("sending data ~p -> ~p", [F, NextState]),
     {next_state, NextState, Stream};
 open(_, {send_trailers, Trailers}, Stream) ->
     send_trailers(open, Trailers, Stream);
@@ -569,8 +598,10 @@ half_closed_remote(cast,
         ok ->
             case ?IS_FLAG(Flags, ?FLAG_END_STREAM) of
                 true ->
+                    ct:pal("sending data ~p -> closed", [F]),
                     {next_state, closed, Stream, 0};
                 _ ->
+                    ct:pal("sending data ~p -> half_closed_remote", [F]),
                     {next_state, half_closed_remote, Stream}
             end;
         {error,_} ->
@@ -591,8 +622,10 @@ half_closed_remote(cast,
         ok ->
             case ?IS_FLAG(Flags, ?FLAG_END_STREAM) of
                 true ->
+                    ct:pal("sending data ~p -> closed", [F]),
                     {next_state, closed, Stream, 0};
                 _ ->
+                    ct:pal("sending data ~p -> half_closed_remote", [F]),
                     {next_state, half_closed_remote, Stream}
             end;
         {error,_} ->
@@ -744,8 +777,10 @@ closed(timeout, _,
                   Streams),
                 case {Type, is_pid(NotifyPid)} of
                     {client, true} ->
+                        ct:pal("sending END_STREAM to ~p ~p", [StreamId, NotifyPid]),
                         NotifyPid ! {'END_STREAM', StreamId};
                     _ ->
+                        ct:pal("NOT sending END_STREAM to ~p ~p ~p", [StreamId, Type, NotifyPid]),
                         ok
                 end;
             _ ->
@@ -766,9 +801,9 @@ closed(_, _,
 closed(Type, Event, State) ->
     handle_event(Type, Event, State).
 
-send_trailers(State, Trailers, Stream=#stream_state{connection=Pid,
+send_trailers(State, Trailers, Stream=#stream_state{connection=Conn,
                                                     stream_id=StreamId}) ->
-    h2_connection:actually_send_trailers(Pid, StreamId, Trailers),
+    h2_connection:actually_send_trailers(Conn, StreamId, Trailers),
     case State of
         half_closed_remote ->
             {next_state, closed, Stream, 0};

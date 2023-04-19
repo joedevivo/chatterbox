@@ -132,8 +132,10 @@ basic_push(_Config) ->
 wait_for_n_notifications(0) ->
     ok;
 wait_for_n_notifications(N) ->
+    ct:pal("test waiting for END_STREAM on ~p", [self()]),
     receive
         {'END_STREAM', _} ->
+            ct:pal("got END_STREAM ~p", [N]),
             wait_for_n_notifications(N-1);
         _ ->
             wait_for_n_notifications(N)

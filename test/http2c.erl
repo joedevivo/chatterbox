@@ -69,6 +69,7 @@ send_binary(Pid, Binary) ->
 %% ifdef(TEST)
 -spec send_unaltered_frames(pid(), [h2_frame:frame()]) -> ok.
 send_unaltered_frames(Pid, Frames) ->
+    ct:pal("sending frames ~p", [Frames]),
     [send_binary(Pid, h2_frame:to_binary(F)) || F <- Frames],
     ok.
 
@@ -193,6 +194,7 @@ handle_cast(recv, #http2c_state{
     RawBody = Transport:recv(Socket, FHeader#frame_header.length),
     {ok, Payload, <<>>} = h2_frame:read_binary_payload(RawBody, FHeader),
     F = {FHeader, Payload},
+    ct:pal("http2c received ~p", [F]),
     gen_server:cast(self(), recv),
     {noreply, State#http2c_state{incoming_frames = Frames ++ [F]}};
 handle_cast({encode_context, EC}, State=#http2c_state{}) ->

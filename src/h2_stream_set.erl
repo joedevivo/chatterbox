@@ -1,6 +1,7 @@
 -module(h2_stream_set).
 -include("http2.hrl").
 -include_lib("stdlib/include/ms_transform.hrl").
+%-compile([export_all]).
 
 %% This module exists to manage a set of all streams for a given
 %% connection. When a connection starts, a stream set logically
@@ -10,9 +11,12 @@
 %% the outside, it will behave as if they all exist
 
 -define(RECV_WINDOW_SIZE, 1).
--define(RECV_LOCK, 2).
+-define(SEND_WINDOW_SIZE, 2).
 -define(SEND_LOCK, 3).
--define(MY_NEXT_AVAILABLE_STREAM_ID, 4).
+-define(SETTINGS_LOCK, 4).
+-define(STREAMS_LOCK, 5).
+-define(ENCODER_LOCK, 6).
+-define(MY_NEXT_AVAILABLE_STREAM_ID, 7).
 
 -define(UNLOCKED, 0).
 -define(SHARED_LOCK, 1).
@@ -24,18 +28,33 @@
      %% Type determines which streams are mine, and which are theirs
      type :: client | server,
 
-     atomics = atomics:new(4, []),
+     atomics = atomics:new(7, []),
 
      socket :: sock:socket(),
 
-     table = ets:new(?MODULE, [public, {keypos, 2}]) :: ets:tab()
+     connection :: pid(),
+
+     table = ets:new(?MODULE, [public, {keypos, 2}]) :: ets:tab(),
      %% Streams initiated by this peer
      %% mine :: peer_subset(),
      %% Streams initiated by the other peer
      %% theirs :: peer_subset()
+     callback_mod = undefined :: atom(),
+     callback_opts = [] :: list()
    }).
 -type stream_set() :: #stream_set{}.
 -export_type([stream_set/0]).
+
+-record(connection_settings, {
+          type :: self_settings | peer_settings,
+          settings = #settings{} :: settings()
+         }).
+
+-record(context, {
+          type = encode_context :: encode_context,
+          context = hpack:new_context() :: hpack:context()
+         }).
+
 
 -record(lock, {
           id :: {lock, non_neg_integer()},
@@ -142,14 +161,15 @@
 %% Set Operations
 -export(
    [
-    new/2,
-    new_stream/9,
+    new/4,
+    new_stream/5,
     get/2,
     upsert/2,
-    take_lock/2,
-    take_exclusive_lock/2,
-    release_lock/2,
-    release_exclusive_lock/2
+    take_lock/3,
+    take_exclusive_lock/3,
+    get_callback/1,
+    socket/1,
+    connection/1
    ]).
 
 %% Accessors
@@ -164,6 +184,11 @@
     increment_socket_recv_window/2,
     socket_recv_window_size/1,
     set_socket_recv_window_size/2,
+    decrement_socket_send_window/2,
+    increment_socket_send_window/2,
+    socket_send_window_size/1,
+    set_socket_send_window_size/2,
+
     response/1,
     send_window_size/1,
     increment_send_window_size/2,
@@ -179,14 +204,19 @@
     their_active_streams/1,
     my_max_active/1,
     their_max_active/1,
-    get_next_available_stream_id/1
+    get_next_available_stream_id/1,
+    get_settings/1,
+    update_self_settings/2,
+    update_peer_settings/2,
+    get_encode_context/1,
+    update_encode_context/2
    ]
   ).
 
 -export(
    [
     close/3,
-    send_what_we_can/4,
+    send_what_we_can/2,
     update_all_recv_windows/2,
     update_all_send_windows/2,
     update_their_max_active/2,
@@ -197,14 +227,23 @@
 %% new/1 returns a new stream_set. This is your constructor.
 -spec new(
         client | server,
-        sock:socket()
+        sock:socket(),
+        atom(), list()
        ) -> stream_set().
-new(client, Socket) ->
+new(client, Socket, CallbackMod, CallbackOpts) ->
     StreamSet = #stream_set{
+        callback_mod = CallbackMod,
+        callback_opts = CallbackOpts,
         socket=Socket,
+        connection=self(),
        type=client},
     ets:insert_new(StreamSet#stream_set.table, #lock{id={lock, ?SEND_LOCK}}),
-    ets:insert_new(StreamSet#stream_set.table, #lock{id={lock, ?RECV_LOCK}}),
+    ets:insert_new(StreamSet#stream_set.table, #lock{id={lock, ?SETTINGS_LOCK}}),
+    ets:insert_new(StreamSet#stream_set.table, #lock{id={lock, ?STREAMS_LOCK}}),
+    ets:insert_new(StreamSet#stream_set.table, #lock{id={lock, ?ENCODER_LOCK}}),
+    ets:insert_new(StreamSet#stream_set.table, #connection_settings{type=self_settings}),
+    ets:insert_new(StreamSet#stream_set.table, #connection_settings{type=peer_settings}),
+    ets:insert_new(StreamSet#stream_set.table, #context{}),
     atomics:put(StreamSet#stream_set.atomics, ?MY_NEXT_AVAILABLE_STREAM_ID, 1),
     %% I'm a client, so mine are always odd numbered
     ets:insert_new(StreamSet#stream_set.table,
@@ -221,12 +260,20 @@ new(client, Socket) ->
                        next_available_stream_id=2
                       }),
     StreamSet;
-new(server, Socket) ->
+new(server, Socket, CallbackMod, CallbackOpts) ->
     StreamSet = #stream_set{
+       callback_mod = CallbackMod,
+       callback_opts = CallbackOpts,
        socket=Socket,
+       connection=self(),
        type=server},
     ets:insert_new(StreamSet#stream_set.table, #lock{id={lock, ?SEND_LOCK}}),
-    ets:insert_new(StreamSet#stream_set.table, #lock{id={lock, ?RECV_LOCK}}),
+    ets:insert_new(StreamSet#stream_set.table, #lock{id={lock, ?SETTINGS_LOCK}}),
+    ets:insert_new(StreamSet#stream_set.table, #lock{id={lock, ?STREAMS_LOCK}}),
+    ets:insert_new(StreamSet#stream_set.table, #lock{id={lock, ?ENCODER_LOCK}}),
+    ets:insert_new(StreamSet#stream_set.table, #connection_settings{type=self_settings}),
+    ets:insert_new(StreamSet#stream_set.table, #connection_settings{type=peer_settings}),
+    ets:insert_new(StreamSet#stream_set.table, #context{}),
     %% I'm a server, so mine are always even numbered
     atomics:put(StreamSet#stream_set.atomics, ?MY_NEXT_AVAILABLE_STREAM_ID, 2),
     ets:insert_new(StreamSet#stream_set.table,
@@ -249,10 +296,6 @@ new(server, Socket) ->
         NotifyPid :: pid(),
         CBMod :: module(),
         CBOpts :: list(),
-        Socket :: sock:socket(),
-        InitialSendWindow :: integer(),
-        InitialRecvWindow :: integer(),
-        Type :: client | server,
         StreamSet :: stream_set()) ->
                         {pid(), stream_id(), stream_set()}
                             | {error, error_code(), closed_stream()}.
@@ -261,12 +304,11 @@ new_stream(
           NotifyPid,
           CBMod,
           CBOpts,
-          Socket,
-          InitialSendWindow,
-          InitialRecvWindow,
-          Type,
           StreamSet) ->
 
+    {SelfSettings, PeerSettings} = get_settings(StreamSet),
+    InitialSendWindow = PeerSettings#settings.initial_window_size,
+    InitialRecvWindow = SelfSettings#settings.initial_window_size,
     {PeerSubset, StreamId} = case StreamId0 of 
                                  next ->
                                      Next = atomics:add_get(StreamSet#stream_set.atomics, ?MY_NEXT_AVAILABLE_STREAM_ID, 2),
@@ -282,16 +324,25 @@ new_stream(
         true ->
             {error, ?REFUSED_STREAM, #closed_stream{id=StreamId}};
         false ->
-            {ok, Pid} = h2_stream:start_link(
-                       StreamId,
-                       StreamSet,
-                       self(),
-                       CBMod,
-                       CBOpts,
-                       Type,
-                       Socket
-                      ),
-            NewStream = #active_stream{
+            {ok, Pid} = case self() == StreamSet#stream_set.connection of
+                            true ->
+                                h2_stream:start_link(
+                                  StreamId,
+                                  StreamSet,
+                                  self(),
+                                  CBMod,
+                                  CBOpts
+                                 );
+                            false ->
+                                h2_stream:start(
+                                  StreamId,
+                                  StreamSet,
+                                  StreamSet#stream_set.connection,
+                                  CBMod,
+                                  CBOpts
+                                 )
+                        end,
+                    NewStream = #active_stream{
                            id = StreamId,
                            pid = Pid,
                            notify_pid=NotifyPid,
@@ -316,7 +367,29 @@ new_stream(
             end
     end.
 
-%read_socket(Fun, StreamSet) ->
+get_callback(#stream_set{callback_mod=CM, callback_opts = CO}) ->
+    {CM, CO}.
+
+socket(#stream_set{socket=Sock}) ->
+    Sock.
+
+connection(#stream_set{connection=Conn}) ->
+    Conn.
+
+get_settings(StreamSet) ->
+    {(hd(ets:lookup(StreamSet#stream_set.table, self_settings)))#connection_settings.settings, (hd(ets:lookup(StreamSet#stream_set.table, peer_settings)))#connection_settings.settings}.
+
+update_self_settings(StreamSet, Settings) ->
+    ets:insert(StreamSet#stream_set.table, #connection_settings{type=self_settings, settings=Settings}).
+
+update_peer_settings(StreamSet, Settings) ->
+    ets:insert(StreamSet#stream_set.table, #connection_settings{type=peer_settings, settings=Settings}).
+
+get_encode_context(StreamSet) ->
+    (hd(ets:lookup(StreamSet#stream_set.table, encode_context)))#context.context.
+
+update_encode_context(StreamSet, Context) ->
+    ets:insert(StreamSet#stream_set.table, #context{type=encode_context, context=Context}).
 
 -spec get_peer_subset(
         stream_id(),
@@ -664,12 +737,14 @@ update_my_max_active(NewMax, Streams) ->
     Streams.
 
 -spec send_what_we_can(StreamId :: all | stream_id(),
-                       ConnSendWindowSize :: integer(),
-                       MaxFrameSize :: non_neg_integer(),
                        Streams :: stream_set()) ->
                               {NewConnSendWindowSize :: integer(),
                                NewStreams :: stream_set()}.
-send_what_we_can(all, ConnSendWindowSize, MaxFrameSize, Streams) ->
+send_what_we_can(all, Streams) ->
+
+    ConnSendWindowSize = socket_send_window_size(Streams),
+    {_SelfSettings, PeerSettings} = get_settings(Streams),
+    MaxFrameSize = PeerSettings#settings.max_frame_size,
     AfterPeerWindowSize = c_send_what_we_can(
                             ConnSendWindowSize,
                             MaxFrameSize,
@@ -681,17 +756,19 @@ send_what_we_can(all, ConnSendWindowSize, MaxFrameSize, Streams) ->
                              get_my_active_streams(Streams),
                              Streams),
 
+    set_socket_send_window_size(AfterAfterWindowSize, Streams),
     {AfterAfterWindowSize,
-     Streams%#stream_set{ TODO
-       %theirs=Streams#stream_set.theirs#peer_subset{active=NewPeerInitiated},
-       %mine=Streams#stream_set.mine#peer_subset{active=NewSelfInitiated}
-      %}
-    };
-send_what_we_can(StreamId, ConnSendWindowSize, MaxFrameSize, Streams) ->
+     Streams};
+send_what_we_can(StreamId, Streams) ->
+    ConnSendWindowSize = socket_send_window_size(Streams),
+    {_SelfSettings, PeerSettings} = get_settings(Streams),
+    MaxFrameSize = PeerSettings#settings.max_frame_size,
     {NewConnSendWindowSize, NewStream} =
         s_send_what_we_can(ConnSendWindowSize,
                            MaxFrameSize,
+                           Streams#stream_set.socket,
                            get(StreamId, Streams)),
+    set_socket_send_window_size(NewConnSendWindowSize, Streams),
     {NewConnSendWindowSize,
      upsert(NewStream, Streams)}.
 
@@ -711,27 +788,28 @@ c_send_what_we_can(SWS, _MFS, [], _StreamSet) ->
     SWS;
 %% Otherwise, try sending on the working stream
 c_send_what_we_can(SWS, MFS, [S|Streams], StreamSet) ->
-    {NewSWS, NewS} = s_send_what_we_can(SWS, MFS, S),
+    {NewSWS, NewS} = s_send_what_we_can(SWS, MFS, StreamSet#stream_set.socket, S),
     ets:insert(StreamSet#stream_set.table, NewS),
     c_send_what_we_can(NewSWS, MFS, Streams, StreamSet).
 
 %% Send at the stream level
 -spec s_send_what_we_can(SWS :: integer(),
                          MFS :: non_neg_integer(),
+                         Socket :: sock:socket(),
                          Stream :: stream()) ->
                                 {integer(), stream()}.
-s_send_what_we_can(SWS, _, #active_stream{queued_data=Data,
+s_send_what_we_can(SWS, _, _, #active_stream{queued_data=Data,
                                           trailers=undefined}=S)
   when is_atom(Data) ->
     {SWS, S};
-s_send_what_we_can(SWS, _, #active_stream{queued_data=Data,
+s_send_what_we_can(SWS, _, _, #active_stream{queued_data=Data,
                                           id=_StreamId,
                                           pid=Pid,
                                           trailers=Trailers}=S)
   when is_atom(Data) ->
     h2_stream:send_trailers(Pid, Trailers),
     {SWS, S#active_stream{trailers=undefined}};
-s_send_what_we_can(SWS, MFS, #active_stream{}=Stream) ->
+s_send_what_we_can(SWS, MFS, Socket, #active_stream{}=Stream) ->
     %% We're coming in here with three numbers we need to look at:
     %% * Connection send window size
     %% * Stream send window size
@@ -769,6 +847,7 @@ s_send_what_we_can(SWS, MFS, #active_stream{}=Stream) ->
                 {SSWS, stream}
         end,
 
+        ct:pal("sending ~p of ~p", [MaxToSend, QueueSize]),
     {Frame, SentBytes, NewS} =
         case MaxToSend > QueueSize of
             true ->
@@ -808,7 +887,9 @@ s_send_what_we_can(SWS, MFS, #active_stream{}=Stream) ->
                    send_window_size=SSWS-MaxToSend}}
         end,
 
-    _Sent = h2_stream:send_data(Stream#active_stream.pid, Frame),
+        ct:pal("sending data ~p via ~p", [Frame, Stream#active_stream.pid]),
+        h2_stream:send_data(Stream#active_stream.pid, Frame),
+        %sock:send(Socket, h2_frame:to_binary(Frame)),a
 
     NewS1 = case NewS of
                 #active_stream{trailers=undefined} ->
@@ -824,13 +905,13 @@ s_send_what_we_can(SWS, MFS, #active_stream{}=Stream) ->
 
     case ExitStrategy of
         max_frame_size ->
-            s_send_what_we_can(SWS - SentBytes, MFS, NewS1);
+            s_send_what_we_can(SWS - SentBytes, Socket, MFS, NewS1);
         stream ->
             {SWS - SentBytes, NewS1};
         connection ->
             {SWS - SentBytes, NewS1}
     end;
-s_send_what_we_can(SWS, _MFS, NonActiveStream) ->
+s_send_what_we_can(SWS, _MFS, _Socket, NonActiveStream) ->
     {SWS, NonActiveStream}.
 
 
@@ -926,16 +1007,29 @@ decrement_recv_window(_, S) ->
     S.
 
 decrement_socket_recv_window(L, #stream_set{atomics = Atomics}) ->
-    atomics:sub(Atomics, ?RECV_WINDOW_SIZE, L).
+    atomics:sub_get(Atomics, ?RECV_WINDOW_SIZE, L).
 
 increment_socket_recv_window(L, #stream_set{atomics = Atomics}) ->
-    atomics:add(Atomics, ?RECV_WINDOW_SIZE, L).
+    atomics:add_get(Atomics, ?RECV_WINDOW_SIZE, L).
 
 socket_recv_window_size(#stream_set{atomics = Atomics}) ->
     atomics:get(Atomics, ?RECV_WINDOW_SIZE).
 
 set_socket_recv_window_size(Value, #stream_set{atomics = Atomics}) ->
     atomics:put(Atomics, ?RECV_WINDOW_SIZE, Value).
+
+decrement_socket_send_window(L, #stream_set{atomics = Atomics}) ->
+    atomics:sub_get(Atomics, ?SEND_WINDOW_SIZE, L).
+
+increment_socket_send_window(L, #stream_set{atomics = Atomics}) ->
+    atomics:add_get(Atomics, ?SEND_WINDOW_SIZE, L).
+
+socket_send_window_size(#stream_set{atomics = Atomics}) ->
+    atomics:get(Atomics, ?SEND_WINDOW_SIZE).
+
+set_socket_send_window_size(Value, #stream_set{atomics = Atomics}) ->
+    atomics:put(Atomics, ?SEND_WINDOW_SIZE, Value).
+
 
 send_window_size(#active_stream{send_window_size=SWS}) ->
     SWS;
@@ -1013,33 +1107,75 @@ my_max_active(SS) ->
 their_max_active(SS) ->
     (get_their_peers(SS))#peer_subset.max_active.
 
+take_lock(StreamSet, Locks, Fun) ->
+    ct:pal("taking locks ~p ~p", [Locks, self()]),
+    [ take_lock(lock_to_index(Lock), StreamSet) || Lock <- lists:sort(Locks) ],
+    Res = catch Fun(),
+    %ct:pal("lock fun res ~p", [Res]),
+    [ release_lock(lock_to_index(Lock), StreamSet) || Lock <- lists:sort(Locks) ],
+    Res.
+
 take_lock(Index, StreamSet=#stream_set{atomics=Atomics}) ->
     case atomics:compare_exchange(Atomics, Index, ?UNLOCKED, ?SHARED_LOCK) of
         ok ->
+            ct:pal("took lock ~p ~p", [Index, self()]),
             hold_lock(Index, StreamSet),
             ok;
         ?SHARED_LOCK ->
+            ct:pal("sharing lock ~p ~p", [Index, self()]),
             %% someone else already has a shared lock, this is fine
             hold_lock(Index, StreamSet),
             ok;
         ?EXCLUSIVE_LOCK ->
+            ct:pal("waiting for lock ~p ~p", [Index, self()]),
             %% need to wait for the exclusive access to be released
             wait_lock(Index, StreamSet)
     end.
 
+take_exclusive_lock(StreamSet, Locks, Fun) ->
+    ct:pal("taking exclusive locks ~p ~p", [Locks, self()]),
+    [ take_exclusive_lock(lock_to_index(Lock), StreamSet) || Lock <- lists:sort(Locks) ],
+    Res = catch Fun(),
+    %ct:pal("exclusive lock fun res ~p", [Res]),
+    [ release_exclusive_lock(lock_to_index(Lock), StreamSet) || Lock <- lists:sort(Locks) ],
+    Res.
+
+
 take_exclusive_lock(Index, StreamSet=#stream_set{atomics=Atomics}) ->
     case atomics:compare_exchange(Atomics, Index, ?UNLOCKED, ?EXCLUSIVE_LOCK) of
         ok ->
+            ct:pal("got exclusive lock ~p ~p", [Index, self()]),
             hold_lock(Index, StreamSet),
             ok;
         ?SHARED_LOCK ->
-            %% someone else already has a shared lock, this is fine
-            wait_lock(Index, StreamSet),
-            take_exclusive_lock(Index, StreamSet);
+            %% check if its only us holding the lock
+            JustUs = [self()],
+            ct:pal("upgrading shared lock to exclusive lock"),
+            case ets:select_count(StreamSet#stream_set.table, ets:fun2ms(fun(#lock{id={lock, I}, holders=H}=Lock) when I == Index, H == JustUs -> true end)) of
+                1 ->
+                    ct:pal("upgrade lock ~p to exclusive succeeded ~p", [Index, self()]),
+                    ok = atomics:compare_exchange(Atomics, Index, ?SHARED_LOCK, ?EXCLUSIVE_LOCK),
+                    hold_lock(Index, StreamSet);
+                0 ->
+                    ct:pal("upgrade lock ~p to exclusive failed ~p", [Index, self()]),
+                    %% someone else already has a shared lock, this is fine
+                    wait_lock(Index, StreamSet),
+                    take_exclusive_lock(Index, StreamSet)
+            end;
         ?EXCLUSIVE_LOCK ->
-            %% need to wait for the exclusive access to be released
-            wait_lock(Index, StreamSet),
-            take_exclusive_lock(Index, StreamSet)
+            JustUs = [self()],
+            case ets:select_count(StreamSet#stream_set.table, ets:fun2ms(fun(#lock{id={lock, I}, holders=H}=Lock) when I == Index, H == JustUs -> true end)) of
+                1 ->
+                    ct:pal("already held exclusive lock ~p ~p", [Index, self()]),
+                    hold_lock(Index, StreamSet),
+                    ok;
+                0 ->
+                    ct:pal("waiting for exclusive lock ~p ~p", [Index, self()]),
+                    ct:pal("~p", [ets:lookup(StreamSet#stream_set.table, {lock, Index})]),
+                    %% need to wait for the exclusive access to be released
+                    wait_lock(Index, StreamSet),
+                    take_exclusive_lock(Index, StreamSet)
+            end
     end.
 
 
@@ -1061,21 +1197,40 @@ wait_lock(Index, StreamSet) ->
 release_lock(Index, StreamSet) ->
     case ets:lookup(StreamSet#stream_set.table, {lock, Index}) of
         [#lock{holders=Holders, waiters=Waiters}] ->
+            ct:pal("lock ~p holders ~p ~p", [Index, Holders, self()]),
             Self = self(),
             %% filter out any dead holders and ourself
             case [ P || P <- Holders, erlang:is_process_alive(P), P /= Self ] of
                 [] ->
+                    ct:pal("releasing lock ~p ;  last holder ~p", [Index, self()]),
                     %% we were the last holder
                     case ets:select_replace(StreamSet#stream_set.table, ets:fun2ms(fun(#lock{id={lock, I}, holders=H}=Lock) when I == Index, H == Holders -> Lock#lock{waiters=[], holders=[]} end)) of
                         1 ->
-                            [ Pid ! {Ref, unlocked} || {Pid, Ref} <- Waiters ],
-                            ok = atomics:compare_exchange(StreamSet#stream_set.atomics, Index, ?SHARED_LOCK, ?UNLOCKED)
+                            case atomics:compare_exchange(StreamSet#stream_set.atomics, Index, ?SHARED_LOCK, ?UNLOCKED) of
+                                ok ->
+                                    ct:pal("lock ~p released ~p", [Index, self()]),
+                                    [ Pid ! {Ref, unlocked} || {Pid, Ref} <- Waiters ];
+                                ?EXCLUSIVE_LOCK ->
+                                    ct:pal("lock ~p upgraded to exclusive? ~p", [Index, self()]),
+                                    %% TODO this needs to be tracked better because when we upgrade a lock or re-take a lock
+                                    %% we need to know how many times to unlock it, and into what state
+                                    ok = atomics:compare_exchange(StreamSet#stream_set.atomics, Index, ?EXCLUSIVE_LOCK, ?UNLOCKED),
+                                    ct:pal("~p", [ets:lookup(StreamSet#stream_set.table, {lock, Index})]),
+                                    ok
+                            end,
+                            ok;
+                        N ->
+                            ct:pal("select_replace returned ~p", [N]),
+                            ok
                     end;
                 OtherHolders ->
+                    ct:pal("releasing lock ~p ; other holders ~p ~p", [Index, OtherHolders, self()]),
                     case ets:select_replace(StreamSet#stream_set.table, ets:fun2ms(fun(#lock{id={lock, I}, holders=H}=Lock) when I == Index, H == Holders -> Lock#lock{holders=OtherHolders} end)) of
                         1 ->
+                            ct:pal("released lock ~p ~p ", [Index, self()]),
                             ok;
                         _ ->
+                            ct:pal("failed to release lock ~p ~p", [Index, self()]),
                             release_lock(Index, StreamSet)
                     end
             end
@@ -1083,14 +1238,22 @@ release_lock(Index, StreamSet) ->
 
 release_exclusive_lock(Index, StreamSet) ->
     Self = self(),
-    1 = ets:select_replace(StreamSet#stream_set.table, 
-                       ets:fun2ms(fun(#lock{id={lock, I}, holders=H}=Lock) when I == Index, H == [Self] -> Lock#lock{holders=[]} end)),
     case ets:lookup(StreamSet#stream_set.table, {lock, Index}) of
-        [#lock{waiters=[]}] ->
+        [#lock{holders=H, waiters=W}] when H /= [Self] ->
+            ct:pal("released re-entrant exclusive lock ~p ~p", [Index, self()]),
+            NewHolders = H -- [Self],
+            true = lists:all(fun(E) -> E == Self end, NewHolders),
+            1 = ets:select_replace(StreamSet#stream_set.table, ets:fun2ms(fun(#lock{id={lock, I}}=Lock) when I == Index -> Lock#lock{waiters=W, holders=NewHolders} end)),
             ok;
         [#lock{waiters=Waiters}] ->
+            ct:pal("released exclusive lock ~p ~p", [Index, self()]),
             1 = ets:select_replace(StreamSet#stream_set.table, ets:fun2ms(fun(#lock{id={lock, I}}=Lock) when I == Index -> Lock#lock{waiters=[], holders=[]} end)),
-            [ Pid ! {Ref, unlocked} || {Pid, Ref} <- Waiters ],
             ok = atomics:compare_exchange(StreamSet#stream_set.atomics, Index, ?EXCLUSIVE_LOCK, ?UNLOCKED),
+            [ Pid ! {Ref, unlocked} || {Pid, Ref} <- Waiters ],
             ok
     end.
+
+lock_to_index(socket) -> ?SEND_LOCK;
+lock_to_index(settings) -> ?SETTINGS_LOCK;
+lock_to_index(streams) -> ?STREAMS_LOCK;
+lock_to_index(encoder) -> ?ENCODER_LOCK.
