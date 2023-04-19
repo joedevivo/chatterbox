@@ -1566,7 +1566,7 @@ spawn_data_receiver(Socket, Streams, Flow) ->
                                                                        F(S, St, false, Decoder)
                                                                end;
                                                            _ ->
-                                                               ct:pal("data on inactive stream"),
+                                                               ct:pal("data on inactive stream ~p", [Header#frame_header.stream_id]),
                                                                go_away_(?PROTOCOL_ERROR, <<"data on inactive stream">>, S, St),
                                                                Connection ! {go_away, ?PROTOCOL_ERROR}
                                                        end
