@@ -746,6 +746,7 @@ route_frame(Event, {H, _Payload},
               }}, ok)
                                                               end);
         _X ->
+            ct:pal("invalid settings ack"),
             maybe_reply(Event, {next_state, closing, Conn}, ok)
     end;
 
@@ -1248,6 +1249,7 @@ handle_event(info, {ssl_error, Socket, Reason},
               }=Conn) ->
     handle_socket_error(Reason, Conn);
 handle_event(info, {go_away, ErrorCode}, Conn) ->
+    ct:pal("sent goaway ~p", [ErrorCode]),
     gen_statem:cast(self(), io_lib:format("GO_AWAY: ErrorCode ~p", [ErrorCode])),
     {next_state, closing, Conn};
 %handle_event(info, {_,R},
@@ -1389,6 +1391,7 @@ go_away(Event, ErrorCode, Conn) ->
     go_away(Event, ErrorCode, <<>>, Conn).
 
 go_away(Event, ErrorCode, Reason, Conn) ->
+    ct:pal("sending goaway ~p ~p", [ErrorCode, Reason]),
     go_away_(ErrorCode, Reason, Conn#connection.socket, Conn#connection.streams),
     %% TODO: why is this sending a string?
     gen_statem:cast(self(), io_lib:format("GO_AWAY: ErrorCode ~p", [ErrorCode])),
@@ -1805,6 +1808,7 @@ start_http2_server(
              send_settings(Http2Settings, NewState)
             };
         {error, invalid_preface} ->
+            ct:pal("invalid preface"),
             {next_state, closing, Conn}
     end.
 
