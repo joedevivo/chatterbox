@@ -115,7 +115,7 @@ basic_push(_Config) ->
     %% We'll know we're done when we're notified of all the streams ending.
     wait_for_n_notifications(12),
 
-    Streams = h2_connection:get_streams(Client),
+    Streams = Client,
     ct:pal("Streams ~p", [Streams]),
     ?assertEqual(0, (h2_stream_set:my_active_count(Streams))),
     ?assertEqual(0, (h2_stream_set:their_active_count(Streams))),

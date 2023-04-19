@@ -1506,8 +1506,8 @@ spawn_data_receiver(Socket, Streams, Flow) ->
                                        StreamId = Header#frame_header.stream_id,
                                        {#settings{max_frame_size=MFS}, _} = h2_stream_set:get_settings(St),
                                        case Header#frame_header.type of
-                                           _ when L > MFS ->
-                                               go_away_(?FRAME_SIZE_ERROR, S, St),
+                                           _ when L > MFS andalso false ->
+                                               go_away_(?FRAME_SIZE_ERROR, list_to_binary(io_lib:format("received frame of size ~p over max of ~p", [L, MFS])), S, St),
                                                Connection ! {go_away, ?FRAME_SIZE_ERROR};
                                            %% The first frame should be the client settings as per
                                            %% RFC-7540#3.5
@@ -1673,7 +1673,7 @@ spawn_data_receiver(Socket, Streams, Flow) ->
                                                go_away_(?PROTOCOL_ERROR, <<"ping on stream /= 0">>, S, St),
                                                Connection ! {go_away, ?PROTOCOL_ERROR};
                                            ?PING when Header#frame_header.length /= 8 ->
-                                               go_away_(?FRAME_SIZE_ERROR, S, St),
+                                               go_away_(?FRAME_SIZE_ERROR, "Header length is length 8", S, St),
                                                Connection ! {go_away, ?FRAME_SIZE_ERROR};
                                            ?PING when ?NOT_FLAG((Header#frame_header.flags), ?FLAG_ACK) ->
                                                Ack = h2_frame_ping:ack(Payload),
