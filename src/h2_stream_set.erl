@@ -488,6 +488,7 @@ get_from_subset(Id,
                    lowest_stream_id=Lowest
                   }, _StreamSet)
   when Id < Lowest ->
+    ct:pal("returning closed stream for ~p id < lowest", [Id]),
     #closed_stream{id=Id};
 get_from_subset(Id,
                 #peer_subset{
@@ -498,11 +499,13 @@ get_from_subset(Id,
 get_from_subset(Id, _PeerSubset, StreamSet) ->
     try ets:lookup(StreamSet#stream_set.table, Id)  of
         [] ->
+            ct:pal("returning closed stream for ~p unknown", [Id]),
             #closed_stream{id=Id};
         [Stream] ->
             Stream
     catch
         _:_ ->
+            ct:pal("returning closed stream for ~p on ets crasj", [Id]),
             #closed_stream{id=Id}
     end.
 
