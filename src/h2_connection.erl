@@ -1611,8 +1611,8 @@ spawn_data_receiver(Socket, Streams, Flow) ->
                                                                          Streams),
                                                                        F(S, St, false, Decoder)
                                                                end;
-                                                           Type ->
-                                                               go_away_(?PROTOCOL_ERROR, list_to_binary(io_lib:format("data on ~p stream ~p", [Type, Header#frame_header.stream_id])), S, St),
+                                                           StreamType ->
+                                                               go_away_(?PROTOCOL_ERROR, list_to_binary(io_lib:format("data on ~p stream ~p", [StreamType, Header#frame_header.stream_id])), S, St),
                                                                Connection ! {go_away, ?PROTOCOL_ERROR}
                                                        end
                                                end;
