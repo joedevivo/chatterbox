@@ -503,7 +503,7 @@ get_from_subset(Id,
 get_from_subset(Id, _PeerSubset, StreamSet) ->
     try ets:lookup(StreamSet#stream_set.table, Id)  of
         [] ->
-            ct:pal("returning closed stream for ~p unknown", [Id]),
+            ct:pal("returning closed stream ~p for unknown", [Id]),
             timer:sleep(100),
             try ets:lookup(StreamSet#stream_set.table, Id)  of
                 [] ->
