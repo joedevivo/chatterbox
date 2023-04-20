@@ -311,6 +311,7 @@ send_headers(Pid, StreamId, Headers, Opts) ->
 
 -spec rst_stream(h2_stream_set:stream_set(), stream_id(), error_code()) -> ok.
 rst_stream(Streams, StreamId, ErrorCode) ->
+    ct:pal("client requested rst stream"),
     Stream = h2_stream_set:get(StreamId, Streams),
     rst_stream__(Stream, ErrorCode, h2_stream_set:socket(Streams)).
 
@@ -1601,6 +1602,7 @@ spawn_data_receiver(Socket, Streams, Flow) ->
                                        go_away_(Code, <<"stream error">>, S, St),
                                        Connection ! {go_away, Code};
                                    {stream_error, StreamId, Code} ->
+                                       ct:pal("got stream error ~p", [Code]),
                                        Stream = h2_stream_set:get(StreamId, St),
                                        rst_stream__(Stream, Code, S),
                                        F(S, St, false, Decoder);
@@ -1684,6 +1686,7 @@ spawn_data_receiver(Socket, Streams, Flow) ->
                                                              CallbackOpts,
                                                              Streams) of
                                                            {error, ErrorCode, NewStream} ->
+                                                               ct:pal("RST when creating stream ~p", [ErrorCode]),
                                                                rst_stream__(NewStream, ErrorCode, S),
                                                                none;
                                                            {_, _, _NewStreams} ->
@@ -1979,8 +1982,10 @@ recv_h_(Stream,
             h2_stream:send_event(Pid, {recv_h, Headers});
         closed ->
             %% If the stream is closed, there's no running FSM
+            ct:pal("closed when recv_h"),
             rst_stream__(Stream, ?STREAM_CLOSED, Sock);
         idle ->
+            ct:pal("idle when recv_h"),
             %% If we're calling this function, we've already activated
             %% a stream FSM (probably). On the off chance we didn't,
             %% we'll throw this
@@ -2021,8 +2026,10 @@ recv_es_(Stream, Sock) ->
             Pid = h2_stream_set:pid(Stream),
             h2_stream:send_event(Pid, recv_es);
         closed ->
+            ct:pal("closed when recv_es"),
             rst_stream__(Stream, ?STREAM_CLOSED, Sock);
         idle ->
+            ct:pal("idle when recv_es"),
             rst_stream__(Stream, ?STREAM_CLOSED, Sock)
     end.
 
