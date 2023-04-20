@@ -444,7 +444,15 @@ send_promise(Streams, StreamId, NewStreamId, Headers) ->
     NewStream = h2_stream_set:get(NewStreamId, Streams),
     case h2_stream_set:type(NewStream) of
         active ->
-            h2_stream_set:take_exclusive_lock(Streams, [encoder],
+            EncodeContext0 = h2_stream_set:get_encode_context(Streams),
+            Locks = case hpack:all_fields_indexed(Headers, EncodeContext0) of
+                        true ->
+                            ct:pal("bypassing encoder lock"),
+                            [];
+                        false ->
+                            [encoder]
+                    end,
+            h2_stream_set:take_exclusive_lock(Streams, Locks,
                                               fun() ->
                                                       OldContext = h2_stream_set:get_encode_context(Streams),
                                                       %% TODO: This could be a series of frames, not just one
@@ -460,7 +468,12 @@ send_promise(Streams, StreamId, NewStreamId, Headers) ->
                                                       Binary = h2_frame:to_binary(PromiseFrame),
                                                       sock:send(h2_stream_set:socket(Streams), Binary),
 
-                                                      h2_stream_set:update_encode_context(Streams, NewContext),
+                                                      case Locks of
+                                                          [] ->
+                                                              ok;
+                                                          _ ->
+                                                              h2_stream_set:update_encode_context(Streams, NewContext)
+                                                      end,
 
                                                       %% Get the promised stream rolling
                                                       h2_stream:send_pp(h2_stream_set:stream_pid(NewStream), Headers),
@@ -553,7 +566,7 @@ handshake(Event, {frame, {FH, _Payload}=Frame}, State=#connection{streams=Stream
     case FH#frame_header.type of
         ?SETTINGS ->
             %% take an exclusive lock since we know this is a settings frame
-            h2_stream_set:take_exclusive_lock(Streams, [settings, encoder],
+            h2_stream_set:take_exclusive_lock(Streams, [settings],
                                               fun () ->
                                                       {SelfSettings, PeerSettings} = h2_stream_set:get_settings(Streams),
                                                       route_frame(Event, Frame, SelfSettings, PeerSettings, State) end);
@@ -661,7 +674,12 @@ route_frame(Event, {H, Payload},
             %% We've just got connection settings from a peer. He have a
             %% couple of jobs to do here w.r.t. flow control
 
-            h2_stream_set:take_exclusive_lock(Streams, [streams, settings, encoder],
+            Locks = [ encoder || proplists:get_value(?SETTINGS_HEADER_TABLE_SIZE, PList) /= undefined ] ++
+                    [ streams || proplists:get_value(?SETTINGS_MAX_CONCURRENT_STREAMS, PList) /= undefined orelse Delta /= 0 ] ++
+                    [ settings],
+
+            ct:pal("new settings need locks ~p", [Locks]),
+            h2_stream_set:take_exclusive_lock(Streams, Locks,
                                               fun() ->
                                                       ct:pal("saved new peer settings ~p", [NewPeerSettings]),
                                                       h2_stream_set:update_peer_settings(Streams, NewPeerSettings),
@@ -902,6 +920,7 @@ route_frame(Event,
         idle ->
             go_away(Event, ?PROTOCOL_ERROR, <<"window update on idle stream">>, Conn);
         closed ->
+            ct:pal("stream ~p closed on window update", [StreamId]),
             rst_stream_(Event, Stream, ?STREAM_CLOSED, Conn);
         active ->
             NewSSWS = h2_stream_set:send_window_size(Stream)+WSI,
@@ -988,7 +1007,16 @@ handle_event(_, {send_headers, StreamId, Headers, Opts}, Conn) ->
     {keep_state, Conn};
 handle_event(_, {actually_send_trailers, StreamId, Trailers}, Conn=#connection{streams=Streams,
                                                                                socket=Socket}) ->
-    h2_stream_set:take_exclusive_lock(Streams, [encoder],
+
+    EncodeContext0 = h2_stream_set:get_encode_context(Streams),
+    Locks = case hpack:all_fields_indexed(Trailers, EncodeContext0) of
+                true ->
+                    ct:pal("bypassing encoder lock"),
+                    [];
+                false ->
+                    [encoder]
+            end,
+    h2_stream_set:take_exclusive_lock(Streams, Locks,
                                       fun() ->
                                               Stream = h2_stream_set:get(StreamId, Streams),
                                               EncodeContext = h2_stream_set:get_encode_context(Streams),
@@ -1000,7 +1028,12 @@ handle_event(_, {actually_send_trailers, StreamId, Trailers}, Conn=#connection{s
                                                                          PeerSettings#settings.max_frame_size,
                                                                          true
                                                                         ),
-                                              h2_stream_set:update_encode_context(Streams, NewContext),
+                                              case Locks of
+                                                  [] ->
+                                                      ok;
+                                                  _ ->
+                                                      h2_stream_set:update_encode_context(Streams, NewContext)
+                                              end,
 
                                               sock:send(Socket, [h2_frame:to_binary(Frame) || Frame <- FramesToSend]),
                                               {keep_state, Conn}
@@ -1068,7 +1101,15 @@ handle_event(_, {send_promise, StreamId, NewStreamId, Headers},
     NewStream = h2_stream_set:get(NewStreamId, Streams),
     case h2_stream_set:type(NewStream) of
         active ->
-            h2_stream_set:take_exclusive_lock(Streams, [encoder],
+            EncodeContext0 = h2_stream_set:get_encode_context(Streams),
+            Locks = case hpack:all_fields_indexed(Headers, EncodeContext0) of
+                        true ->
+                            ct:pal("bypassing encoder lock"),
+                            [];
+                        false ->
+                            [encoder]
+                    end,
+            h2_stream_set:take_exclusive_lock(Streams, Locks,
                                               fun() ->
                                                       OldContext = h2_stream_set:get_encode_context(Streams),
                                                       %% TODO: This could be a series of frames, not just one
@@ -1084,7 +1125,12 @@ handle_event(_, {send_promise, StreamId, NewStreamId, Headers},
                                                       Binary = h2_frame:to_binary(PromiseFrame),
                                                       socksend(Conn, Binary),
 
-                                                      h2_stream_set:update_encode_context(Streams, NewContext),
+                                                      case Locks of
+                                                          [] ->
+                                                              ok;
+                                                          _ ->
+                                                              h2_stream_set:update_encode_context(Streams, NewContext)
+                                                      end,
 
                                                       %% Get the promised stream rolling
                                                       h2_stream:send_pp(h2_stream_set:stream_pid(NewStream), Headers),
@@ -1360,7 +1406,15 @@ send_headers_(StreamId, Headers, Opts, Streams) ->
     Stream = h2_stream_set:get(StreamId, Streams),
     case h2_stream_set:type(Stream) of
         active ->
-            h2_stream_set:take_exclusive_lock(Streams, [encoder],
+            EncodeContext0 = h2_stream_set:get_encode_context(Streams),
+            Locks = case hpack:all_fields_indexed(Headers, EncodeContext0) of
+                        true ->
+                            ct:pal("bypassing encoder lock"),
+                            [];
+                        false ->
+                            [encoder]
+                    end,
+            h2_stream_set:take_exclusive_lock(Streams, Locks,
                                               fun() ->
                                                       {_SelfSettings, PeerSettings} = h2_stream_set:get_settings(Streams),
                                                       EncodeContext = h2_stream_set:get_encode_context(Streams),
@@ -1371,7 +1425,12 @@ send_headers_(StreamId, Headers, Opts, Streams) ->
                                                                                  PeerSettings#settings.max_frame_size,
                                                                                  StreamComplete
                                                                                 ),
-                                                      h2_stream_set:update_encode_context(Streams, NewContext),
+                                                      case Locks of
+                                                          [] ->
+                                                              ok;
+                                                          _ ->
+                                                              h2_stream_set:update_encode_context(Streams, NewContext)
+                                                      end,
                                                       sock:send(Socket, [h2_frame:to_binary(Frame) || Frame <- FramesToSend]),
                                                       send_h(Stream, Headers),
                                                       ok
@@ -1501,6 +1560,7 @@ spawn_data_receiver(Socket, Streams, Flow) ->
                                        Connection ! {go_away, Code};
                                    {stream_error, StreamId, Code} ->
                                        Stream = h2_stream_set:get(StreamId, St),
+                                       ct:pal("stream error ~p on stream ~p", [Code, StreamId]),
                                        rst_stream__(Stream, Code, S),
                                        F(S, St, false, Decoder);
                                    {#frame_header{length=L} = Header, Payload} = Frame ->
@@ -1587,7 +1647,7 @@ spawn_data_receiver(Socket, Streams, Flow) ->
                                                              CallbackOpts,
                                                              Streams) of
                                                            {error, ErrorCode, NewStream} ->
-                                                               ct:pal("error creating stream ~p", [ErrorCode]),
+                                                               ct:pal("error ~p creating stream ~p", [ErrorCode, StreamId]),
                                                                rst_stream__(NewStream, ErrorCode, S),
                                                                none;
                                                            {_, _, _NewStreams} ->
@@ -1670,6 +1730,7 @@ spawn_data_receiver(Socket, Streams, Flow) ->
                                                        go_away_(?PROTOCOL_ERROR, <<"RST on idle stream">>, S, St),
                                                        Connection ! {go_away, ?PROTOCOL_ERROR};
                                                    _Stream ->
+                                                       ct:pal("ignoring reset stream on ~p", [StreamId]),
                                                        %% TODO: RST_STREAM support
                                                        F(S, St, false, Decoder)
                                                end;
@@ -1677,7 +1738,7 @@ spawn_data_receiver(Socket, Streams, Flow) ->
                                                go_away_(?PROTOCOL_ERROR, <<"ping on stream /= 0">>, S, St),
                                                Connection ! {go_away, ?PROTOCOL_ERROR};
                                            ?PING when Header#frame_header.length /= 8 ->
-                                               go_away_(?FRAME_SIZE_ERROR, "Header length is length 8", S, St),
+                                               go_away_(?FRAME_SIZE_ERROR, <<"Header length is not 8">>, S, St),
                                                Connection ! {go_away, ?FRAME_SIZE_ERROR};
                                            ?PING when ?NOT_FLAG((Header#frame_header.flags), ?FLAG_ACK) ->
                                                Ack = h2_frame_ping:ack(Payload),
@@ -1882,11 +1943,11 @@ recv_h_(Stream,
             Pid = h2_stream_set:pid(Stream),
             h2_stream:send_event(Pid, {recv_h, Headers});
         closed ->
-            ct:pal("stream closed"),
+            ct:pal("stream ~p closed on recv_h", [h2_stream_set:stream_id(Stream)]),
             %% If the stream is closed, there's no running FSM
             rst_stream__(Stream, ?STREAM_CLOSED, Sock);
         idle ->
-            ct:pal("stream idle"),
+            ct:pal("stream ~p idle on recv_h", [h2_stream_set:stream_id(Stream)]),
             %% If we're calling this function, we've already activated
             %% a stream FSM (probably). On the off chance we didn't,
             %% we'll throw this
@@ -1927,10 +1988,10 @@ recv_es_(Stream, Sock) ->
             Pid = h2_stream_set:pid(Stream),
             h2_stream:send_event(Pid, recv_es);
         closed ->
-            ct:pal("stream closed"),
+            ct:pal("stream ~p closed on recv_es", [h2_stream_set:stream_id(Stream)]),
             rst_stream__(Stream, ?STREAM_CLOSED, Sock);
         idle ->
-            ct:pal("stream idle"),
+            ct:pal("stream ~p idle on recv_es", [h2_stream_set:stream_id(Stream)]),
             rst_stream__(Stream, ?STREAM_CLOSED, Sock)
     end.
 

@@ -10,6 +10,7 @@
          on_send_push_promise/2,
          on_receive_data/2,
          on_end_stream/1,
+         handle_info/2,
          terminate/1
         ]).
 
@@ -150,6 +151,10 @@ on_end_stream(State=#cb_static{connection_pid=ConnPid,
             ct:pal("done sending body ~p", [StreamId])
     end,
 
+    {ok, State}.
+
+handle_info(Event, State) ->
+    ct:pal("got unknown info ~p", [Event]),
     {ok, State}.
 
 terminate(_State) ->

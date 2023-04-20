@@ -10,6 +10,7 @@
          on_send_push_promise/2,
          on_receive_data/2,
          on_end_stream/1,
+         handle_info/2,
          terminate/1
         ]).
 
@@ -53,6 +54,10 @@ on_end_stream(State=#state{conn_pid=ConnPid,
                       ],
     h2_connection:send_headers(ConnPid, StreamId, ResponseHeaders),
     h2_connection:send_body(ConnPid, StreamId, Body),
+    {ok, State}.
+
+handle_info(Event, State) ->
+    ct:pal("handle_info(~p, ~p)", [Event, State]),
     {ok, State}.
 
 terminate(_State) ->

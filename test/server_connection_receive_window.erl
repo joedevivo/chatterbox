@@ -8,6 +8,7 @@
          on_send_push_promise/2,
          on_receive_data/2,
          on_end_stream/1,
+         handle_info/2,
          terminate/1
         ]).
 
@@ -34,6 +35,10 @@ on_receive_data(Bin, State)->
 
 on_end_stream(State) ->
     ct:pal("on_end_stream(~p)", [State]),
+    {ok, State}.
+
+handle_info(Event, State) ->
+    ct:pal("handle_info(~p, ~p)", [Event, State]),
     {ok, State}.
 
 terminate(_State) ->

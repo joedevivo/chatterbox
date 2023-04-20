@@ -99,6 +99,11 @@
             CallbackState :: callback_state()) ->
     {ok, NewState :: callback_state()}.
 
+-callback handle_info(
+            Event :: any(),
+            CallbackState :: callback_state()) ->
+    {ok, NewState :: callback_state()}.
+
 -callback terminate(
             CallbackState :: callback_state()) ->
     any().
@@ -410,7 +415,7 @@ open(cast, {recv_data,
        }=Stream)
   when ?NOT_FLAG(Flags, ?FLAG_END_STREAM) ->
     Bin = h2_frame_data:data(Payload),
-    ct:pal("recv data ~p", [F]),
+    ct:pal("~p recv data ~p", [self(), F]),
     case CB of
         undefined ->
             {next_state,
@@ -443,7 +448,7 @@ open(cast, {recv_data,
        }=Stream)
   when ?IS_FLAG(Flags, ?FLAG_END_STREAM) ->
     Bin = h2_frame_data:data(Payload),
-    ct:pal("recv data END ~p", [F]),
+    ct:pal("~p recv data END ~p", [self(), F]),
     case CB of
         undefined ->
             NewStream =
@@ -454,8 +459,10 @@ open(cast, {recv_data,
                  },
             case check_content_length(NewStream) of
                 ok ->
+                    ct:pal("~p stream going half-closed-remote", [self()]),
                     {next_state, half_closed_remote, NewStream};
                 rst_stream ->
+                    ct:pal("~p stream going closed", [self()]),
                     {next_state, closed, NewStream}
             end;
 
@@ -469,6 +476,7 @@ open(cast, {recv_data,
                          },
             case check_content_length(NewStream) of
                 ok ->
+                    ct:pal("~p stream going half-closed-remote", [self()]),
                     {ok, NewCBState1} = callback(CB, on_end_stream, [], NewCBState),
                     {next_state,
                      half_closed_remote,
@@ -476,6 +484,7 @@ open(cast, {recv_data,
                        callback_state=NewCBState1
                       }};
                 rst_stream ->
+                    ct:pal("~p stream going closed", [self()]),
                     {next_state,
                      closed,
                      NewStream}
@@ -516,7 +525,7 @@ open(cast, {send_data,
      #stream_state{
         socket=Socket
        }=Stream) ->
-    ct:pal("sending header ~p", [F]),
+    ct:pal("~p sending header ~p", [self(), F]),
     sock:send(Socket, h2_frame:to_binary(F)),
 
     NextState =
@@ -545,7 +554,7 @@ open(cast, {send_data,
                 open
         end,
 
-    ct:pal("sending data ~p -> ~p", [F, NextState]),
+    ct:pal("~p sending data ~p -> ~p", [self(), F, NextState]),
     {next_state, NextState, Stream};
 open(_, {send_trailers, Trailers}, Stream) ->
     send_trailers(open, Trailers, Stream);
@@ -649,6 +658,7 @@ half_closed_local(cast,
                   #stream_state{callback_mod=CB,
                                 callback_state=CallbackState
                                }=Stream) ->
+    ct:pal("~p got ~p", [self(), Headers]),
   case is_valid_headers(response, Headers) of
       ok ->
           {ok, NewCBState} = callback(CB, on_receive_headers, [Headers], CallbackState),
@@ -671,6 +681,7 @@ half_closed_local(cast,
      callback_mod=undefined,
      incoming_frames=IFQ
      } = Stream) ->
+    ct:pal("~p got ~p", [self(), F]),
     NewQ = queue:in(F, IFQ),
     case ?IS_FLAG(Flags, ?FLAG_END_STREAM) of
         true ->
@@ -694,11 +705,12 @@ half_closed_local(cast,
    {#frame_header{
        flags=Flags,
        type=?DATA
-      }, Payload}},
+      }, Payload}=F},
   #stream_state{
      callback_mod=CB,
      callback_state=CallbackState
      } = Stream) ->
+    ct:pal("~p got ~p", [self(), F]),
     Data = h2_frame_data:data(Payload),
     {ok, NewCBState} = callback(CB, on_receive_data, [Data], CallbackState),
     case ?IS_FLAG(Flags, ?FLAG_END_STREAM) of
@@ -722,6 +734,7 @@ half_closed_local(cast, recv_es,
                      callback_state=CallbackState,
                      incoming_frames = Q
                     } = Stream) ->
+    ct:pal("~p got es", [self()]),
     {ok, NewCBState} = callback(CB, on_end_stream, [], CallbackState),
     Data = [h2_frame_data:data(Payload) || {#frame_header{type=?DATA}, Payload} <- queue:to_list(Q)],
     {next_state, closed,
@@ -737,6 +750,7 @@ half_closed_local(cast, recv_es,
                      callback_mod=CB,
                      callback_state=CallbackState
                     } = Stream) ->
+    ct:pal("~p got es", [self()]),
     {ok, NewCBState} = callback(CB, on_end_stream, [], CallbackState),
     {next_state, closed,
      Stream#stream_state{
@@ -890,10 +904,12 @@ check_content_length(Stream) ->
 
     case ContentLength of
         undefined ->
+            ct:pal("content length was undefined"),
             ok;
         _Other ->
             try binary_to_integer(ContentLength) of
                 Integer ->
+                    ct:pal("check content length ~p ~p", [Stream#stream_state.request_body_size, Integer]),
                     case Stream#stream_state.request_body_size =:= Integer of
                         true ->
                             ok;

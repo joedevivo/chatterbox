@@ -807,6 +807,7 @@ s_send_what_we_can(SWS, _, _, #active_stream{queued_data=Data,
                                           pid=Pid,
                                           trailers=Trailers}=S)
   when is_atom(Data) ->
+    ct:pal("sending trailers on stream ~p", [_StreamId]),
     h2_stream:send_trailers(Pid, Trailers),
     {SWS, S#active_stream{trailers=undefined}};
 s_send_what_we_can(SWS, MFS, Socket, #active_stream{}=Stream) ->
@@ -897,6 +898,7 @@ s_send_what_we_can(SWS, MFS, Socket, #active_stream{}=Stream) ->
                 #active_stream{pid=Pid,
                                queued_data=done,
                                trailers=Trailers1} ->
+                    ct:pal("sending trailers on stream ~p", [NewS#active_stream.id]),
                     h2_stream:send_trailers(Pid, Trailers1),
                     NewS#active_stream{trailers=undefined};
                 _ ->
@@ -1170,11 +1172,28 @@ take_exclusive_lock(Index, StreamSet=#stream_set{atomics=Atomics}) ->
                     hold_lock(Index, StreamSet),
                     ok;
                 0 ->
-                    ct:pal("waiting for exclusive lock ~p ~p", [Index, self()]),
-                    ct:pal("~p", [ets:lookup(StreamSet#stream_set.table, {lock, Index})]),
-                    %% need to wait for the exclusive access to be released
-                    wait_lock(Index, StreamSet),
-                    take_exclusive_lock(Index, StreamSet)
+                    case ets:select_count(StreamSet#stream_set.table, ets:fun2ms(fun(#lock{id={lock, I}, holders=H}=Lock) when I == Index, H == [] -> true end)) of
+                        1 ->
+                            ct:pal("~p claiming orphaned exclusive lock", [self()]),
+                            Self = self(),
+                            case ets:select_replace(StreamSet#stream_set.table,
+                                                    ets:fun2ms(fun(#lock{id={lock, I}, holders=[]}=Lock) when I == Index -> Lock#lock{holders=[Self]} end)) of
+                                1 ->
+                                    ok;
+                                _ ->
+                                    ct:pal("waiting for exclusive lock ~p ~p", [Index, self()]),
+                                    ct:pal("~p", [ets:lookup(StreamSet#stream_set.table, {lock, Index})]),
+                                    %% need to wait for the exclusive access to be released
+                                    wait_lock(Index, StreamSet),
+                                    take_exclusive_lock(Index, StreamSet)
+                            end;
+                        _ ->
+                            ct:pal("waiting for exclusive lock ~p ~p", [Index, self()]),
+                            ct:pal("~p", [ets:lookup(StreamSet#stream_set.table, {lock, Index})]),
+                            %% need to wait for the exclusive access to be released
+                            wait_lock(Index, StreamSet),
+                            take_exclusive_lock(Index, StreamSet)
+                    end
             end
     end.
 
@@ -1189,9 +1208,22 @@ wait_lock(Index, StreamSet) ->
     Ref = make_ref(),
     1 = ets:select_replace(StreamSet#stream_set.table,
                        ets:fun2ms(fun(#lock{id={lock, I}, waiters=H}=Lock) when I == Index -> Lock#lock{waiters=[{Self, Ref}|H]} end)),
+    wait_ref(Index, Ref, StreamSet).
+
+wait_ref(Index, Ref, StreamSet) ->
     receive
         {Ref, unlocked} ->
             ok
+    after 1000 ->
+              case ets:select_count(StreamSet#stream_set.table, ets:fun2ms(fun(#lock{id={lock, I}, holders=[]}=Lock) when I == Index -> true end)) of
+                  1 ->
+                      ct:pal("orphaned lock"),
+                      ok;
+                  _ ->
+                      ct:pal("~p still waiting on ~p", [self(), Index]),
+                      ct:pal("~p", [ets:lookup(StreamSet#stream_set.table, {lock, Index})]),
+                      wait_ref(Index, Ref, StreamSet)
+              end
     end.
 
 release_lock(Index, StreamSet) ->
@@ -1214,7 +1246,11 @@ release_lock(Index, StreamSet) ->
                                     ct:pal("lock ~p upgraded to exclusive? ~p", [Index, self()]),
                                     %% TODO this needs to be tracked better because when we upgrade a lock or re-take a lock
                                     %% we need to know how many times to unlock it, and into what state
-                                    ok = atomics:compare_exchange(StreamSet#stream_set.atomics, Index, ?EXCLUSIVE_LOCK, ?UNLOCKED),
+                                    case atomics:compare_exchange(StreamSet#stream_set.atomics, Index, ?EXCLUSIVE_LOCK, ?UNLOCKED) of
+                                        ok -> ok;
+                                        ?UNLOCKED ->
+                                            ok
+                                    end,
                                     ct:pal("~p", [ets:lookup(StreamSet#stream_set.table, {lock, Index})]),
                                     ok
                             end,
@@ -1242,7 +1278,8 @@ release_exclusive_lock(Index, StreamSet) ->
         [#lock{holders=H, waiters=W}] when H /= [Self] ->
             ct:pal("released re-entrant exclusive lock ~p ~p", [Index, self()]),
             NewHolders = H -- [Self],
-            true = lists:all(fun(E) -> E == Self end, NewHolders),
+            ct:pal("~p new holders ~p", [self(), NewHolders]),
+            %true = lists:all(fun(E) -> E == Self end, NewHolders),
             1 = ets:select_replace(StreamSet#stream_set.table, ets:fun2ms(fun(#lock{id={lock, I}}=Lock) when I == Index -> Lock#lock{waiters=W, holders=NewHolders} end)),
             ok;
         [#lock{waiters=Waiters}] ->
