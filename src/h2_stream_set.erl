@@ -389,7 +389,9 @@ update_peer_settings(StreamSet, Settings) ->
     ets:insert(StreamSet#stream_set.table, #connection_settings{type=peer_settings, settings=Settings}).
 
 get_encode_context(StreamSet) ->
-    (hd(ets:lookup(StreamSet#stream_set.table, encode_context)))#context.context.
+    try (hd(ets:lookup(StreamSet#stream_set.table, encode_context)))#context.context
+    catch _:_ -> hpack:new_context()
+    end.
 
 update_encode_context(StreamSet, Context) ->
     ets:insert(StreamSet#stream_set.table, #context{type=encode_context, context=Context}).
@@ -414,7 +416,7 @@ get_peer_subset(Id, StreamSet) ->
 get_my_peers(StreamSet) ->
     Next = atomics:get(StreamSet#stream_set.atomics, ?MY_NEXT_AVAILABLE_STREAM_ID),
     try (hd(ets:lookup(StreamSet#stream_set.table, mine)))#peer_subset{next_available_stream_id=Next}
-    catch _:_ -> hpack:new_context()
+    catch _:_ -> #peer_subset{}
     end.
 
 -spec get_their_peers(stream_set()) -> peer_subset().
