@@ -318,7 +318,7 @@ new_stream(
                                      {get_peer_subset(Id, StreamSet), Id}
                              end,
 
-    ct:pal("spawning stream ~p", [StreamId]),
+    ct:pal("~p spawning stream ~p", [StreamSet#stream_set.type, StreamId]),
     case PeerSubset#peer_subset.max_active =/= unlimited andalso
          PeerSubset#peer_subset.active_count >= PeerSubset#peer_subset.max_active
     of
@@ -366,7 +366,7 @@ new_stream(
                     h2_stream:stop(Pid),
                     {error, ?REFUSED_STREAM, #closed_stream{id=StreamId}};
                 NewStreamSet ->
-                    ct:pal("inserted stream ~p", [StreamId]),
+                    ct:pal("~p inserted stream ~p", [StreamSet#stream_set.type, StreamId]),
                     {Pid, StreamId, NewStreamSet}
             end
     end.
@@ -492,7 +492,7 @@ get_from_subset(Id,
                    lowest_stream_id=Lowest
                   }, _StreamSet)
   when Id < Lowest ->
-    ct:pal("returning closed stream for ~p id < lowest", [Id]),
+    ct:pal("~p returning closed stream for ~p id < lowest", [_StreamSet#stream_set.type, Id]),
     #closed_stream{id=Id};
 get_from_subset(Id,
                 #peer_subset{
@@ -503,7 +503,7 @@ get_from_subset(Id,
 get_from_subset(Id, _PeerSubset, StreamSet) ->
     try ets:lookup(StreamSet#stream_set.table, Id)  of
         [] ->
-            ct:pal("returning closed stream ~p for unknown", [Id]),
+            ct:pal("~p returning closed stream ~p for unknown", [StreamSet#stream_set.type, Id]),
             timer:sleep(100),
             try ets:lookup(StreamSet#stream_set.table, Id)  of
                 [] ->
