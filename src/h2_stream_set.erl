@@ -501,7 +501,15 @@ get_from_subset(Id, _PeerSubset, StreamSet) ->
         [] ->
             ct:pal("returning closed stream for ~p unknown", [Id]),
             timer:sleep(100),
-            get_from_subset(Id, _PeerSubset, StreamSet);
+            try ets:lookup(StreamSet#stream_set.table, Id)  of
+                [] ->
+                    #closed_stream{id=Id};
+                [NewStream] ->
+                    NewStream
+            catch _:_ ->
+                      ct:pal("returning closed stream for ~p on ets crasj", [Id]),
+                      #closed_stream{id=Id}
+            end;
         [Stream] ->
             Stream
     catch
