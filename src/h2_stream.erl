@@ -637,8 +637,9 @@ half_closed_remote(cast,
 
 half_closed_remote(_Type, {send_trailers, Trailers}, State) ->
     send_trailers(half_closed_remote, Trailers, State);
-half_closed_remote(cast, _,
+half_closed_remote(cast, _E,
        #stream_state{}=Stream) ->
+    ct:pal("stream closed on cast ~p", [_E]),
     rst_stream_(?STREAM_CLOSED, Stream);
 half_closed_remote(Type, Event, State) ->
     handle_event(Type, Event, State).
@@ -755,8 +756,9 @@ half_closed_local(cast, recv_es,
 half_closed_local(cast, {send_t, _Trailers},
                   #stream_state{}) ->
     keep_state_and_data;
-half_closed_local(_, _,
+half_closed_local(_T, _E,
        #stream_state{}=Stream) ->
+    ct:pal("stream closed on ~p ~p", [_T, _E]),
     rst_stream_(?STREAM_CLOSED, Stream);
 half_closed_local(Type, Event, State) ->
     handle_event(Type, Event, State).
@@ -802,8 +804,9 @@ closed(cast,
   #stream_state{connection=_Pid,
                 stream_id=_StreamId}=Stream) ->
    {keep_state,Stream#stream_state{response_trailers=Headers}, 0};
-closed(_, _,
+closed(_T, _E,
        #stream_state{}=Stream) ->
+    ct:pal("stream closed on ~p ~p", [_T, _E]),
     rst_stream_(?STREAM_CLOSED, Stream);
 closed(Type, Event, State) ->
     handle_event(Type, Event, State).
