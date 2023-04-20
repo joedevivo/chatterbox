@@ -182,12 +182,10 @@ stop(Pid) ->
 sync_request(CliPid, Headers, Body) ->
     case send_request(CliPid, Headers, Body) of
         {ok, StreamId} ->
-            ct:pal("waiting for END_STREAM ~p ~p", [StreamId, self()]),
             receive
                 {'END_STREAM', StreamId} ->
                     h2_connection:get_response(CliPid, StreamId)
             after 5000 ->
-                      ct:pal("timed out waiting for END_STREAM ~p ~p", [StreamId, self()]),
                       {error, timeout}
             end;
         Error ->
@@ -202,11 +200,8 @@ send_request(CliPid, Headers, Body) ->
         {error, _Code} = Err ->
             Err;
         {StreamId, _} ->
-            ct:pal("spawned new stream ~p", [StreamId]),
             h2_connection:send_headers(CliPid, StreamId, Headers),
-            ct:pal("sent headers ~p", [StreamId]),
             h2_connection:send_body(CliPid, StreamId, Body),
-            ct:pal("sent body"),
             {ok, StreamId}
     end.
 

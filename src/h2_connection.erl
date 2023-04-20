@@ -447,7 +447,6 @@ send_promise(Streams, StreamId, NewStreamId, Headers) ->
             EncodeContext0 = h2_stream_set:get_encode_context(Streams),
             Locks = case hpack:all_fields_indexed(Headers, EncodeContext0) of
                         true ->
-                            ct:pal("bypassing encoder lock"),
                             [];
                         false ->
                             [encoder]
@@ -678,10 +677,8 @@ route_frame(Event, {H, Payload},
                     [ streams || proplists:get_value(?SETTINGS_MAX_CONCURRENT_STREAMS, PList) /= undefined orelse Delta /= 0 ] ++
                     [ settings],
 
-            ct:pal("new settings need locks ~p", [Locks]),
             h2_stream_set:take_exclusive_lock(Streams, Locks,
                                               fun() ->
-                                                      ct:pal("saved new peer settings ~p", [NewPeerSettings]),
                                                       h2_stream_set:update_peer_settings(Streams, NewPeerSettings),
                                                       EncodeContext = h2_stream_set:get_encode_context(Streams),
                                                       NewEncodeContext = hpack:new_max_table_size(HTS, EncodeContext),
@@ -764,7 +761,6 @@ route_frame(Event, {H, _Payload},
               }}, ok)
                                                               end);
         _X ->
-            ct:pal("invalid settings ack"),
             maybe_reply(Event, {next_state, closing, Conn}, ok)
     end;
 
@@ -920,7 +916,6 @@ route_frame(Event,
         idle ->
             go_away(Event, ?PROTOCOL_ERROR, <<"window update on idle stream">>, Conn);
         closed ->
-            ct:pal("stream ~p closed on window update", [StreamId]),
             rst_stream_(Event, Stream, ?STREAM_CLOSED, Conn);
         active ->
             NewSSWS = h2_stream_set:send_window_size(Stream)+WSI,
@@ -1011,7 +1006,6 @@ handle_event(_, {actually_send_trailers, StreamId, Trailers}, Conn=#connection{s
     EncodeContext0 = h2_stream_set:get_encode_context(Streams),
     Locks = case hpack:all_fields_indexed(Trailers, EncodeContext0) of
                 true ->
-                    ct:pal("bypassing encoder lock"),
                     [];
                 false ->
                     [encoder]
@@ -1104,7 +1098,6 @@ handle_event(_, {send_promise, StreamId, NewStreamId, Headers},
             EncodeContext0 = h2_stream_set:get_encode_context(Streams),
             Locks = case hpack:all_fields_indexed(Headers, EncodeContext0) of
                         true ->
-                            ct:pal("bypassing encoder lock"),
                             [];
                         false ->
                             [encoder]
@@ -1295,7 +1288,6 @@ handle_event(info, {ssl_error, Socket, Reason},
               }=Conn) ->
     handle_socket_error(Reason, Conn);
 handle_event(info, {go_away, ErrorCode}, Conn) ->
-    ct:pal("sent goaway ~p", [ErrorCode]),
     gen_statem:cast(self(), io_lib:format("GO_AWAY: ErrorCode ~p", [ErrorCode])),
     {next_state, closing, Conn};
 %handle_event(info, {_,R},
@@ -1409,7 +1401,6 @@ send_headers_(StreamId, Headers, Opts, Streams) ->
             EncodeContext0 = h2_stream_set:get_encode_context(Streams),
             Locks = case hpack:all_fields_indexed(Headers, EncodeContext0) of
                         true ->
-                            ct:pal("bypassing encoder lock"),
                             [];
                         false ->
                             [encoder]
@@ -1436,13 +1427,11 @@ send_headers_(StreamId, Headers, Opts, Streams) ->
                                                       ok
                                               end);
         idle ->
-            ct:pal("not sending headers on idle stream"),
             %% In theory this is a client maybe activating a stream,
             %% but in practice, we've already activated the stream in
             %% new_stream/1
             ok;
         closed ->
-            ct:pal("not sending headers on closed stream"),
             ok
     end.
 
@@ -1450,7 +1439,6 @@ go_away(Event, ErrorCode, Conn) ->
     go_away(Event, ErrorCode, <<>>, Conn).
 
 go_away(Event, ErrorCode, Reason, Conn) ->
-    ct:pal("sending goaway ~p ~p", [ErrorCode, Reason]),
     go_away_(ErrorCode, Reason, Conn#connection.socket, Conn#connection.streams),
     %% TODO: why is this sending a string?
     gen_statem:cast(self(), io_lib:format("GO_AWAY: ErrorCode ~p", [ErrorCode])),
@@ -1462,7 +1450,6 @@ go_away_(ErrorCode, Socket, Streams) ->
     go_away_(ErrorCode, <<>>, Socket, Streams).
 
 go_away_(ErrorCode, Reason, Socket, Streams) ->
-    ct:pal("sending goaway ~p ~p", [ErrorCode, Reason]),
     NAS = h2_stream_set:get_next_available_stream_id(Streams),
     GoAway = h2_frame_goaway:new(NAS, ErrorCode, Reason),
     GoAwayBin = h2_frame:to_binary({#frame_header{
@@ -1560,11 +1547,9 @@ spawn_data_receiver(Socket, Streams, Flow) ->
                                        Connection ! {go_away, Code};
                                    {stream_error, StreamId, Code} ->
                                        Stream = h2_stream_set:get(StreamId, St),
-                                       ct:pal("stream error ~p on stream ~p", [Code, StreamId]),
                                        rst_stream__(Stream, Code, S),
                                        F(S, St, false, Decoder);
                                    {#frame_header{length=L} = Header, Payload} = Frame ->
-                                       ct:pal("got frame ~p", [Frame]),
                                        %% TODO move some of the cases of route_frame into here
                                        %% so we can send frames directly to the stream pids
                                        StreamId = Header#frame_header.stream_id,
@@ -1582,7 +1567,6 @@ spawn_data_receiver(Socket, Streams, Flow) ->
                                                L = Header#frame_header.length,
                                                case L > h2_stream_set:socket_recv_window_size(St) of
                                                    true ->
-                                                       ct:pal("data bigger than recv window"),
                                                        go_away_(?FLOW_CONTROL_ERROR, S, St),
                                                        Connection ! {go_away, ?FLOW_CONTROL_ERROR};
                                                    false ->
@@ -1596,7 +1580,6 @@ spawn_data_receiver(Socket, Streams, Flow) ->
                                                                  L > 0
                                                                 } of
                                                                    {true, _, _} ->
-                                                                       ct:pal("data bigger than stream recv window"),
                                                                        rst_stream__(Stream,
                                                                                    ?FLOW_CONTROL_ERROR,
                                                                                    S);
@@ -1626,7 +1609,6 @@ spawn_data_receiver(Socket, Streams, Flow) ->
                                                                        F(S, St, false, Decoder)
                                                                end;
                                                            _ ->
-                                                               ct:pal("data on inactive stream ~p", [Header#frame_header.stream_id]),
                                                                go_away_(?PROTOCOL_ERROR, <<"data on inactive stream">>, S, St),
                                                                Connection ! {go_away, ?PROTOCOL_ERROR}
                                                        end
@@ -1647,7 +1629,6 @@ spawn_data_receiver(Socket, Streams, Flow) ->
                                                              CallbackOpts,
                                                              Streams) of
                                                            {error, ErrorCode, NewStream} ->
-                                                               ct:pal("error ~p creating stream ~p", [ErrorCode, StreamId]),
                                                                rst_stream__(NewStream, ErrorCode, S),
                                                                none;
                                                            {_, _, _NewStreams} ->
@@ -1730,7 +1711,6 @@ spawn_data_receiver(Socket, Streams, Flow) ->
                                                        go_away_(?PROTOCOL_ERROR, <<"RST on idle stream">>, S, St),
                                                        Connection ! {go_away, ?PROTOCOL_ERROR};
                                                    _Stream ->
-                                                       ct:pal("ignoring reset stream on ~p", [StreamId]),
                                                        %% TODO: RST_STREAM support
                                                        F(S, St, false, Decoder)
                                                end;
@@ -1777,7 +1757,6 @@ spawn_data_receiver(Socket, Streams, Flow) ->
 
                                                        case ?IS_FLAG((Header#frame_header.flags), ?FLAG_END_STREAM) of
                                                            true ->
-                                                               ct:pal("pp es"),
                                                                recv_es_(Old, S);
                                                            false ->
                                                                ok
@@ -1870,7 +1849,6 @@ start_http2_server(
              send_settings(Http2Settings, NewState)
             };
         {error, invalid_preface} ->
-            ct:pal("invalid preface"),
             {next_state, closing, Conn}
     end.
 
@@ -1943,11 +1921,9 @@ recv_h_(Stream,
             Pid = h2_stream_set:pid(Stream),
             h2_stream:send_event(Pid, {recv_h, Headers});
         closed ->
-            ct:pal("stream ~p closed on recv_h", [h2_stream_set:stream_id(Stream)]),
             %% If the stream is closed, there's no running FSM
             rst_stream__(Stream, ?STREAM_CLOSED, Sock);
         idle ->
-            ct:pal("stream ~p idle on recv_h", [h2_stream_set:stream_id(Stream)]),
             %% If we're calling this function, we've already activated
             %% a stream FSM (probably). On the off chance we didn't,
             %% we'll throw this
@@ -1988,10 +1964,8 @@ recv_es_(Stream, Sock) ->
             Pid = h2_stream_set:pid(Stream),
             h2_stream:send_event(Pid, recv_es);
         closed ->
-            ct:pal("stream ~p closed on recv_es", [h2_stream_set:stream_id(Stream)]),
             rst_stream__(Stream, ?STREAM_CLOSED, Sock);
         idle ->
-            ct:pal("stream ~p idle on recv_es", [h2_stream_set:stream_id(Stream)]),
             rst_stream__(Stream, ?STREAM_CLOSED, Sock)
     end.
 
@@ -2002,11 +1976,9 @@ recv_es_(Stream, Sock) ->
 recv_pp(Stream, Headers) ->
     case h2_stream_set:pid(Stream) of
         undefined ->
-            ct:pal("undefined stream pid for pp"),
             %% Should this be an error?
             ok;
         Pid ->
-            ct:pal("sending pp ~p to ~p", [Headers, Pid]),
             h2_stream:send_event(Pid, {recv_pp, Headers})
     end.
 
@@ -2067,13 +2039,11 @@ send_body_(StreamId, Body, Opts, Streams) ->
 
                 ok;
         idle ->
-            ct:pal("not sending body on idle stream"),
             %% Sending DATA frames on an idle stream?  It's a
             %% Connection level protocol error on reciept, but If we
             %% have no active stream what can we even do?
             ok;
         closed ->
-            ct:pal("not sending body on closed stream"),
             ok
     end.
 

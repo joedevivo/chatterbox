@@ -36,7 +36,6 @@ on_receive_data(_Bin, State)->
 
 on_end_stream(State=#cb_static{connection_pid=ConnPid,
                                        stream_id=StreamId}) ->
-    ct:pal("end stream"),
     Headers = State#cb_static.req_headers,
 
     Method = proplists:get_value(<<":method">>, Headers),
@@ -141,20 +140,16 @@ on_end_stream(State=#cb_static{connection_pid=ConnPid,
 
     case {Method, HeadersToSend, BodyToSend} of
         {<<"HEAD">>, _, _} ->
-            ct:pal("sending headers ~p ~p", [HeadersToSend, self()]),
                 h2_connection:send_headers(ConnPid, StreamId, HeadersToSend, [{send_end_stream, true}]);
         %%{<<"GET">>, _, _} ->
         _ ->
-            ct:pal("sending headers ~p ~p, body follows ~p", [StreamId, HeadersToSend, self()]),
             h2_connection:send_headers(ConnPid, StreamId, HeadersToSend),
-            h2_connection:send_body(ConnPid, StreamId, BodyToSend),
-            ct:pal("done sending body ~p", [StreamId])
+            h2_connection:send_body(ConnPid, StreamId, BodyToSend)
     end,
 
     {ok, State}.
 
-handle_info(Event, State) ->
-    ct:pal("got unknown info ~p", [Event]),
+handle_info(_Event, State) ->
     {ok, State}.
 
 terminate(_State) ->
