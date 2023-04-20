@@ -1452,7 +1452,7 @@ go_away_(ErrorCode, Socket, Streams) ->
     go_away_(ErrorCode, <<>>, Socket, Streams).
 
 go_away_(ErrorCode, Reason, Socket, Streams) ->
-    ct:pal("sending goaway ~p ~p", [ErrorCode, Reason]),
+    ct:pal("~p ~p sending goaway ~p ~p", [self(), h2_stream_set:stream_set_type(Streams), ErrorCode, Reason]),
     NAS = h2_stream_set:get_next_available_stream_id(Streams),
     GoAway = h2_frame_goaway:new(NAS, ErrorCode, Reason),
     GoAwayBin = h2_frame:to_binary({#frame_header{
@@ -1611,8 +1611,8 @@ spawn_data_receiver(Socket, Streams, Flow) ->
                                                                          Streams),
                                                                        F(S, St, false, Decoder)
                                                                end;
-                                                           _ ->
-                                                               go_away_(?PROTOCOL_ERROR, <<"data on inactive stream">>, S, St),
+                                                           Type ->
+                                                               go_away_(?PROTOCOL_ERROR, list_to_binary(io_lib:format("data on ~p stream ~p", [Type, Header#frame_header.stream_id])), S, St),
                                                                Connection ! {go_away, ?PROTOCOL_ERROR}
                                                        end
                                                end;
