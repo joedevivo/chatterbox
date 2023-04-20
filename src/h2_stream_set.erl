@@ -770,7 +770,7 @@ update_my_max_active(NewMax, Streams) ->
                               {NewConnSendWindowSize :: integer(),
                                NewStreams :: stream_set()}.
 send_what_we_can(all, Streams) ->
-
+    AfterAfterWindowSize = take_exclusive_lock(Streams, [socket], fun() ->
     ConnSendWindowSize = socket_send_window_size(Streams),
     {_SelfSettings, PeerSettings} = get_settings(Streams),
     MaxFrameSize = PeerSettings#settings.max_frame_size,
@@ -779,24 +779,28 @@ send_what_we_can(all, Streams) ->
                             MaxFrameSize,
                             get_their_active_streams(Streams),
                             Streams),
-    AfterAfterWindowSize = c_send_what_we_can(
+    c_send_what_we_can(
                              AfterPeerWindowSize,
                              MaxFrameSize,
                              get_my_active_streams(Streams),
-                             Streams),
+                             Streams)
+                                           end),
 
     set_socket_send_window_size(AfterAfterWindowSize, Streams),
     {AfterAfterWindowSize,
      Streams};
 send_what_we_can(StreamId, Streams) ->
+
+    {NewConnSendWindowSize, NewStream} = take_exclusive_lock(Streams, [socket], fun() ->
     ConnSendWindowSize = socket_send_window_size(Streams),
     {_SelfSettings, PeerSettings} = get_settings(Streams),
     MaxFrameSize = PeerSettings#settings.max_frame_size,
-    {NewConnSendWindowSize, NewStream} =
+    
         s_send_what_we_can(ConnSendWindowSize,
                            MaxFrameSize,
                            Streams#stream_set.socket,
-                           get(StreamId, Streams)),
+                           get(StreamId, Streams))
+                                           end),
     set_socket_send_window_size(NewConnSendWindowSize, Streams),
     {NewConnSendWindowSize,
      upsert(NewStream, Streams)}.

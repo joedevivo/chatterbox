@@ -311,7 +311,6 @@ send_headers(Pid, StreamId, Headers, Opts) ->
 
 -spec rst_stream(h2_stream_set:stream_set(), stream_id(), error_code()) -> ok.
 rst_stream(Streams, StreamId, ErrorCode) ->
-    ct:pal("client requested rst stream"),
     Stream = h2_stream_set:get(StreamId, Streams),
     rst_stream__(Stream, ErrorCode, h2_stream_set:socket(Streams)).
 
@@ -327,9 +326,9 @@ actually_send_trailers(Streams, StreamId, Trailers) ->
     EncodeContext0 = h2_stream_set:get_encode_context(Streams),
     Locks = case hpack:all_fields_indexed(Trailers, EncodeContext0) of
                 true ->
-                    [];
+                    [socket];
                 false ->
-                    [encoder]
+                    [socket, encoder]
             end,
     h2_stream_set:take_exclusive_lock(Streams, Locks,
                                       fun() ->
@@ -473,9 +472,9 @@ send_promise(Streams, StreamId, NewStreamId, Headers) ->
             EncodeContext0 = h2_stream_set:get_encode_context(Streams),
             Locks = case hpack:all_fields_indexed(Headers, EncodeContext0) of
                         true ->
-                            [];
+                            [socket];
                         false ->
-                            [encoder]
+                            [socket, encoder]
                     end,
             h2_stream_set:take_exclusive_lock(Streams, Locks,
                                               fun() ->
@@ -1034,9 +1033,9 @@ handle_event(_, {actually_send_trailers, StreamId, Trailers}, Conn=#connection{s
     EncodeContext0 = h2_stream_set:get_encode_context(Streams),
     Locks = case hpack:all_fields_indexed(Trailers, EncodeContext0) of
                 true ->
-                    [];
+                    [socket];
                 false ->
-                    [encoder]
+                    [socket, encoder]
             end,
     h2_stream_set:take_exclusive_lock(Streams, Locks,
                                       fun() ->
@@ -1430,9 +1429,9 @@ send_headers_(StreamId, Headers, Opts, Streams) ->
             EncodeContext0 = h2_stream_set:get_encode_context(Streams),
             Locks = case hpack:all_fields_indexed(Headers, EncodeContext0) of
                         true ->
-                            [];
+                            [socket];
                         false ->
-                            [encoder]
+                            [socket, encoder]
                     end,
             h2_stream_set:take_exclusive_lock(Streams, Locks,
                                               fun() ->
@@ -1511,7 +1510,9 @@ go_away_(ErrorCode, Reason, Socket, Streams) ->
     GoAwayBin = h2_frame:to_binary({#frame_header{
                                        stream_id=0
                                       }, GoAway}),
-    sock:send(Socket, GoAwayBin),
+    h2_stream_set:take_exclusive_lock(Streams, [socket], fun() ->
+                                                                 sock:send(Socket, GoAwayBin)
+                                                         end),
     ok.
 
 maybe_reply({call, From}, {next_state, NewState, NewData}, Msg) ->
@@ -1961,14 +1962,17 @@ handle_socket_error(Reason, Conn) ->
     {stop, {shutdown, Reason}, Conn}.
 
 socksend(#connection{
-            socket=Socket
+            socket=Socket,
+            streams=Streams
            }, Data) ->
+    h2_stream_set:take_exclusive_lock(Streams, [socket], fun() ->
     case sock:send(Socket, Data) of
         ok ->
             ok;
         {error, Reason} ->
             {error, Reason}
-    end.
+    end
+                                                         end).
 
 %% Stream API: These will be moved
 
