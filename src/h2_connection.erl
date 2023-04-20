@@ -322,9 +322,36 @@ send_trailers(Streams, StreamId, Trailers) ->
 send_trailers(Streams, StreamId, Trailers, Opts) ->
     send_trailers_(StreamId, Trailers, Opts, Streams).
 
-actually_send_trailers(Pid, StreamId, Trailers) ->
-    gen_statem:cast(Pid, {actually_send_trailers, StreamId, Trailers}),
-    ok.
+actually_send_trailers(Streams, StreamId, Trailers) ->
+    EncodeContext0 = h2_stream_set:get_encode_context(Streams),
+    Locks = case hpack:all_fields_indexed(Trailers, EncodeContext0) of
+                true ->
+                    [];
+                false ->
+                    [encoder]
+            end,
+    h2_stream_set:take_exclusive_lock(Streams, Locks,
+                                      fun() ->
+                                              Stream = h2_stream_set:get(StreamId, Streams),
+                                              EncodeContext = h2_stream_set:get_encode_context(Streams),
+                                              {_SelfSettings, PeerSettings} = h2_stream_set:get_settings(Streams),
+                                              {FramesToSend, NewContext} =
+                                              h2_frame_headers:to_frames(h2_stream_set:stream_id(Stream),
+                                                                         Trailers,
+                                                                         EncodeContext,
+                                                                         PeerSettings#settings.max_frame_size,
+                                                                         true
+                                                                        ),
+                                              case Locks of
+                                                  [] ->
+                                                      ok;
+                                                  _ ->
+                                                      h2_stream_set:update_encode_context(Streams, NewContext)
+                                              end,
+
+                                              sock:send(h2_stream_set:socket(Streams), [h2_frame:to_binary(Frame) || Frame <- FramesToSend]),
+                                              ok
+                                      end).
 
 -spec send_body(h2_stream_set:stream_set(), stream_id(), binary()) -> ok.
 send_body(Pid, StreamId, Body) ->
