@@ -517,13 +517,15 @@ upsert(#idle_stream{}, StreamSet) ->
 upsert(Stream, StreamSet) ->
     StreamId = stream_id(Stream),
     PeerSubset = get_peer_subset(StreamId, StreamSet),
-    case upsert_peer_subset(Stream, PeerSubset, StreamSet) of
+    try upsert_peer_subset(Stream, PeerSubset, StreamSet) of
         {error, Code} ->
             {error, Code};
         unchanged ->
             StreamSet;
         NewPeerSubset ->
             set_peer_subset(StreamId, StreamSet, NewPeerSubset)
+    catch _:_ ->
+              StreamSet
     end.
 
 -spec upsert_peer_subset(
