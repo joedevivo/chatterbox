@@ -799,9 +799,9 @@ closed(_, _,
 closed(Type, Event, State) ->
     handle_event(Type, Event, State).
 
-send_trailers(State, Trailers, Stream=#stream_state{connection=Conn,
+send_trailers(State, Trailers, Stream=#stream_state{streams=Streams,
                                                     stream_id=StreamId}) ->
-    h2_connection:actually_send_trailers(Conn, StreamId, Trailers),
+    h2_connection:actually_send_trailers(Streams, StreamId, Trailers),
     case State of
         half_closed_remote ->
             {next_state, closed, Stream, 0};
