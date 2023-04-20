@@ -318,6 +318,7 @@ new_stream(
                                      {get_peer_subset(Id, StreamSet), Id}
                              end,
 
+    ct:pal("spawning stream ~p", [StreamId]),
     case PeerSubset#peer_subset.max_active =/= unlimited andalso
          PeerSubset#peer_subset.active_count >= PeerSubset#peer_subset.max_active
     of
