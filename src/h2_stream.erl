@@ -396,6 +396,7 @@ open(cast, recv_es,
                callback_state=NewCBState
               }};
         rst_stream ->
+            ct:pal("closing on ES with rst"),
             {next_state,
              closed,
              Stream}
@@ -458,6 +459,7 @@ open(cast, {recv_data,
                 ok ->
                     {next_state, half_closed_remote, NewStream};
                 rst_stream ->
+                    ct:pal("closing on rst_stream"),
                     {next_state, closed, NewStream}
             end;
 
@@ -478,6 +480,7 @@ open(cast, {recv_data,
                        callback_state=NewCBState1
                       }};
                 rst_stream ->
+                    ct:pal("closing on rst_stream"),
                     {next_state,
                      closed,
                      NewStream}
@@ -598,6 +601,7 @@ half_closed_remote(cast,
         ok ->
             case ?IS_FLAG(Flags, ?FLAG_END_STREAM) of
                 true ->
+                    ct:pal("closing on END STREAM flag on data"),
                     {next_state, closed, Stream, 0};
                 _ ->
                     {next_state, half_closed_remote, Stream}
@@ -621,6 +625,7 @@ half_closed_remote(cast,
         ok ->
             case ?IS_FLAG(Flags, ?FLAG_END_STREAM) of
                 true ->
+                    ct:pal("closing on END STREAM flag on headers"),
                     {next_state, closed, Stream, 0};
                 _ ->
                     {next_state, half_closed_remote, Stream}
@@ -675,6 +680,8 @@ half_closed_local(cast,
             Data =
                 [h2_frame_data:data(Payload)
                  || {#frame_header{type=?DATA}, Payload} <- queue:to_list(NewQ)],
+
+                    ct:pal("closing on END STREAM flag on data"),
             {next_state, closed,
              Stream#stream_state{
                incoming_frames=queue:new(),
@@ -702,6 +709,7 @@ half_closed_local(cast,
     case ?IS_FLAG(Flags, ?FLAG_END_STREAM) of
         true ->
             {ok, NewCBState1} = callback(CB, on_end_stream, [], NewCBState),
+                    ct:pal("closing on END STREAM flag on data"),
             {next_state, closed,
              Stream#stream_state{
                callback_state=NewCBState1
@@ -737,6 +745,7 @@ half_closed_local(cast, recv_es,
                      callback_state=CallbackState
                     } = Stream) ->
     {ok, NewCBState} = callback(CB, on_end_stream, [], CallbackState),
+    ct:pal("stream ~p received ES", [Stream#stream_state.stream_id]),
     {next_state, closed,
      Stream#stream_state{
        incoming_frames=queue:new(),
@@ -804,6 +813,7 @@ send_trailers(State, Trailers, Stream=#stream_state{streams=Streams,
     h2_connection:actually_send_trailers(Streams, StreamId, Trailers),
     case State of
         half_closed_remote ->
+            ct:pal("closing after sending trailers"),
             {next_state, closed, Stream, 0};
         open ->
             {next_state, half_closed_local, Stream}
