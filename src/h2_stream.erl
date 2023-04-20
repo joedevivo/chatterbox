@@ -766,6 +766,7 @@ closed(timeout, _,
                                         StreamState#stream_state.response_trailers}
                                        %{client, true} -> garbage
                 end,
+                ct:pal("closing closed stream ~p on timeout", [StreamId]),
                 {_NewStream, _NewStreams} =
                 h2_stream_set:close(
                   Stream,

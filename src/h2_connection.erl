@@ -964,6 +964,7 @@ handle_event(_, {stream_finished,
                     {client, false} -> {Headers, Body, Trailers};
                     {client, true} -> garbage
                 end,
+                ct:pal("stream ~p finished", [StreamId]),
             {_NewStream, NewStreams} =
                 h2_stream_set:close(
                   Stream,
