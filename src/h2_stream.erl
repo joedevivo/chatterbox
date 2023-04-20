@@ -722,7 +722,7 @@ half_closed_local(cast, recv_es,
                     } = Stream) ->
     {ok, NewCBState} = callback(CB, on_end_stream, [], CallbackState),
     Data = [h2_frame_data:data(Payload) || {#frame_header{type=?DATA}, Payload} <- queue:to_list(Q)],
-    ct:pal("stream ~p received ES"),
+    ct:pal("stream ~p received ES", [Stream#stream_state.stream_id]),
     {next_state, closed,
      Stream#stream_state{
        incoming_frames=queue:new(),
