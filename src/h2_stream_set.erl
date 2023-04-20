@@ -323,6 +323,7 @@ new_stream(
          PeerSubset#peer_subset.active_count >= PeerSubset#peer_subset.max_active
     of
         true ->
+            ct:pal("refused stream ~p because of max active", [StreamId]),
             {error, ?REFUSED_STREAM, #closed_stream{id=StreamId}};
         false ->
             {ok, Pid} = case self() == StreamSet#stream_set.connection of
@@ -352,6 +353,7 @@ new_stream(
                           },
             case upsert(NewStream, StreamSet) of
                 {error, ?REFUSED_STREAM} ->
+                    ct:pal("refused stream ~p", [StreamId]),
                     %% This should be very rare, if it ever happens at
                     %% all. The case clause above tests the same
                     %% condition that upsert/2 checks to return this
@@ -364,6 +366,7 @@ new_stream(
                     h2_stream:stop(Pid),
                     {error, ?REFUSED_STREAM, #closed_stream{id=StreamId}};
                 NewStreamSet ->
+                    ct:pal("inserted stream ~p", [StreamId]),
                     {Pid, StreamId, NewStreamSet}
             end
     end.
@@ -509,14 +512,12 @@ get_from_subset(Id, _PeerSubset, StreamSet) ->
                     ct:pal("found missing stream ~p", [Id]),
                     NewStream
             catch _:_ ->
-                      ct:pal("returning closed stream for ~p on ets crasj", [Id]),
                       #closed_stream{id=Id}
             end;
         [Stream] ->
             Stream
     catch
         _:_ ->
-            ct:pal("returning closed stream for ~p on ets crasj", [Id]),
             #closed_stream{id=Id}
     end.
 
