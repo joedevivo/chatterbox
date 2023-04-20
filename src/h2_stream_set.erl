@@ -34,7 +34,7 @@
 
      connection :: pid(),
 
-     table = ets:new(?MODULE, [public, {keypos, 2}]) :: ets:tab(),
+     table = ets:new(?MODULE, [public, {keypos, 2}, {read_concurrency, true}, {write_concurrency, true}]) :: ets:tab(),
      %% Streams initiated by this peer
      %% mine :: peer_subset(),
      %% Streams initiated by the other peer
@@ -505,6 +505,7 @@ get_from_subset(Id, _PeerSubset, StreamSet) ->
                 [] ->
                     #closed_stream{id=Id};
                 [NewStream] ->
+                    ct:pal("found missing stream ~p", [Id]),
                     NewStream
             catch _:_ ->
                       ct:pal("returning closed stream for ~p on ets crasj", [Id]),
