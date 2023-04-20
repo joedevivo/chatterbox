@@ -1208,10 +1208,21 @@ wait_lock(Index, StreamSet) ->
     Ref = make_ref(),
     1 = ets:select_replace(StreamSet#stream_set.table,
                        ets:fun2ms(fun(#lock{id={lock, I}, waiters=H}=Lock) when I == Index -> Lock#lock{waiters=[{Self, Ref}|H]} end)),
-    wait_ref(Index, Ref, StreamSet).
+    Holders = (hd(ets:lookup(StreamSet#stream_set.table, {lock, Index})))#lock.holders,
+    Monitors = [ erlang:monitor(process, Holder) || Holder <- Holders ],
+    wait_ref(Index, Ref, Monitors, StreamSet).
 
-wait_ref(Index, Ref, StreamSet) ->
+wait_ref(Index, Ref, Monitors, StreamSet) ->
     receive
+        {'DOWN', MRef, process, _Handler, Reason}=Msg ->
+            case lists:member(MRef, Monitors) of
+                true ->
+                    ct:pal("handler died unexpectedly ~p ~p", [_Handler, Reason]),
+                    wait_ref(Index, Ref, Monitors -- [MRef], StreamSet);
+                false ->
+                    self() ! Msg,
+                    wait_ref(Index, Ref, Monitors, StreamSet)
+            end;
         {Ref, unlocked} ->
             ok
     after 1000 ->
@@ -1222,7 +1233,7 @@ wait_ref(Index, Ref, StreamSet) ->
                   _ ->
                       ct:pal("~p still waiting on ~p", [self(), Index]),
                       ct:pal("~p", [ets:lookup(StreamSet#stream_set.table, {lock, Index})]),
-                      wait_ref(Index, Ref, StreamSet)
+                      wait_ref(Index, Ref, Monitors, StreamSet)
               end
     end.
 
