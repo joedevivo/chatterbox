@@ -309,10 +309,10 @@ send_headers(Pid, StreamId, Headers) ->
 send_headers(Pid, StreamId, Headers, Opts) ->
     send_headers_(StreamId, Headers, Opts, Pid).
 
--spec rst_stream(pid(), stream_id(), error_code()) -> ok.
-rst_stream(Pid, StreamId, ErrorCode) ->
-    gen_statem:cast(Pid, {rst_stream, StreamId, ErrorCode}),
-    ok.
+-spec rst_stream(h2_stream_set:stream_set(), stream_id(), error_code()) -> ok.
+rst_stream(Streams, StreamId, ErrorCode) ->
+    Stream = h2_stream_set:get(StreamId, Streams),
+    rst_stream__(Stream, ErrorCode, h2_stream_set:socket(Streams)).
 
 -spec send_trailers(h2_stream_set:stream_set(), stream_id(), hpack:headers()) -> ok.
 send_trailers(Streams, StreamId, Trailers) ->
