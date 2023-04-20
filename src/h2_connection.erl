@@ -314,15 +314,13 @@ rst_stream(Pid, StreamId, ErrorCode) ->
     gen_statem:cast(Pid, {rst_stream, StreamId, ErrorCode}),
     ok.
 
--spec send_trailers(pid(), stream_id(), hpack:headers()) -> ok.
-send_trailers(Pid, StreamId, Trailers) ->
-    gen_statem:cast(Pid, {send_trailers, StreamId, Trailers, []}),
-    ok.
+-spec send_trailers(h2_stream_set:stream_set(), stream_id(), hpack:headers()) -> ok.
+send_trailers(Streams, StreamId, Trailers) ->
+    send_trailers_(StreamId, Trailers, [], Streams).
 
--spec send_trailers(pid(), stream_id(), hpack:headers(), send_opts()) -> ok.
-send_trailers(Pid, StreamId, Trailers, Opts) ->
-    gen_statem:cast(Pid, {send_trailers, StreamId, Trailers, Opts}),
-    ok.
+-spec send_trailers(h2_stream_set:stream_set(), stream_id(), hpack:headers(), send_opts()) -> ok.
+send_trailers(Streams, StreamId, Trailers, Opts) ->
+    send_trailers_(StreamId, Trailers, Opts, Streams).
 
 actually_send_trailers(Pid, StreamId, Trailers) ->
     gen_statem:cast(Pid, {actually_send_trailers, StreamId, Trailers}),
@@ -1437,6 +1435,32 @@ send_headers_(StreamId, Headers, Opts, Streams) ->
         closed ->
             ok
     end.
+
+send_trailers_(StreamId, Trailers, Opts, Streams) ->
+    BodyComplete = proplists:get_value(send_end_stream, Opts, true),
+
+    Stream = h2_stream_set:get(StreamId, Streams),
+    case h2_stream_set:type(Stream) of
+        active ->
+            NewS = h2_stream_set:update_trailers(Trailers, Stream),
+            {_NewSWS, _NewStreams} =
+                h2_stream_set:send_what_we_can(
+                  StreamId,
+                  h2_stream_set:upsert(
+                    h2_stream_set:update_data_queue(h2_stream_set:queued_data(Stream), BodyComplete, NewS),
+                    Streams)),
+
+            send_t(Stream, Trailers),
+            ok;
+        idle ->
+            %% In theory this is a client maybe activating a stream,
+            %% but in practice, we've already activated the stream in
+            %% new_stream/1
+            ok;
+        closed ->
+            ok
+    end.
+
 
 go_away(Event, ErrorCode, Conn) ->
     go_away(Event, ErrorCode, <<>>, Conn).
