@@ -761,6 +761,7 @@ route_frame(Event, {H, _Payload},
               }}, ok)
                                                               end);
         _X ->
+            ct:pal("closing because of unexpected settings value on ack"),
             maybe_reply(Event, {next_state, closing, Conn}, ok)
     end;
 
@@ -1289,6 +1290,7 @@ handle_event(info, {ssl_error, Socket, Reason},
     handle_socket_error(Reason, Conn);
 handle_event(info, {go_away, ErrorCode}, Conn) ->
     gen_statem:cast(self(), io_lib:format("GO_AWAY: ErrorCode ~p", [ErrorCode])),
+    ct:pal("sent goaway ~p", [ErrorCode]),
     {next_state, closing, Conn};
 %handle_event(info, {_,R},
 %           #connection{}=Conn) ->
@@ -1450,6 +1452,7 @@ go_away_(ErrorCode, Socket, Streams) ->
     go_away_(ErrorCode, <<>>, Socket, Streams).
 
 go_away_(ErrorCode, Reason, Socket, Streams) ->
+    ct:pal("sending goaway ~p ~p", [ErrorCode, Reason]),
     NAS = h2_stream_set:get_next_available_stream_id(Streams),
     GoAway = h2_frame_goaway:new(NAS, ErrorCode, Reason),
     GoAwayBin = h2_frame:to_binary({#frame_header{
@@ -1849,6 +1852,7 @@ start_http2_server(
              send_settings(Http2Settings, NewState)
             };
         {error, invalid_preface} ->
+            ct:pal("invalid preface"),
             {next_state, closing, Conn}
     end.
 
@@ -1895,6 +1899,7 @@ handle_socket_passive(Conn) ->
     {keep_state, Conn}.
 
 handle_socket_closed(Conn) ->
+    ct:pal("socket closed"),
     {stop, normal, Conn}.
 
 handle_socket_error(Reason, Conn) ->
