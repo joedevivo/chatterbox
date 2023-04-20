@@ -887,6 +887,7 @@ rst_stream_(ErrorCode,
                      },
                    RstStream}),
     sock:send(Socket, RstStreamBin),
+    ct:pal("closing on rst_stream ~p", [ErrorCode]),
     {next_state,
      closed,
      Stream, 0}.
