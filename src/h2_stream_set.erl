@@ -494,11 +494,14 @@ get_from_subset(Id,
   when Id >= Next ->
     #idle_stream{id=Id};
 get_from_subset(Id, _PeerSubset, StreamSet) ->
-    case ets:lookup(StreamSet#stream_set.table, Id)  of
+    try ets:lookup(StreamSet#stream_set.table, Id)  of
         [] ->
             #closed_stream{id=Id};
         [Stream] ->
             Stream
+    catch
+        _:_ ->
+            #closed_stream{id=Id}
     end.
 
 -spec upsert(
