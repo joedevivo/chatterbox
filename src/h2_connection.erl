@@ -1439,6 +1439,7 @@ send_headers_(StreamId, Headers, Opts, Streams) ->
                                                               h2_stream_set:update_encode_context(Streams, NewContext)
                                                       end,
                                                       sock:send(Socket, [h2_frame:to_binary(Frame) || Frame <- FramesToSend]),
+                                                      ct:pal("sent headers on stream ~p (complete ~p)", [StreamId, StreamComplete]),
                                                       send_h(Stream, Headers),
                                                       ok
                                               end);

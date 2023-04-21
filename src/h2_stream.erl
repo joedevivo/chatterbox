@@ -601,7 +601,7 @@ half_closed_remote(cast,
         ok ->
             case ?IS_FLAG(Flags, ?FLAG_END_STREAM) of
                 true ->
-                    ct:pal("closing on END STREAM flag on data"),
+                    ct:pal("stream ~p closing on END STREAM flag on data ~p", [Stream#stream_state.stream_id, F]),
                     {next_state, closed, Stream, 0};
                 _ ->
                     {next_state, half_closed_remote, Stream}
@@ -682,7 +682,7 @@ half_closed_local(cast,
                 [h2_frame_data:data(Payload)
                  || {#frame_header{type=?DATA}, Payload} <- queue:to_list(NewQ)],
 
-                    ct:pal("closing on END STREAM flag on data"),
+                    ct:pal("stream ~p closing on END STREAM flag on data ~p", [Stream#stream_state.stream_id, F]),
             {next_state, closed,
              Stream#stream_state{
                incoming_frames=queue:new(),
@@ -700,7 +700,7 @@ half_closed_local(cast,
    {#frame_header{
        flags=Flags,
        type=?DATA
-      }, Payload}},
+      }, Payload}=F},
   #stream_state{
      callback_mod=CB,
      callback_state=CallbackState
@@ -710,7 +710,7 @@ half_closed_local(cast,
     case ?IS_FLAG(Flags, ?FLAG_END_STREAM) of
         true ->
             {ok, NewCBState1} = callback(CB, on_end_stream, [], NewCBState),
-                    ct:pal("closing on END STREAM flag on data"),
+            ct:pal("stream ~p closing on END STREAM flag on data ~p", [Stream#stream_state.stream_id, F]),
             {next_state, closed,
              Stream#stream_state{
                callback_state=NewCBState1
