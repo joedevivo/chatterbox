@@ -1235,12 +1235,15 @@ wait_ref(Index, Ref, Monitors, StreamSet) ->
                     wait_ref(Index, Ref, Monitors, StreamSet)
             end;
         {Ref, unlocked} ->
+            [erlang:demonitor(Monitor, [flush]) || Monitor <- Monitors ],
             ok
     after 1000 ->
               case ets:select_count(StreamSet#stream_set.table, ets:fun2ms(fun(#lock{id={lock, I}, holders=[]}=Lock) when I == Index -> true end)) of
                   1 ->
+                      [erlang:demonitor(Monitor, [flush]) || Monitor <- Monitors ],
                       ok;
                   _ ->
+                      ct:pal("~p deadlocked on ~p", [self(), Index]),
                       wait_ref(Index, Ref, Monitors, StreamSet)
               end
     end.
