@@ -21,6 +21,7 @@
 -define(UNLOCKED, 0).
 -define(SHARED_LOCK, 1).
 -define(EXCLUSIVE_LOCK, 2).
+-define(EDITING_LOCK, 3).
 
 -record(
    stream_set,
@@ -1145,17 +1146,25 @@ take_lock(StreamSet, Locks, Fun) ->
     Res.
 
 take_lock(Index, StreamSet=#stream_set{atomics=Atomics}) ->
+    ct:pal("~p trying to take lock ~p", [self(), Index]),
     case atomics:compare_exchange(Atomics, Index, ?UNLOCKED, ?SHARED_LOCK) of
         ok ->
+            ct:pal("~p got lock ~p", [self(), Index]),
             hold_lock(Index, StreamSet),
             ok;
         ?SHARED_LOCK ->
+            ct:pal("~p got lock ~p", [self(), Index]),
             %% someone else already has a shared lock, this is fine
             hold_lock(Index, StreamSet),
             ok;
         ?EXCLUSIVE_LOCK ->
+            ct:pal("~p waiting for exclusive lock ~p to release", [self(), Index]),
             %% need to wait for the exclusive access to be released
-            wait_lock(Index, StreamSet)
+            wait_lock(Index, StreamSet);
+        ?EDITING_LOCK ->
+            ct:pal("~p waiting for lock ~p to be edited", [self(), Index]),
+            timer:sleep(10),
+            take_lock(Index, StreamSet)
     end.
 
 take_exclusive_lock(StreamSet, Locks, Fun) ->
@@ -1166,11 +1175,14 @@ take_exclusive_lock(StreamSet, Locks, Fun) ->
 
 
 take_exclusive_lock(Index, StreamSet=#stream_set{atomics=Atomics}) ->
+    ct:pal("~p trying to take exclusive lock ~p", [self(), Index]),
     case atomics:compare_exchange(Atomics, Index, ?UNLOCKED, ?EXCLUSIVE_LOCK) of
         ok ->
+            ct:pal("~p took exclusive lock ~p", [self(), Index]),
             hold_lock(Index, StreamSet),
             ok;
         ?SHARED_LOCK ->
+            ct:pal("~p lock ~p is shared", [self(), Index]),
             %% check if its only us holding the lock
             JustUs = [self()],
             case ets:select_count(StreamSet#stream_set.table, ets:fun2ms(fun(#lock{id={lock, I}, holders=H}=Lock) when I == Index, H == JustUs -> true end)) of
@@ -1186,9 +1198,11 @@ take_exclusive_lock(Index, StreamSet=#stream_set{atomics=Atomics}) ->
             JustUs = [self()],
             case ets:select_count(StreamSet#stream_set.table, ets:fun2ms(fun(#lock{id={lock, I}, holders=H}=Lock) when I == Index, H == JustUs -> true end)) of
                 1 ->
+                    ct:pal("~p already held exclusive lock ~p", [self(), Index]),
                     hold_lock(Index, StreamSet),
                     ok;
                 0 ->
+                    ct:pal("~p exclusive lock ~p is held by ~p", [self(), Index, get_holders(Index, StreamSet)]),
                     case ets:select_count(StreamSet#stream_set.table, ets:fun2ms(fun(#lock{id={lock, I}, holders=H}=Lock) when I == Index, H == [] -> true end)) of
                         1 ->
                             Self = self(),
@@ -1206,29 +1220,85 @@ take_exclusive_lock(Index, StreamSet=#stream_set{atomics=Atomics}) ->
                             wait_lock(Index, StreamSet),
                             take_exclusive_lock(Index, StreamSet)
                     end
-            end
+            end;
+        ?EDITING_LOCK ->
+            ct:pal("waiting for lock ~p to be edited", [Index]),
+            timer:sleep(10),
+            take_exclusive_lock(Index, StreamSet)
     end.
 
 
 hold_lock(Index, StreamSet) ->
-    Self = self(),
-    1 = ets:select_replace(StreamSet#stream_set.table,
-                       ets:fun2ms(fun(#lock{id={lock, I}, holders=H}=Lock) when I == Index -> Lock#lock{holders=[Self|H]} end)).
+    OldState = atomics:get(StreamSet#stream_set.atomics, Index),
+    case OldState /= ?EDITING_LOCK andalso atomics:compare_exchange(StreamSet#stream_set.atomics, Index, OldState, ?EDITING_LOCK) == ok of
+        true ->
+            Self = self(),
+            1 = ets:select_replace(StreamSet#stream_set.table,
+                                   ets:fun2ms(fun(#lock{id={lock, I}, holders=H}=Lock) when I == Index -> Lock#lock{holders=[Self|H]} end)),
+            ok = atomics:compare_exchange(StreamSet#stream_set.atomics, Index, ?EDITING_LOCK, OldState);
+        _Other ->
+            ct:pal("waiting to hold lock"),
+            timer:sleep(100),
+            hold_lock(Index, StreamSet)
+    end.
+
+remove_holder(Index, Holder, StreamSet) ->
+    OldState = atomics:get(StreamSet#stream_set.atomics, Index),
+    case OldState /= ?EDITING_LOCK andalso atomics:compare_exchange(StreamSet#stream_set.atomics, Index, OldState, ?EDITING_LOCK) == ok of
+        true ->
+            Holders = get_holders(Index, StreamSet),
+            NewHolders = Holders -- [Holder],
+            case ets:select_replace(StreamSet#stream_set.table,
+                                   ets:fun2ms(fun(#lock{id={lock, I}, holders=H}=Lock) when I == Index, H == Holders -> Lock#lock{holders=NewHolders} end)) of
+                1 ->
+                    case NewHolders of
+                        [] ->
+                            ok = atomics:compare_exchange(StreamSet#stream_set.atomics, Index, ?EDITING_LOCK, ?UNLOCKED);
+                        _ ->
+                            ok = atomics:compare_exchange(StreamSet#stream_set.atomics, Index, ?EDITING_LOCK, OldState)
+                    end,
+                    ok;
+                0 ->
+                    ok = atomics:compare_exchange(StreamSet#stream_set.atomics, Index, ?EDITING_LOCK, OldState),
+                    timer:sleep(10),
+                    remove_holder(Index, Holder, StreamSet)
+            end;
+        _Other ->
+            timer:sleep(10),
+            ct:pal("waiting remove holder"),
+            remove_holder(Index, Holder, StreamSet)
+    end.
+
 
 wait_lock(Index, StreamSet) ->
-    Self = self(),
-    Ref = make_ref(),
-    1 = ets:select_replace(StreamSet#stream_set.table,
-                       ets:fun2ms(fun(#lock{id={lock, I}, waiters=H}=Lock) when I == Index -> Lock#lock{waiters=[{Self, Ref}|H]} end)),
-    Holders = (hd(ets:lookup(StreamSet#stream_set.table, {lock, Index})))#lock.holders,
-    Monitors = [ erlang:monitor(process, Holder) || Holder <- Holders ],
-    wait_ref(Index, Ref, Monitors, StreamSet).
+    OldState = atomics:get(StreamSet#stream_set.atomics, Index),
+    case OldState /= ?EDITING_LOCK andalso  atomics:compare_exchange(StreamSet#stream_set.atomics, Index, OldState, ?EDITING_LOCK) == ok of
+        true ->
+            Self = self(),
+            Ref = make_ref(),
+            1 = ets:select_replace(StreamSet#stream_set.table,
+                                   ets:fun2ms(fun(#lock{id={lock, I}, waiters=H}=Lock) when I == Index -> Lock#lock{waiters=[{Self, Ref}|H]} end)),
+            Holders = (hd(ets:lookup(StreamSet#stream_set.table, {lock, Index})))#lock.holders,
+            Monitors = [ erlang:monitor(process, Holder) || Holder <- Holders ],
+            ok = atomics:compare_exchange(StreamSet#stream_set.atomics, Index, ?EDITING_LOCK, OldState),
+            ct:pal("waiting on lock ~p", [Index]),
+            wait_ref(Index, Ref, Monitors, StreamSet);
+        _Other ->
+            ct:pal("waiting for lock ~p to be edited to wait", [Index]),
+            timer:sleep(10),
+            wait_lock(Index, StreamSet)
+    end.
 
+wait_ref(_Index, _Ref, [], _StreamSet) ->
+    ct:pal("all holders died, try to get the lock again"),
+    ok;
 wait_ref(Index, Ref, Monitors, StreamSet) ->
     receive
-        {'DOWN', MRef, process, _Handler, _Reason}=Msg ->
+        {'DOWN', MRef, process, Handler, Reason}=Msg ->
+            ct:pal("lock holder ~p ~p died with reason ~p", [Index, Handler, Reason]),
             case lists:member(MRef, Monitors) of
                 true ->
+                    remove_holder(Index, Handler, StreamSet),
                     wait_ref(Index, Ref, Monitors -- [MRef], StreamSet);
                 false ->
                     self() ! Msg,
@@ -1244,66 +1314,95 @@ wait_ref(Index, Ref, Monitors, StreamSet) ->
                       ok;
                   _ ->
                       ct:pal("~p deadlocked on ~p", [self(), Index]),
+                      Lock = hd(ets:lookup(StreamSet#stream_set.table, {lock, Index})),
+                      ct:pal("Lock ~p", [Lock]),
+                      [ ct:pal("~p", [erlang:process_info(P)]) || P <- Lock#lock.holders ],
                       wait_ref(Index, Ref, Monitors, StreamSet)
               end
     end.
 
 release_lock(Index, StreamSet) ->
-    case ets:lookup(StreamSet#stream_set.table, {lock, Index}) of
-        [#lock{holders=Holders, waiters=Waiters}] ->
-            Self = self(),
-            %% filter out any dead holders and ourself
-            case [ P || P <- Holders, erlang:is_process_alive(P), P /= Self ] of
-                [] ->
-                    %% we were the last holder
-                    case ets:select_replace(StreamSet#stream_set.table, ets:fun2ms(fun(#lock{id={lock, I}, holders=H}=Lock) when I == Index, H == Holders -> Lock#lock{waiters=[], holders=[]} end)) of
-                        1 ->
-                            case atomics:compare_exchange(StreamSet#stream_set.atomics, Index, ?SHARED_LOCK, ?UNLOCKED) of
-                                ok ->
-                                    [ Pid ! {Ref, unlocked} || {Pid, Ref} <- Waiters ];
-                                ?EXCLUSIVE_LOCK ->
-                                    %% TODO this needs to be tracked better because when we upgrade a lock or re-take a lock
-                                    %% we need to know how many times to unlock it, and into what state
-                                    case atomics:compare_exchange(StreamSet#stream_set.atomics, Index, ?EXCLUSIVE_LOCK, ?UNLOCKED) of
-                                        ok -> ok;
-                                        ?UNLOCKED ->
-                                            ok
+    OldState = atomics:get(StreamSet#stream_set.atomics, Index),
+    case OldState /= ?EDITING_LOCK andalso atomics:compare_exchange(StreamSet#stream_set.atomics, Index, OldState, ?EDITING_LOCK) == ok of
+        true ->
+            case ets:lookup(StreamSet#stream_set.table, {lock, Index}) of
+                [#lock{holders=Holders, waiters=Waiters}] ->
+                    Self = self(),
+                    %% filter out any dead holders and ourself
+                    case [ P || P <- Holders, erlang:is_process_alive(P), P /= Self ] of
+                        [] ->
+                            %% we were the last holder
+                            case ets:select_replace(StreamSet#stream_set.table, ets:fun2ms(fun(#lock{id={lock, I}, holders=H}=Lock) when I == Index, H == Holders -> Lock#lock{waiters=[], holders=[]} end)) of
+                                1 ->
+                                    case OldState of
+                                        ?SHARED_LOCK ->
+                                            ok = atomics:compare_exchange(StreamSet#stream_set.atomics, Index, ?EDITING_LOCK, ?SHARED_LOCK),
+                                            [ Pid ! {Ref, unlocked} || {Pid, Ref} <- Waiters ];
+                                        ?EXCLUSIVE_LOCK ->
+                                            %% TODO this needs to be tracked better because when we upgrade a lock or re-take a lock
+                                            %% we need to know how many times to unlock it, and into what state
+                                            case atomics:compare_exchange(StreamSet#stream_set.atomics, Index, ?EDITING_LOCK, ?UNLOCKED) of
+                                                ok -> ok;
+                                                ?UNLOCKED ->
+                                                    ok
+                                            end
                                     end,
-                                    ok
-                            end,
-                            ok;
-                        _N ->
-                            ok
-                    end;
-                OtherHolders ->
-                    case ets:select_replace(StreamSet#stream_set.table, ets:fun2ms(fun(#lock{id={lock, I}, holders=H}=Lock) when I == Index, H == Holders -> Lock#lock{holders=OtherHolders} end)) of
-                        1 ->
-                            ok;
-                        _ ->
-                            release_lock(Index, StreamSet)
+                                    ok;
+                                _N ->
+                                    ok = atomics:compare_exchange(StreamSet#stream_set.atomics, Index, ?EDITING_LOCK, OldState),
+                                    timer:sleep(10),
+                                    release_lock(Index, StreamSet)
+                            end;
+                        OtherHolders ->
+                            case ets:select_replace(StreamSet#stream_set.table, ets:fun2ms(fun(#lock{id={lock, I}, holders=H}=Lock) when I == Index, H == Holders -> Lock#lock{holders=OtherHolders} end)) of
+                                1 ->
+                                    ok = atomics:compare_exchange(StreamSet#stream_set.atomics, Index, ?EDITING_LOCK, OldState),
+                                    ok;
+                                _ ->
+                                    ok = atomics:compare_exchange(StreamSet#stream_set.atomics, Index, ?EDITING_LOCK, OldState),
+                                    release_lock(Index, StreamSet)
+                            end
                     end
-            end
+            end;
+        _Other ->
+            ct:pal("waiting for lock ~p to be edited to release", [Index]),
+            timer:sleep(10),
+            release_lock(Index, StreamSet)
     end.
 
 release_exclusive_lock(Index, StreamSet) ->
-    Self = self(),
-    case ets:lookup(StreamSet#stream_set.table, {lock, Index}) of
-        [#lock{holders=H, waiters=W}] when H /= [Self] ->
-            NewHolders = H -- [Self],
-            %true = lists:all(fun(E) -> E == Self end, NewHolders),
-            1 = ets:select_replace(StreamSet#stream_set.table, ets:fun2ms(fun(#lock{id={lock, I}}=Lock) when I == Index -> Lock#lock{waiters=W, holders=NewHolders} end)),
-            ok;
-        [#lock{waiters=Waiters}] ->
-            1 = ets:select_replace(StreamSet#stream_set.table, ets:fun2ms(fun(#lock{id={lock, I}}=Lock) when I == Index -> Lock#lock{waiters=[], holders=[]} end)),
-            case atomics:compare_exchange(StreamSet#stream_set.atomics, Index, ?EXCLUSIVE_LOCK, ?UNLOCKED) of
-                ok -> ok;
-                ?UNLOCKED -> ok
-            end,
-            [ Pid ! {Ref, unlocked} || {Pid, Ref} <- Waiters ],
-            ok
+    OldState = atomics:get(StreamSet#stream_set.atomics, Index),
+    case OldState /= ?EDITING_LOCK andalso atomics:compare_exchange(StreamSet#stream_set.atomics, Index, OldState, ?EDITING_LOCK) == ok of
+        true ->
+            Self = self(),
+            case ets:lookup(StreamSet#stream_set.table, {lock, Index}) of
+                [#lock{holders=H, waiters=W}] when H /= [Self] ->
+                    NewHolders = H -- [Self],
+                    %true = lists:all(fun(E) -> E == Self end, NewHolders),
+                    1 = ets:select_replace(StreamSet#stream_set.table, ets:fun2ms(fun(#lock{id={lock, I}}=Lock) when I == Index -> Lock#lock{waiters=W, holders=NewHolders} end)),
+                    ok = atomics:compare_exchange(StreamSet#stream_set.atomics, Index, ?EDITING_LOCK, OldState),
+                    ok;
+                [#lock{waiters=Waiters}] ->
+                    1 = ets:select_replace(StreamSet#stream_set.table, ets:fun2ms(fun(#lock{id={lock, I}}=Lock) when I == Index -> Lock#lock{waiters=[], holders=[]} end)),
+                    ok = atomics:compare_exchange(StreamSet#stream_set.atomics, Index, ?EDITING_LOCK, OldState),
+                    case atomics:compare_exchange(StreamSet#stream_set.atomics, Index, ?EXCLUSIVE_LOCK, ?UNLOCKED) of
+                        ok -> ok;
+                        ?UNLOCKED -> ok
+                    end,
+                    [ Pid ! {Ref, unlocked} || {Pid, Ref} <- Waiters ],
+                    ok
+            end;
+        _Other ->
+            ct:pal("~p waiting for lock ~p to be edited to release exclusive", [self(), Index]),
+            timer:sleep(10),
+            release_exclusive_lock(Index, StreamSet)
     end.
 
 lock_to_index(socket) -> ?SEND_LOCK;
 lock_to_index(settings) -> ?SETTINGS_LOCK;
 lock_to_index(streams) -> ?STREAMS_LOCK;
 lock_to_index(encoder) -> ?ENCODER_LOCK.
+
+get_holders(Index, StreamSet) ->
+    [#lock{holders=Holders}] = ets:lookup(StreamSet#stream_set.table, {lock, Index}),
+    Holders.
