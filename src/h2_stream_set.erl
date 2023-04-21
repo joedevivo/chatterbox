@@ -771,7 +771,7 @@ update_my_max_active(NewMax, Streams) ->
                               {NewConnSendWindowSize :: integer(),
                                NewStreams :: stream_set()}.
 send_what_we_can(all, Streams) ->
-    AfterAfterWindowSize = take_exclusive_lock(Streams, [socket], fun() ->
+    AfterAfterWindowSize = take_exclusive_lock(Streams, [socket, streams], fun() ->
     ConnSendWindowSize = socket_send_window_size(Streams),
     {_SelfSettings, PeerSettings} = get_settings(Streams),
     MaxFrameSize = PeerSettings#settings.max_frame_size,
@@ -792,7 +792,7 @@ send_what_we_can(all, Streams) ->
      Streams};
 send_what_we_can(StreamId, Streams) ->
 
-    {NewConnSendWindowSize, NewStream} = take_exclusive_lock(Streams, [socket], fun() ->
+    {NewConnSendWindowSize, NewStream} = take_exclusive_lock(Streams, [socket, streams], fun() ->
     ConnSendWindowSize = socket_send_window_size(Streams),
     {_SelfSettings, PeerSettings} = get_settings(Streams),
     MaxFrameSize = PeerSettings#settings.max_frame_size,
@@ -1168,10 +1168,18 @@ take_lock(Index, StreamSet=#stream_set{atomics=Atomics}) ->
     end.
 
 take_exclusive_lock(StreamSet, Locks, Fun) ->
-    [ take_exclusive_lock(lock_to_index(Lock), StreamSet) || Lock <- lists:sort(Locks) ],
-    Res = catch Fun(),
-    [ release_exclusive_lock(lock_to_index(Lock), StreamSet) || Lock <- lists:sort(Locks) ],
-    Res.
+    LockRes = [ {take_exclusive_lock(lock_to_index(Lock), StreamSet), lock_to_index(Lock)} || Lock <- lists:sort(Locks) ],
+    case lists:all(fun({Res, _Index}) -> Res == ok end, LockRes) of
+        false ->
+            %% release any we got
+            [ release_exclusive_lock(Index, StreamSet) || {ok, Index} <- LockRes ],
+            timer:sleep(10),
+            take_exclusive_lock(StreamSet, Locks, Fun);
+        true ->
+            Res = catch Fun(),
+            [ release_exclusive_lock(lock_to_index(Lock), StreamSet) || Lock <- lists:sort(Locks) ],
+            Res
+    end.
 
 
 take_exclusive_lock(Index, StreamSet=#stream_set{atomics=Atomics}) ->
@@ -1185,14 +1193,13 @@ take_exclusive_lock(Index, StreamSet=#stream_set{atomics=Atomics}) ->
             ct:pal("~p lock ~p is shared", [self(), Index]),
             %% check if its only us holding the lock
             JustUs = [self()],
-            case ets:select_count(StreamSet#stream_set.table, ets:fun2ms(fun(#lock{id={lock, I}, holders=H}=Lock) when I == Index, H == JustUs -> true end)) of
+            case ets:select_count(StreamSet#stream_set.table, ets:fun2ms(fun(#lock{id={lock, I}, holders=H}=Lock) when I == Index, (H == JustUs orelse H == []) -> true end)) of
                 1 ->
                     ok = atomics:compare_exchange(Atomics, Index, ?SHARED_LOCK, ?EXCLUSIVE_LOCK),
                     hold_lock(Index, StreamSet);
                 0 ->
                     %% someone else already has a shared lock, this is fine
-                    wait_lock(Index, StreamSet),
-                    take_exclusive_lock(Index, StreamSet)
+                    failed
             end;
         ?EXCLUSIVE_LOCK ->
             JustUs = [self()],
@@ -1212,13 +1219,11 @@ take_exclusive_lock(Index, StreamSet=#stream_set{atomics=Atomics}) ->
                                     ok;
                                 _ ->
                                     %% need to wait for the exclusive access to be released
-                                    wait_lock(Index, StreamSet),
-                                    take_exclusive_lock(Index, StreamSet)
+                                    failed
                             end;
                         _ ->
                             %% need to wait for the exclusive access to be released
-                            wait_lock(Index, StreamSet),
-                            take_exclusive_lock(Index, StreamSet)
+                            failed
                     end
             end;
         ?EDITING_LOCK ->
@@ -1265,7 +1270,7 @@ remove_holder(Index, Holder, StreamSet) ->
             end;
         _Other ->
             timer:sleep(10),
-            ct:pal("waiting remove holder"),
+            ct:pal("~p waiting remove holder ~p ~p", [self(), Index, Holder]),
             remove_holder(Index, Holder, StreamSet)
     end.
 
@@ -1345,7 +1350,9 @@ release_lock(Index, StreamSet) ->
                                                 ok -> ok;
                                                 ?UNLOCKED ->
                                                     ok
-                                            end
+                                            end;
+                                        ?UNLOCKED ->
+                                            ok
                                     end,
                                     ok;
                                 _N ->

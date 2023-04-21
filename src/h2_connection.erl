@@ -917,15 +917,12 @@ route_frame(Event,
             %% lowest stream_id first
             %Streams = h2_stream_set:sort(Conn#connection.streams),
 
-            {_RemainingSendWindow, UpdatedStreams} =
                 h2_stream_set:send_what_we_can(
                   all,
                   Streams
                  ),
             maybe_reply(Event, {next_state, connected,
-             Conn#connection{
-               streams=UpdatedStreams
-              }}, ok)
+             Conn}, ok)
     end;
 route_frame(Event,
   {#frame_header{type=?WINDOW_UPDATE}=FH,
@@ -950,17 +947,14 @@ route_frame(Event,
                 true ->
                     rst_stream_(Event, Stream, ?FLOW_CONTROL_ERROR, Conn);
                 false ->
-                    {_RemainingSendWindow, NewStreams}
-                        = h2_stream_set:send_what_we_can(
+                        h2_stream_set:send_what_we_can(
                             StreamId,
                             h2_stream_set:upsert(
                               h2_stream_set:increment_send_window_size(WSI, Stream),
                               Streams)
                            ),
                     maybe_reply(Event, {next_state, connected,
-                     Conn#connection{
-                       streams=NewStreams
-                      }}, ok)
+                     Conn}, ok)
             end
     end;
 route_frame(Event, {#frame_header{type=T}, _}, _SelfSettings, _PeerSettings, Conn)
@@ -1079,19 +1073,16 @@ handle_event(_, {send_trailers, StreamId, Headers, Opts},
     case h2_stream_set:type(Stream) of
         active ->
             NewS = h2_stream_set:update_trailers(Headers, Stream),
-            {_NewSWS, NewStreams} =
-                h2_stream_set:send_what_we_can(
-                  StreamId,
-                  h2_stream_set:upsert(
-                    h2_stream_set:update_data_queue(h2_stream_set:queued_data(Stream), BodyComplete, NewS),
-                    Conn#connection.streams)),
+            h2_stream_set:send_what_we_can(
+              StreamId,
+              h2_stream_set:upsert(
+                h2_stream_set:update_data_queue(h2_stream_set:queued_data(Stream), BodyComplete, NewS),
+                Streams)),
 
             send_t(Stream, Headers),
 
             {keep_state,
-             Conn#connection{
-               streams=NewStreams
-              }};
+             Conn};
         idle ->
             %% In theory this is a client maybe activating a stream,
             %% but in practice, we've already activated the stream in
@@ -1470,7 +1461,6 @@ send_trailers_(StreamId, Trailers, Opts, Streams) ->
     case h2_stream_set:type(Stream) of
         active ->
             NewS = h2_stream_set:update_trailers(Trailers, Stream),
-            {_NewSWS, _NewStreams} =
                 h2_stream_set:send_what_we_can(
                   StreamId,
                   h2_stream_set:upsert(
@@ -1667,6 +1657,7 @@ spawn_data_receiver(Socket, Streams, Flow) ->
                                                                        F(S, St, false, Decoder)
                                                                end;
                                                            StreamType ->
+                                                               ct:pal("unexpected ~p", [Frame]),
                                                                go_away_(?PROTOCOL_ERROR, list_to_binary(io_lib:format("data on ~p stream ~p", [StreamType, Header#frame_header.stream_id])), S, St),
                                                                Connection ! {go_away, ?PROTOCOL_ERROR}
                                                        end
@@ -1781,7 +1772,10 @@ spawn_data_receiver(Socket, Streams, Flow) ->
                                                Connection ! {go_away, ?FRAME_SIZE_ERROR};
                                            ?PING when ?NOT_FLAG((Header#frame_header.flags), ?FLAG_ACK) ->
                                                Ack = h2_frame_ping:ack(Payload),
-                                               sock:send(S, h2_frame:to_binary(Ack)),
+                                               h2_stream_set:take_exclusive_lock(St, [socket],
+                                                                                 fun() ->
+                                                                                         sock:send(S, h2_frame:to_binary(Ack))
+                                                                                 end),
                                                F(S, St, false, Decoder);
                                            ?PUSH_PROMISE when Type == server ->
                                                go_away_(?PROTOCOL_ERROR, <<"push_promise sent to server">>, S, St),
@@ -2098,7 +2092,6 @@ send_body_(StreamId, Body, Opts, Streams) ->
                           true -> <<OldBody/binary, Body/binary>>;
                           false -> Body
                       end,
-            {_NewSWS, _NewStreams} =
                 h2_stream_set:send_what_we_can(
                   StreamId,
                   h2_stream_set:upsert(
