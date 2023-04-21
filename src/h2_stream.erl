@@ -396,7 +396,7 @@ open(cast, recv_es,
                callback_state=NewCBState
               }};
         rst_stream ->
-            ct:pal("closing on ES with rst"),
+            ct:pal("stream ~p closing on ES with rst", [Stream#stream_state.stream_id]),
             {next_state,
              closed,
              Stream}
@@ -459,7 +459,7 @@ open(cast, {recv_data,
                 ok ->
                     {next_state, half_closed_remote, NewStream};
                 rst_stream ->
-                    ct:pal("closing on rst_stream"),
+                    ct:pal("stream ~p closing on rst_stream", [Stream#stream_state.stream_id]),
                     {next_state, closed, NewStream}
             end;
 
@@ -890,7 +890,7 @@ rst_stream_(ErrorCode,
                      },
                    RstStream}),
     sock:send(Socket, RstStreamBin),
-    ct:pal("closing on rst_stream ~p", [ErrorCode]),
+    ct:pal("stream ~p closing on rst_stream ~p", [StreamId, ErrorCode]),
     {next_state,
      closed,
      Stream, 0}.

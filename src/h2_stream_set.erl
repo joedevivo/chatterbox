@@ -17,6 +17,8 @@
 -define(STREAMS_LOCK, 5).
 -define(ENCODER_LOCK, 6).
 -define(MY_NEXT_AVAILABLE_STREAM_ID, 7).
+-define(MY_LOWEST_STREAM_ID, 8).
+-define(THEIR_LOWEST_STREAM_ID, 9).
 
 -define(UNLOCKED, 0).
 -define(SHARED_LOCK, 1).
@@ -29,7 +31,7 @@
      %% Type determines which streams are mine, and which are theirs
      type :: client | server,
 
-     atomics = atomics:new(7, []),
+     atomics = atomics:new(9, []),
 
      socket :: sock:socket(),
 
@@ -247,6 +249,8 @@ new(client, Socket, CallbackMod, CallbackOpts) ->
     ets:insert_new(StreamSet#stream_set.table, #connection_settings{type=peer_settings}),
     ets:insert_new(StreamSet#stream_set.table, #context{}),
     atomics:put(StreamSet#stream_set.atomics, ?MY_NEXT_AVAILABLE_STREAM_ID, 1),
+    atomics:put(StreamSet#stream_set.atomics, ?MY_LOWEST_STREAM_ID, 0),
+    atomics:put(StreamSet#stream_set.atomics, ?THEIR_LOWEST_STREAM_ID, 0),
     %% I'm a client, so mine are always odd numbered
     ets:insert_new(StreamSet#stream_set.table,
                    #peer_subset{
@@ -278,6 +282,8 @@ new(server, Socket, CallbackMod, CallbackOpts) ->
     ets:insert_new(StreamSet#stream_set.table, #context{}),
     %% I'm a server, so mine are always even numbered
     atomics:put(StreamSet#stream_set.atomics, ?MY_NEXT_AVAILABLE_STREAM_ID, 2),
+    atomics:put(StreamSet#stream_set.atomics, ?MY_LOWEST_STREAM_ID, 0),
+    atomics:put(StreamSet#stream_set.atomics, ?THEIR_LOWEST_STREAM_ID, 0),
     ets:insert_new(StreamSet#stream_set.table,
                    #peer_subset{
                       type=mine,
@@ -421,13 +427,15 @@ get_peer_subset(Id, StreamSet) ->
 -spec get_my_peers(stream_set()) -> peer_subset().
 get_my_peers(StreamSet) ->
     Next = atomics:get(StreamSet#stream_set.atomics, ?MY_NEXT_AVAILABLE_STREAM_ID),
-    try (hd(ets:lookup(StreamSet#stream_set.table, mine)))#peer_subset{next_available_stream_id=Next}
+    Lowest = atomics:get(StreamSet#stream_set.atomics, ?MY_LOWEST_STREAM_ID),
+    try (hd(ets:lookup(StreamSet#stream_set.table, mine)))#peer_subset{next_available_stream_id=Next, lowest_stream_id = Lowest}
     catch _:_ -> #peer_subset{}
     end.
 
 -spec get_their_peers(stream_set()) -> peer_subset().
 get_their_peers(StreamSet) ->
-    try hd(ets:lookup(StreamSet#stream_set.table, theirs))
+    Lowest = atomics:get(StreamSet#stream_set.atomics, ?THEIR_LOWEST_STREAM_ID),
+    try (hd(ets:lookup(StreamSet#stream_set.table, theirs)))#peer_subset{lowest_stream_id = Lowest}
     catch _:_ -> #peer_subset{}
     end.
 
@@ -505,22 +513,22 @@ get_from_subset(Id,
 get_from_subset(Id, _PeerSubset, StreamSet) ->
     try ets:lookup(StreamSet#stream_set.table, Id)  of
         [] ->
-            ct:pal("~p returning closed stream ~p for unknown", [StreamSet#stream_set.type, Id]),
+            ct:pal("~p returning idle stream ~p for unknown", [StreamSet#stream_set.type, Id]),
             timer:sleep(100),
             try ets:lookup(StreamSet#stream_set.table, Id)  of
                 [] ->
-                    #closed_stream{id=Id};
+                    #idle_stream{id=Id};
                 [NewStream] ->
                     ct:pal("found missing stream ~p", [Id]),
                     NewStream
             catch _:_ ->
-                      #closed_stream{id=Id}
+                      #idle_stream{id=Id}
             end;
         [Stream] ->
             Stream
     catch
         _:_ ->
-            #closed_stream{id=Id}
+            #idle_stream{id=Id}
     end.
 
 -spec upsert(
@@ -560,7 +568,7 @@ upsert_peer_subset(
   #closed_stream{
      id=Id,
      garbage=true
-    },
+    }=Closed,
   PeerSubset, StreamSet)
   when Id >= PeerSubset#peer_subset.lowest_stream_id,
        Id < PeerSubset#peer_subset.next_available_stream_id ->
@@ -572,19 +580,21 @@ upsert_peer_subset(
             active -> -1
         end,
 
-    ets:delete(StreamSet#stream_set.table, Id),
+    ets:insert(StreamSet#stream_set.table, Closed),
     %% NewActive could now have a #closed_stream with no information
     %% in it as the lowest active stream, so we should drop those.
     NewActive = drop_unneeded_streams(StreamSet, Id),
 
     case NewActive of
         [] ->
+            ct:pal("~p lowest stream is now ~p", [stream_set_type(StreamSet), PeerSubset#peer_subset.next_available_stream_id]),
             PeerSubset#peer_subset{
               lowest_stream_id=PeerSubset#peer_subset.next_available_stream_id,
               active_count=0
              };
         [NewLowestStream|_] ->
             NewLowest = stream_id(NewLowestStream),
+            ct:pal("lowest stream is now ~p", [NewLowest]),
             PeerSubset#peer_subset{
               lowest_stream_id=NewLowest,
               active_count=PeerSubset#peer_subset.active_count+ActiveDiff
@@ -661,27 +671,29 @@ upsert_peer_subset(
 
 
 drop_unneeded_streams(StreamSet, Id) ->
-    Streams = case {StreamSet#stream_set.type, Id rem 2} of
+    {Streams, Key} = case {StreamSet#stream_set.type, Id rem 2} of
                   {client, 0} ->
                       %% their streams
-                      their_active_streams(StreamSet);
+                             {their_active_streams(StreamSet), ?THEIR_LOWEST_STREAM_ID};
                   {client, 1} ->
                       %% my streams
-                      my_active_streams(StreamSet);
+                             {my_active_streams(StreamSet), ?MY_LOWEST_STREAM_ID};
                   {server, 0} ->
                       %% my streams
-                      my_active_streams(StreamSet);
+                             {my_active_streams(StreamSet), ?MY_LOWEST_STREAM_ID};
                   {server, 1} ->
                       %% their streams
-                      their_active_streams(StreamSet)
+                             {their_active_streams(StreamSet), ?THEIR_LOWEST_STREAM_ID}
               end,
     SortedStreams = lists:keysort(2, Streams),
-    drop_unneeded_streams_(SortedStreams, StreamSet).
+    drop_unneeded_streams_(SortedStreams, StreamSet, Key).
 
-drop_unneeded_streams_([#closed_stream{garbage=true, id=Id}|T], StreamSet) ->
+drop_unneeded_streams_([#closed_stream{garbage=true, id=Id}|T], StreamSet, Key) ->
+    ct:pal("drop deleting stream ~p", [Id]),
+    atomics:put(StreamSet#stream_set.atomics, Key, Id + 2),
     ets:delete(StreamSet#stream_set.table, Id),
-    drop_unneeded_streams_(T, StreamSet);
-drop_unneeded_streams_(Other, _StreamSet) ->
+    drop_unneeded_streams_(T, StreamSet, Key);
+drop_unneeded_streams_(Other, _StreamSet, _Key) ->
     Other.
 
 -spec close(

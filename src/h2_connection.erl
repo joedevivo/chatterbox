@@ -936,7 +936,7 @@ route_frame(Event,
     Stream0 = h2_stream_set:get(StreamId, Streams),
     case h2_stream_set:type(Stream0) of
         idle ->
-            go_away(Event, ?PROTOCOL_ERROR, <<"window update on idle stream">>, Conn);
+            go_away(Event, ?PROTOCOL_ERROR, list_to_binary(io_lib:format("window update on idle stream ~p", [StreamId])), Conn);
         closed ->
             rst_stream_(Event, Stream0, ?STREAM_CLOSED, Conn);
         active ->
@@ -1623,7 +1623,7 @@ spawn_data_receiver(Socket, Streams, Flow) ->
                                                                case {
                                                                  h2_stream_set:recv_window_size(Stream) < L,
                                                                  Flow,
-                                                                 L > 0
+                                                                 L > 0 andalso h2_stream_set:queued_data(Stream) /= done
                                                                 } of
                                                                    {true, _, _} ->
                                                                        rst_stream__(Stream,
@@ -1676,7 +1676,7 @@ spawn_data_receiver(Socket, Streams, Flow) ->
                                                              CallbackOpts,
                                                              Streams) of
                                                            {error, ErrorCode, NewStream} ->
-                                                               ct:pal("RST when creating stream ~p", [ErrorCode]),
+                                                               ct:pal("RST when creating stream ~p ~p", [StreamId, ErrorCode]),
                                                                rst_stream__(NewStream, ErrorCode, S),
                                                                none;
                                                            {_, _, _NewStreams} ->
