@@ -1157,7 +1157,8 @@ my_max_active(SS) ->
 their_max_active(SS) ->
     (get_their_peers(SS))#peer_subset.max_active.
 
-take_lock(StreamSet, Locks, Fun) ->
+take_lock(StreamSet, Locks0, Fun) ->
+    Locks = Locks0 -- [socket],
     [ take_lock(lock_to_index(Lock), StreamSet) || Lock <- lists:sort(Locks) ],
     Res = catch Fun(),
     [ release_lock(lock_to_index(Lock), StreamSet) || Lock <- lists:sort(Locks) ],
@@ -1185,7 +1186,8 @@ take_lock(Index, StreamSet=#stream_set{atomics=Atomics}) ->
             take_lock(Index, StreamSet)
     end.
 
-take_exclusive_lock(StreamSet, Locks, Fun) ->
+take_exclusive_lock(StreamSet, Locks0, Fun) ->
+    Locks = Locks0 -- [socket],
     LockRes = [ {take_exclusive_lock(lock_to_index(Lock), StreamSet), lock_to_index(Lock)} || Lock <- lists:sort(Locks) ],
     case lists:all(fun({Res, _Index}) -> Res == ok end, LockRes) of
         false ->
