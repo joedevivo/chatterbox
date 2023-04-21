@@ -917,8 +917,7 @@ route_frame(Event,
             %% lowest stream_id first
             %Streams = h2_stream_set:sort(Conn#connection.streams),
 
-                h2_stream_set:send_what_we_can(
-                  all,
+                h2_stream_set:send_all_we_can(
                   Streams
                  ),
             maybe_reply(Event, {next_state, connected,
@@ -934,25 +933,24 @@ route_frame(Event,
     StreamId = FH#frame_header.stream_id,
     Streams = Conn#connection.streams,
     WSI = h2_frame_window_update:size_increment(Payload),
-    Stream = h2_stream_set:get(StreamId, Streams),
-    case h2_stream_set:type(Stream) of
+    Stream0 = h2_stream_set:get(StreamId, Streams),
+    case h2_stream_set:type(Stream0) of
         idle ->
             go_away(Event, ?PROTOCOL_ERROR, <<"window update on idle stream">>, Conn);
         closed ->
-            rst_stream_(Event, Stream, ?STREAM_CLOSED, Conn);
+            rst_stream_(Event, Stream0, ?STREAM_CLOSED, Conn);
         active ->
-            NewSSWS = h2_stream_set:send_window_size(Stream)+WSI,
+            NewSSWS = h2_stream_set:send_window_size(Stream0)+WSI,
 
             case NewSSWS > 2147483647 of
                 true ->
-                    rst_stream_(Event, Stream, ?FLOW_CONTROL_ERROR, Conn);
+                    rst_stream_(Event, Stream0, ?FLOW_CONTROL_ERROR, Conn);
                 false ->
                         h2_stream_set:send_what_we_can(
                             StreamId,
-                            h2_stream_set:upsert(
-                              h2_stream_set:increment_send_window_size(WSI, Stream),
-                              Streams)
-                           ),
+                            fun(Stream) ->
+                                    h2_stream_set:increment_send_window_size(WSI, Stream)
+                            end, Streams),
                     maybe_reply(Event, {next_state, connected,
                      Conn}, ok)
             end
@@ -1069,17 +1067,16 @@ handle_event(_, {send_trailers, StreamId, Headers, Opts},
             ) ->
     BodyComplete = proplists:get_value(send_end_stream, Opts, true),
 
-    Stream = h2_stream_set:get(StreamId, Streams),
-    case h2_stream_set:type(Stream) of
+    Stream0 = h2_stream_set:get(StreamId, Streams),
+    case h2_stream_set:type(Stream0) of
         active ->
-            NewS = h2_stream_set:update_trailers(Headers, Stream),
             h2_stream_set:send_what_we_can(
               StreamId,
-              h2_stream_set:upsert(
-                h2_stream_set:update_data_queue(h2_stream_set:queued_data(Stream), BodyComplete, NewS),
-                Streams)),
-
-            send_t(Stream, Headers),
+              fun(Stream) -> 
+                      NewS = h2_stream_set:update_trailers(Headers, Stream),
+                      h2_stream_set:update_data_queue(h2_stream_set:queued_data(Stream), BodyComplete, NewS)
+              end, Streams),
+            send_t(Stream0, Headers),
 
             {keep_state,
              Conn};
@@ -1457,17 +1454,17 @@ send_headers_(StreamId, Headers, Opts, Streams) ->
 send_trailers_(StreamId, Trailers, Opts, Streams) ->
     BodyComplete = proplists:get_value(send_end_stream, Opts, true),
 
-    Stream = h2_stream_set:get(StreamId, Streams),
-    case h2_stream_set:type(Stream) of
+    Stream0 = h2_stream_set:get(StreamId, Streams),
+    case h2_stream_set:type(Stream0) of
         active ->
-            NewS = h2_stream_set:update_trailers(Trailers, Stream),
                 h2_stream_set:send_what_we_can(
                   StreamId,
-                  h2_stream_set:upsert(
-                    h2_stream_set:update_data_queue(h2_stream_set:queued_data(Stream), BodyComplete, NewS),
-                    Streams)),
+                  fun(Stream) ->
+                          NewS = h2_stream_set:update_trailers(Trailers, Stream),
+                          h2_stream_set:update_data_queue(h2_stream_set:queued_data(Stream), BodyComplete, NewS)
+                  end, Streams),
 
-            send_t(Stream, Trailers),
+            send_t(Stream0, Trailers),
             ok;
         idle ->
             %% In theory this is a client maybe activating a stream,
@@ -2084,19 +2081,19 @@ send_request_(NotifyPid, Conn, Streams, Headers, Body, CallbackMod, CallbackOpts
 send_body_(StreamId, Body, Opts, Streams) ->
     BodyComplete = proplists:get_value(send_end_stream, Opts, true),
 
-    Stream = h2_stream_set:get(StreamId, Streams),
-    case h2_stream_set:type(Stream) of
+    Stream0 = h2_stream_set:get(StreamId, Streams),
+    case h2_stream_set:type(Stream0) of
         active ->
-            OldBody = h2_stream_set:queued_data(Stream),
-            NewBody = case is_binary(OldBody) of
-                          true -> <<OldBody/binary, Body/binary>>;
-                          false -> Body
-                      end,
                 h2_stream_set:send_what_we_can(
                   StreamId,
-                  h2_stream_set:upsert(
-                    h2_stream_set:update_data_queue(NewBody, BodyComplete, Stream),
-                    Streams)),
+                  fun(Stream) ->
+                          OldBody = h2_stream_set:queued_data(Stream),
+                          NewBody = case is_binary(OldBody) of
+                                        true -> <<OldBody/binary, Body/binary>>;
+                                        false -> Body
+                                    end,
+                          h2_stream_set:update_data_queue(NewBody, BodyComplete, Stream)
+                  end, Streams),
 
                 ok;
         idle ->

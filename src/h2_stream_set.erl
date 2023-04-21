@@ -217,7 +217,8 @@
 -export(
    [
     close/3,
-    send_what_we_can/2,
+    send_all_we_can/1,
+    send_what_we_can/3,
     update_all_recv_windows/2,
     update_all_send_windows/2,
     update_their_max_active/2,
@@ -766,11 +767,10 @@ update_my_max_active(NewMax, Streams) ->
     set_my_peers(Streams, Mine#peer_subset{max_active=NewMax}),
     Streams.
 
--spec send_what_we_can(StreamId :: all | stream_id(),
-                       Streams :: stream_set()) ->
+-spec send_all_we_can(Streams :: stream_set()) ->
                               {NewConnSendWindowSize :: integer(),
                                NewStreams :: stream_set()}.
-send_what_we_can(all, Streams) ->
+send_all_we_can(Streams) ->
     AfterAfterWindowSize = take_exclusive_lock(Streams, [socket, streams], fun() ->
     ConnSendWindowSize = socket_send_window_size(Streams),
     {_SelfSettings, PeerSettings} = get_settings(Streams),
@@ -789,9 +789,15 @@ send_what_we_can(all, Streams) ->
 
     set_socket_send_window_size(AfterAfterWindowSize, Streams),
     {AfterAfterWindowSize,
-     Streams};
-send_what_we_can(StreamId, Streams) ->
+     Streams}.
 
+-spec send_what_we_can(StreamId :: stream_id(),
+                       StreamFun :: fun((#active_stream{}) -> #active_stream{}),
+                       Streams :: stream_set()) ->
+                              {NewConnSendWindowSize :: integer(),
+                               NewStreams :: stream_set()}.
+
+send_what_we_can(StreamId, StreamFun, Streams) ->
     {NewConnSendWindowSize, NewStream} = take_exclusive_lock(Streams, [socket, streams], fun() ->
     ConnSendWindowSize = socket_send_window_size(Streams),
     {_SelfSettings, PeerSettings} = get_settings(Streams),
@@ -800,7 +806,7 @@ send_what_we_can(StreamId, Streams) ->
         s_send_what_we_can(ConnSendWindowSize,
                            MaxFrameSize,
                            Streams#stream_set.socket,
-                           get(StreamId, Streams))
+                           StreamFun(get(StreamId, Streams)))
                                            end),
     set_socket_send_window_size(NewConnSendWindowSize, Streams),
     {NewConnSendWindowSize,
