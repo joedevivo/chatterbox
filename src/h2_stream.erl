@@ -592,7 +592,7 @@ half_closed_remote(cast,
                      #frame_header{
                         flags=Flags,
                         type=?DATA
-                       },_
+                       }=H,_
                    }=F}=_Msg,
   #stream_state{
      socket=Socket
@@ -601,7 +601,7 @@ half_closed_remote(cast,
         ok ->
             case ?IS_FLAG(Flags, ?FLAG_END_STREAM) of
                 true ->
-                    ct:pal("stream ~p closing on END STREAM flag on data ~p", [Stream#stream_state.stream_id, F]),
+                    ct:pal("stream ~p closing on END STREAM flag on data ~p", [Stream#stream_state.stream_id, H]),
                     {next_state, closed, Stream, 0};
                 _ ->
                     {next_state, half_closed_remote, Stream}
@@ -670,7 +670,7 @@ half_closed_local(cast,
    {#frame_header{
        flags=Flags,
        type=?DATA
-      }, _}=F},
+      }=H, _}=F},
   #stream_state{
      callback_mod=undefined,
      incoming_frames=IFQ
@@ -682,7 +682,7 @@ half_closed_local(cast,
                 [h2_frame_data:data(Payload)
                  || {#frame_header{type=?DATA}, Payload} <- queue:to_list(NewQ)],
 
-                    ct:pal("stream ~p closing on END STREAM flag on data ~p", [Stream#stream_state.stream_id, F]),
+                    ct:pal("stream ~p closing on END STREAM flag on data ~p", [Stream#stream_state.stream_id, H]),
             {next_state, closed,
              Stream#stream_state{
                incoming_frames=queue:new(),
@@ -700,7 +700,7 @@ half_closed_local(cast,
    {#frame_header{
        flags=Flags,
        type=?DATA
-      }, Payload}=F},
+      }=H, Payload}},
   #stream_state{
      callback_mod=CB,
      callback_state=CallbackState
@@ -710,7 +710,7 @@ half_closed_local(cast,
     case ?IS_FLAG(Flags, ?FLAG_END_STREAM) of
         true ->
             {ok, NewCBState1} = callback(CB, on_end_stream, [], NewCBState),
-            ct:pal("stream ~p closing on END STREAM flag on data ~p", [Stream#stream_state.stream_id, F]),
+            ct:pal("stream ~p closing on END STREAM flag on data ~p", [Stream#stream_state.stream_id, H]),
             {next_state, closed,
              Stream#stream_state{
                callback_state=NewCBState1
@@ -849,11 +849,11 @@ handle_event({call, From}, Event, State=#stream_state{callback_mod=CB,
 handle_event(cast, {rst_stream, ErrorCode}, State=#stream_state{}) ->
     rst_stream_(ErrorCode, State);
 handle_event(cast, Event, State=#stream_state{callback_mod=CB,
-                                              callback_state=CallbackState}) ->
+                                              callback_state=CallbackState}) when CB /= undefined ->
     CallbackState1 = CB:handle_info(Event, CallbackState),
     {keep_state, State#stream_state{callback_state=CallbackState1}};
 handle_event(info, Event, State=#stream_state{callback_mod=CB,
-                                              callback_state=CallbackState}) ->
+                                              callback_state=CallbackState}) when CB /= undefined ->
      CallbackState1 = CB:handle_info(Event, CallbackState),
     {keep_state, State#stream_state{callback_state=CallbackState1}};
 handle_event(_, _Event, State) ->

@@ -1655,7 +1655,7 @@ spawn_data_receiver(Socket, Streams, Flow) ->
                                                                        F(S, St, false, Decoder)
                                                                end;
                                                            StreamType ->
-                                                               ct:pal("unexpected ~p", [Frame]),
+                                                               ct:pal("unexpected data ~p", [Frame]),
                                                                go_away_(?PROTOCOL_ERROR, list_to_binary(io_lib:format("data on ~p stream ~p", [StreamType, Header#frame_header.stream_id])), S, St),
                                                                Connection ! {go_away, ?PROTOCOL_ERROR}
                                                        end
