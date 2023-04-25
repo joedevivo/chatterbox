@@ -969,7 +969,7 @@ s_send_what_we_can(MFS, StreamId, StreamFun0, Streams) ->
             end,
 
             {Frames, SentBytes, NewS} =
-            case MaxToSend > QueueSize of
+            case MaxToSend >= QueueSize of
                 true ->
                     EndStream = case Stream#active_stream.body_complete of
                                     true ->
@@ -988,6 +988,7 @@ s_send_what_we_can(MFS, StreamId, StreamFun0, Streams) ->
                        queued_data=done,
                        send_window_size=SSWS-QueueSize}};
                 false ->
+                    ct:pal("taking ~p of ~p", [MaxToSend, byte_size(Stream#active_stream.queued_data)]),
                     <<BinToSend:MaxToSend/binary,Rest/binary>> = Stream#active_stream.queued_data,
                     {chunk_to_frames(BinToSend, MFS, Stream#active_stream.id, false, []),
                      MaxToSend,
