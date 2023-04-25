@@ -863,23 +863,18 @@ update_my_max_active(NewMax, Streams) ->
                               {NewConnSendWindowSize :: integer(),
                                NewStreams :: stream_set()}.
 send_all_we_can(Streams) ->
-    AfterAfterWindowSize = take_exclusive_lock(Streams, [socket], fun() ->
-    ConnSendWindowSize = socket_send_window_size(Streams),
     {_SelfSettings, PeerSettings} = get_settings(Streams),
     MaxFrameSize = PeerSettings#settings.max_frame_size,
-    AfterPeerWindowSize = c_send_what_we_can(
-                            ConnSendWindowSize,
-                            MaxFrameSize,
-                            get_their_active_streams(Streams),
-                            Streams),
     c_send_what_we_can(
-                             AfterPeerWindowSize,
-                             MaxFrameSize,
-                             get_my_active_streams(Streams),
-                             Streams)
-                                           end),
+      MaxFrameSize,
+      get_their_active_streams(Streams),
+      Streams),
+    c_send_what_we_can(
+      MaxFrameSize,
+      get_my_active_streams(Streams),
+      Streams),
 
-    {AfterAfterWindowSize,
+    {socket_send_window_size(Streams),
      Streams}.
 
 -spec send_what_we_can(StreamId :: stream_id(),
@@ -906,23 +901,23 @@ send_what_we_can(StreamId, StreamFun, Streams) ->
     {NewConnSendWindowSize, Streams}.
 
 %% Send at the connection level
--spec c_send_what_we_can(ConnSendWindowSize :: integer(),
-                         MaxFrameSize :: non_neg_integer(),
+-spec c_send_what_we_can(MaxFrameSize :: non_neg_integer(),
                          Streams :: [stream()],
                          StreamSet :: stream_set()
                         ) ->
                                 integer().
-%% If we hit =< 0, done
-c_send_what_we_can(ConnSendWindowSize, _MFS, _Streams, _StreamSet)
-  when ConnSendWindowSize =< 0 ->
-    ConnSendWindowSize;
-%% If we hit end of streams list, done
-c_send_what_we_can(SWS, _MFS, [], _StreamSet) ->
-    SWS;
-%% Otherwise, try sending on the working stream
-c_send_what_we_can(_SWS, MFS, [S|Streams], StreamSet) ->
+c_send_what_we_can(_MFS, [], StreamSet) ->
+    socket_send_window_size(StreamSet);
+c_send_what_we_can(MFS, [S|Streams], StreamSet) ->
     NewSWS = s_send_what_we_can(MFS, stream_id(S), fun(Stream) -> Stream end, StreamSet),
-    c_send_what_we_can(NewSWS, MFS, Streams, StreamSet).
+    case NewSWS =< 0 of
+        true ->
+            %% If we hit =< 0, done
+            NewSWS;
+        false ->
+            %% Otherwise, try sending on the next stream
+            c_send_what_we_can(MFS, Streams, StreamSet)
+    end.
 
 %% Send at the stream level
 -spec s_send_what_we_can(MFS :: non_neg_integer(),
