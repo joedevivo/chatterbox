@@ -1623,7 +1623,7 @@ spawn_data_receiver(Socket, Streams, Flow) ->
                                                                case {
                                                                  h2_stream_set:recv_window_size(Stream) < L,
                                                                  Flow,
-                                                                 L > 0 andalso h2_stream_set:queued_data(Stream) /= done
+                                                                 L > 0
                                                                 } of
                                                                    {true, _, _} ->
                                                                        rst_stream__(Stream,
