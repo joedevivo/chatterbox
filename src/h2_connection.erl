@@ -786,7 +786,6 @@ route_frame(Event, {H, _Payload},
               }}, ok)
                                                               end);
         _X ->
-            ct:pal("closing because of unexpected settings value on ack"),
             maybe_reply(Event, {next_state, closing, Conn}, ok)
     end;
 
@@ -981,7 +980,6 @@ handle_event(_, {stream_finished,
                     {client, false} -> {Headers, Body, Trailers};
                     {client, true} -> garbage
                 end,
-                ct:pal("stream ~p finished", [StreamId]),
             {_NewStream, NewStreams} =
                 h2_stream_set:close(
                   Stream,
@@ -1304,7 +1302,6 @@ handle_event(info, {ssl_error, Socket, Reason},
     handle_socket_error(Reason, Conn);
 handle_event(info, {go_away, ErrorCode}, Conn) ->
     gen_statem:cast(self(), io_lib:format("GO_AWAY: ErrorCode ~p", [ErrorCode])),
-    ct:pal("sent goaway ~p", [ErrorCode]),
     {next_state, closing, Conn};
 %handle_event(info, {_,R},
 %           #connection{}=Conn) ->
@@ -1439,7 +1436,6 @@ send_headers_(StreamId, Headers, Opts, Streams) ->
                                                               h2_stream_set:update_encode_context(Streams, NewContext)
                                                       end,
                                                       sock:send(Socket, [h2_frame:to_binary(Frame) || Frame <- FramesToSend]),
-                                                      ct:pal("sent headers on stream ~p (complete ~p)", [StreamId, StreamComplete]),
                                                       send_h(Stream, Headers),
                                                       ok
                                               end);
@@ -1492,7 +1488,6 @@ go_away_(ErrorCode, Socket, Streams) ->
     go_away_(ErrorCode, <<>>, Socket, Streams).
 
 go_away_(ErrorCode, Reason, Socket, Streams) ->
-    ct:pal("~p ~p sending goaway ~p ~p", [self(), h2_stream_set:stream_set_type(Streams), ErrorCode, Reason]),
     NAS = h2_stream_set:get_next_available_stream_id(Streams),
     GoAway = h2_frame_goaway:new(NAS, ErrorCode, Reason),
     GoAwayBin = h2_frame:to_binary({#frame_header{
@@ -1591,7 +1586,6 @@ spawn_data_receiver(Socket, Streams, Flow) ->
                                        go_away_(Code, <<"stream error">>, S, St),
                                        Connection ! {go_away, Code};
                                    {stream_error, StreamId, Code} ->
-                                       ct:pal("got stream error ~p", [Code]),
                                        Stream = h2_stream_set:get(StreamId, St),
                                        rst_stream__(Stream, Code, S),
                                        F(S, St, false, Decoder);
@@ -1657,7 +1651,6 @@ spawn_data_receiver(Socket, Streams, Flow) ->
                                                                        F(S, St, false, Decoder)
                                                                end;
                                                            StreamType ->
-                                                               ct:pal("unexpected data ~p", [Frame]),
                                                                go_away_(?PROTOCOL_ERROR, list_to_binary(io_lib:format("data on ~p stream ~p", [StreamType, Header#frame_header.stream_id])), S, St),
                                                                Connection ! {go_away, ?PROTOCOL_ERROR}
                                                        end
@@ -1678,7 +1671,6 @@ spawn_data_receiver(Socket, Streams, Flow) ->
                                                              CallbackOpts,
                                                              Streams) of
                                                            {error, ErrorCode, NewStream} ->
-                                                               ct:pal("RST when creating stream ~p ~p", [StreamId, ErrorCode]),
                                                                rst_stream__(NewStream, ErrorCode, S),
                                                                none;
                                                            {_, _, _NewStreams} ->
@@ -1902,7 +1894,6 @@ start_http2_server(
              send_settings(Http2Settings, NewState)
             };
         {error, invalid_preface} ->
-            ct:pal("invalid preface"),
             {next_state, closing, Conn}
     end.
 
@@ -1949,7 +1940,6 @@ handle_socket_passive(Conn) ->
     {keep_state, Conn}.
 
 handle_socket_closed(Conn) ->
-    ct:pal("socket closed"),
     {stop, normal, Conn}.
 
 handle_socket_error(Reason, Conn) ->
@@ -1980,10 +1970,8 @@ recv_h_(Stream,
             h2_stream:send_event(Pid, {recv_h, Headers});
         closed ->
             %% If the stream is closed, there's no running FSM
-            ct:pal("closed when recv_h"),
             rst_stream__(Stream, ?STREAM_CLOSED, Sock);
         idle ->
-            ct:pal("idle when recv_h"),
             %% If we're calling this function, we've already activated
             %% a stream FSM (probably). On the off chance we didn't,
             %% we'll throw this
@@ -2024,10 +2012,8 @@ recv_es_(Stream, Sock) ->
             Pid = h2_stream_set:pid(Stream),
             h2_stream:send_event(Pid, recv_es);
         closed ->
-            ct:pal("closed when recv_es"),
             rst_stream__(Stream, ?STREAM_CLOSED, Sock);
         idle ->
-            ct:pal("idle when recv_es"),
             rst_stream__(Stream, ?STREAM_CLOSED, Sock)
     end.
 

@@ -396,7 +396,6 @@ open(cast, recv_es,
                callback_state=NewCBState
               }};
         rst_stream ->
-            ct:pal("stream ~p closing on ES with rst", [Stream#stream_state.stream_id]),
             {next_state,
              closed,
              Stream}
@@ -459,7 +458,6 @@ open(cast, {recv_data,
                 ok ->
                     {next_state, half_closed_remote, NewStream};
                 rst_stream ->
-                    ct:pal("stream ~p closing on rst_stream", [Stream#stream_state.stream_id]),
                     {next_state, closed, NewStream}
             end;
 
@@ -480,7 +478,6 @@ open(cast, {recv_data,
                        callback_state=NewCBState1
                       }};
                 rst_stream ->
-                    ct:pal("closing on rst_stream"),
                     {next_state,
                      closed,
                      NewStream}
@@ -592,7 +589,7 @@ half_closed_remote(cast,
                      #frame_header{
                         flags=Flags,
                         type=?DATA
-                       }=H,_
+                       },_
                    }=F}=_Msg,
   #stream_state{
      socket=Socket
@@ -601,13 +598,11 @@ half_closed_remote(cast,
         ok ->
             case ?IS_FLAG(Flags, ?FLAG_END_STREAM) of
                 true ->
-                    ct:pal("stream ~p closing on END STREAM flag on data ~p", [Stream#stream_state.stream_id, H]),
                     {next_state, closed, Stream, 0};
                 _ ->
                     {next_state, half_closed_remote, Stream}
             end;
         {error,_} ->
-            ct:pal("closing on socket send error"),
             {next_state, closed, Stream, 0}
     end;
 half_closed_remote(cast,
@@ -625,13 +620,11 @@ half_closed_remote(cast,
         ok ->
             case ?IS_FLAG(Flags, ?FLAG_END_STREAM) of
                 true ->
-                    ct:pal("closing on END STREAM flag on headers"),
                     {next_state, closed, Stream, 0};
                 _ ->
                     {next_state, half_closed_remote, Stream}
             end;
         {error,_} ->
-            ct:pal("closing on socket send error"),
             {next_state, closed, Stream, 0}
     end;
 
@@ -639,7 +632,6 @@ half_closed_remote(_Type, {send_trailers, Trailers}, State) ->
     send_trailers(half_closed_remote, Trailers, State);
 half_closed_remote(cast, _E,
        #stream_state{}=Stream) ->
-    ct:pal("stream closed on cast ~p", [_E]),
     rst_stream_(?STREAM_CLOSED, Stream);
 half_closed_remote(Type, Event, State) ->
     handle_event(Type, Event, State).
@@ -670,7 +662,7 @@ half_closed_local(cast,
    {#frame_header{
        flags=Flags,
        type=?DATA
-      }=H, _}=F},
+      }, _}=F},
   #stream_state{
      callback_mod=undefined,
      incoming_frames=IFQ
@@ -682,7 +674,6 @@ half_closed_local(cast,
                 [h2_frame_data:data(Payload)
                  || {#frame_header{type=?DATA}, Payload} <- queue:to_list(NewQ)],
 
-                    ct:pal("stream ~p closing on END STREAM flag on data ~p", [Stream#stream_state.stream_id, H]),
             {next_state, closed,
              Stream#stream_state{
                incoming_frames=queue:new(),
@@ -700,7 +691,7 @@ half_closed_local(cast,
    {#frame_header{
        flags=Flags,
        type=?DATA
-      }=H, Payload}},
+      }, Payload}},
   #stream_state{
      callback_mod=CB,
      callback_state=CallbackState
@@ -710,7 +701,6 @@ half_closed_local(cast,
     case ?IS_FLAG(Flags, ?FLAG_END_STREAM) of
         true ->
             {ok, NewCBState1} = callback(CB, on_end_stream, [], NewCBState),
-            ct:pal("stream ~p closing on END STREAM flag on data ~p", [Stream#stream_state.stream_id, H]),
             {next_state, closed,
              Stream#stream_state{
                callback_state=NewCBState1
@@ -731,7 +721,6 @@ half_closed_local(cast, recv_es,
                     } = Stream) ->
     {ok, NewCBState} = callback(CB, on_end_stream, [], CallbackState),
     Data = [h2_frame_data:data(Payload) || {#frame_header{type=?DATA}, Payload} <- queue:to_list(Q)],
-    ct:pal("stream ~p received ES", [Stream#stream_state.stream_id]),
     {next_state, closed,
      Stream#stream_state{
        incoming_frames=queue:new(),
@@ -746,7 +735,6 @@ half_closed_local(cast, recv_es,
                      callback_state=CallbackState
                     } = Stream) ->
     {ok, NewCBState} = callback(CB, on_end_stream, [], CallbackState),
-    ct:pal("stream ~p received ES", [Stream#stream_state.stream_id]),
     {next_state, closed,
      Stream#stream_state{
        incoming_frames=queue:new(),
@@ -758,7 +746,6 @@ half_closed_local(cast, {send_t, _Trailers},
     keep_state_and_data;
 half_closed_local(_T, _E,
        #stream_state{}=Stream) ->
-    ct:pal("stream closed on ~p ~p", [_T, _E]),
     rst_stream_(?STREAM_CLOSED, Stream);
 half_closed_local(Type, Event, State) ->
     handle_event(Type, Event, State).
@@ -780,7 +767,6 @@ closed(timeout, _,
                                         StreamState#stream_state.response_trailers}
                                        %{client, true} -> garbage
                 end,
-                ct:pal("closing closed stream ~p on timeout", [StreamId]),
                 {_NewStream, _NewStreams} =
                 h2_stream_set:close(
                   Stream,
@@ -806,7 +792,6 @@ closed(cast,
    {keep_state,Stream#stream_state{response_trailers=Headers}, 0};
 closed(_T, _E,
        #stream_state{}=Stream) ->
-    ct:pal("stream closed on ~p ~p", [_T, _E]),
     rst_stream_(?STREAM_CLOSED, Stream);
 closed(Type, Event, State) ->
     handle_event(Type, Event, State).
@@ -816,7 +801,6 @@ send_trailers(State, Trailers, Stream=#stream_state{streams=Streams,
     h2_connection:actually_send_trailers(Streams, StreamId, Trailers),
     case State of
         half_closed_remote ->
-            ct:pal("closing after sending trailers"),
             {next_state, closed, Stream, 0};
         open ->
             {next_state, half_closed_local, Stream}
@@ -890,7 +874,6 @@ rst_stream_(ErrorCode,
                      },
                    RstStream}),
     sock:send(Socket, RstStreamBin),
-    ct:pal("stream ~p closing on rst_stream ~p", [StreamId, ErrorCode]),
     {next_state,
      closed,
      Stream, 0}.
