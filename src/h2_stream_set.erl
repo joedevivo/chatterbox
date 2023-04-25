@@ -357,7 +357,7 @@ new_stream(
                            send_window_size=InitialSendWindow,
                            recv_window_size=InitialRecvWindow
                           },
-                   true = ets:insert_new(StreamSet#stream_set.table, NewStream),
+                    true = ets:insert_new(StreamSet#stream_set.table, NewStream),
             case upsert_peer_subset(#idle_stream{id=StreamId}, NewStream, get_peer_subset(StreamId, StreamSet), StreamSet) of
                 {error, ?REFUSED_STREAM} ->
                     %% This should be very rare, if it ever happens at
@@ -528,6 +528,7 @@ update(StreamId, Fun, StreamSet) ->
                                     {ok, Data}
                             end;
                         false ->
+                            timer:sleep(1),
                             %% somebody beat us to it, try again
                             update(StreamId, Fun, StreamSet)
                     end;
@@ -549,6 +550,7 @@ update(StreamId, Fun, StreamSet) ->
                                     {ok, Data}
                             end;
                         0 ->
+                            timer:sleep(1),
                             update(StreamId, Fun, StreamSet)
                     end
             end
@@ -604,6 +606,7 @@ upsert_peer_subset(
         1 ->
             ok;
         0 ->
+            timer:sleep(1),
             upsert_peer_subset(OldStream, NewStream, get_peer_subset(Id, StreamSet), StreamSet)
     end;
 %% Case 2: Like case 1, but it's not garbage
@@ -624,6 +627,7 @@ upsert_peer_subset(
                 1 ->
                     ok;
                 0 ->
+                    timer:sleep(1),
                     upsert_peer_subset(OldStream, NewStream, get_peer_subset(Id, StreamSet), StreamSet)
             end;
         _ -> ok
@@ -644,6 +648,7 @@ upsert_peer_subset(
         1 ->
             ok;
         0 ->
+            timer:sleep(1),
             upsert_peer_subset(OldStream, NewStream, get_peer_subset(Id, StreamSet), StreamSet)
     end;
 %% Case 4: It's active, and in the range we're working with
@@ -681,6 +686,7 @@ upsert_peer_subset(
         1 ->
             ok;
         0 ->
+            timer:sleep(1),
             upsert_peer_subset(OldStream, NewStream, get_peer_subset(Id, StreamSet), StreamSet)
     end;
 %% Catch All
