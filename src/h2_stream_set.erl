@@ -972,6 +972,8 @@ s_send_what_we_can(MFS, StreamId, StreamFun0, Streams) ->
                     {max(0, SSWS), stream}
             end,
 
+            ct:pal("max to send on ~p is ~p -- SWS ~p SSWS ~p", [StreamId, MaxToSend, SWS, SSWS]),
+
             {Frames, SentBytes, NewS} =
             case MaxToSend >= QueueSize of
                 _ when MaxToSend == 0 ->
