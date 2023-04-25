@@ -1414,9 +1414,9 @@ send_headers_(StreamId, Headers, Opts, Streams) ->
             EncodeContext0 = h2_stream_set:get_encode_context(Streams),
             Locks = case hpack:all_fields_indexed(Headers, EncodeContext0) of
                         true ->
-                            [socket];
+                            [];
                         false ->
-                            [socket, encoder]
+                            [encoder]
                     end,
             Res = h2_stream_set:take_exclusive_lock(Streams, Locks,
                                                     fun() ->
