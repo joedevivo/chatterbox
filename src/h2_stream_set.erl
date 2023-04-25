@@ -967,65 +967,71 @@ s_send_what_we_can(MFS, StreamId, StreamFun0, Streams) ->
                 %% take the smallest of SWS or SSWS, read that
                 %% from the queue and break it up into MFS frames
                 true ->
-                    {max(0, SWS), connection};
+                    {SWS, connection};
                 _ ->
-                    {max(0, SSWS), stream}
+                    {SSWS, stream}
             end,
 
             ct:pal("max to send on ~p is ~p -- SWS ~p SSWS ~p", [StreamId, MaxToSend, SWS, SSWS]),
 
-            {Frames, SentBytes, NewS} =
-            case MaxToSend >= QueueSize of
-                _ when MaxToSend == 0 ->
-                    {[], 0, Stream};
-                true ->
-                    EndStream = case Stream#active_stream.body_complete of
-                                    true ->
-                                        case Stream of
-                                            #active_stream{trailers=undefined} ->
-                                                true;
-                                            _ ->
-                                                false
-                                        end;
-                                    false -> false
-                                end,
-                    %% We have the power to send everything
-                    {chunk_to_frames(Stream#active_stream.queued_data, MFS, Stream#active_stream.id, EndStream, []),
-                     QueueSize,
-                     Stream#active_stream{
-                       queued_data=done,
-                       send_window_size=SSWS-QueueSize}};
+            case MaxToSend > 0 of
                 false ->
-                    ct:pal("taking ~p of ~p", [MaxToSend, byte_size(Stream#active_stream.queued_data)]),
-                    <<BinToSend:MaxToSend/binary,Rest/binary>> = Stream#active_stream.queued_data,
-                    {chunk_to_frames(BinToSend, MFS, Stream#active_stream.id, false, []),
-                     MaxToSend,
-                     Stream#active_stream{
-                       queued_data=Rest,
-                       send_window_size=SSWS-MaxToSend}}
-            end,
+                    ignore;
+                true ->
 
-
-            %h2_stream:send_data(Stream#active_stream.pid, Frame),
-            Actions = case Frames of
-                          [] ->
-                              [];
-                          _ ->
-                              [{send_data, Stream#active_stream.pid, Frames}]
-                      end,
-            %sock:send(Socket, h2_frame:to_binary(Frame)),
-
-            {NewS1, NewActions} =
-            case NewS of
-                #active_stream{pid=Pid,
+                    {Frames, SentBytes, NewS} =
+                    case MaxToSend >= QueueSize of
+                        _ when MaxToSend == 0 ->
+                            {[], 0, Stream};
+                        true ->
+                            EndStream = case Stream#active_stream.body_complete of
+                                            true ->
+                                                case Stream of
+                                                    #active_stream{trailers=undefined} ->
+                                                        true;
+                                                    _ ->
+                                                        false
+                                                end;
+                                            false -> false
+                                        end,
+                            %% We have the power to send everything
+                            {chunk_to_frames(Stream#active_stream.queued_data, MFS, Stream#active_stream.id, EndStream, []),
+                             QueueSize,
+                             Stream#active_stream{
                                queued_data=done,
-                               trailers=Trailers1} when Trailers1 /= undefined ->
-                    {NewS#active_stream{trailers=undefined}, Actions ++ [{send_trailers, Pid, Trailers1}]};
-                _ ->
-                    {NewS, Actions}
-            end,
+                               send_window_size=SSWS-QueueSize}};
+                        false ->
+                            ct:pal("taking ~p of ~p", [MaxToSend, byte_size(Stream#active_stream.queued_data)]),
+                            <<BinToSend:MaxToSend/binary,Rest/binary>> = Stream#active_stream.queued_data,
+                            {chunk_to_frames(BinToSend, MFS, Stream#active_stream.id, false, []),
+                             MaxToSend,
+                             Stream#active_stream{
+                               queued_data=Rest,
+                               send_window_size=SSWS-MaxToSend}}
+                    end,
 
-            {NewS1, {SentBytes, NewActions}};
+
+                    %h2_stream:send_data(Stream#active_stream.pid, Frame),
+                    Actions = case Frames of
+                                  [] ->
+                                      [];
+                                  _ ->
+                                      [{send_data, Stream#active_stream.pid, Frames}]
+                              end,
+                    %sock:send(Socket, h2_frame:to_binary(Frame)),
+
+                    {NewS1, NewActions} =
+                    case NewS of
+                        #active_stream{pid=Pid,
+                                       queued_data=done,
+                                       trailers=Trailers1} when Trailers1 /= undefined ->
+                            {NewS#active_stream{trailers=undefined}, Actions ++ [{send_trailers, Pid, Trailers1}]};
+                        _ ->
+                            {NewS, Actions}
+                    end,
+
+                    {NewS1, {SentBytes, Stream, NewActions}}
+            end;
        (_) ->
             ignore
     end,
@@ -1035,12 +1041,22 @@ s_send_what_we_can(MFS, StreamId, StreamFun0, Streams) ->
             ct:pal("no send on ~p", [StreamId]),
             NewSWS = socket_send_window_size(Streams),
             NewSWS;
-        {ok, {BytesSent, Actions}} ->
-            ct:pal("sent ~p on ~p", [BytesSent, StreamId]),
-            NewSWS = decrement_socket_send_window(BytesSent, Streams),
-            %% ok, its now safe to apply these actions
-            apply_stream_actions(Actions),
-            NewSWS
+        {ok, {BytesSent, OldStream, Actions}} ->
+            SWS = socket_send_window_size(Streams),
+            case BytesSent > SWS of
+                true ->
+                    ct:pal("OVERSENT ~p > ~p on ~p", [BytesSent, SWS, StreamId]),
+                    %% we delved too deep, and too greedily
+                    %% try to roll things back
+                    ets:insert(Streams#stream_set.table, StreamFun0(OldStream)),
+                    SWS;
+                false ->
+                    ct:pal("sent ~p on ~p", [BytesSent, StreamId]),
+                    NewSWS = decrement_socket_send_window(BytesSent, Streams),
+                    %% ok, its now safe to apply these actions
+                    apply_stream_actions(Actions),
+                    NewSWS
+            end
     end.
 
 apply_stream_actions([]) ->
