@@ -931,7 +931,7 @@ s_send_what_we_can(MFS, StreamId, StreamFun0, Streams) ->
             ignore;
        (#active_stream{queued_data=Data, pid=Pid, trailers=Trailers}=S) when is_atom(Data) ->
             NewS = S#active_stream{trailers=undefined},
-            {NewS, {0, [{send_trailers, Pid, Trailers}]}};
+            {NewS, S, {0, [{send_trailers, Pid, Trailers}]}};
        (#active_stream{}=Stream) ->
 
             %% We're coming in here with three numbers we need to look at:
