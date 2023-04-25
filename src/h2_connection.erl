@@ -1411,34 +1411,41 @@ send_headers_(StreamId, Headers, Opts, Streams) ->
     Stream = h2_stream_set:get(StreamId, Streams),
     case h2_stream_set:type(Stream) of
         active ->
-            EncodeContext0 = h2_stream_set:get_encode_context(Streams),
-            Locks = case hpack:all_fields_indexed(Headers, EncodeContext0) of
-                        true ->
-                            [socket];
-                        false ->
-                            [socket, encoder]
-                    end,
-            h2_stream_set:take_exclusive_lock(Streams, Locks,
-                                              fun() ->
-                                                      {_SelfSettings, PeerSettings} = h2_stream_set:get_settings(Streams),
-                                                      EncodeContext = h2_stream_set:get_encode_context(Streams),
-                                                      {FramesToSend, NewContext} =
-                                                      h2_frame_headers:to_frames(h2_stream_set:stream_id(Stream),
-                                                                                 Headers,
-                                                                                 EncodeContext,
-                                                                                 PeerSettings#settings.max_frame_size,
-                                                                                 StreamComplete
-                                                                                ),
-                                                      case Locks of
-                                                          [] ->
-                                                              ok;
-                                                          _ ->
-                                                              h2_stream_set:update_encode_context(Streams, NewContext)
-                                                      end,
-                                                      sock:send(Socket, [h2_frame:to_binary(Frame) || Frame <- FramesToSend]),
-                                                      send_h(Stream, Headers),
-                                                      ok
-                                              end);
+            case h2_stream_set:stream_set_type(Streams) /= h2_stream_set:type(Stream) orelse h2_stream_set:send_headers(StreamId, Streams) == ok of
+                true ->
+                    EncodeContext0 = h2_stream_set:get_encode_context(Streams),
+                    Locks = case hpack:all_fields_indexed(Headers, EncodeContext0) of
+                                true ->
+                                    [socket];
+                                false ->
+                                    [socket, encoder]
+                            end,
+                    h2_stream_set:take_exclusive_lock(Streams, Locks,
+                                                      fun() ->
+                                                              {_SelfSettings, PeerSettings} = h2_stream_set:get_settings(Streams),
+                                                              EncodeContext = h2_stream_set:get_encode_context(Streams),
+                                                              {FramesToSend, NewContext} =
+                                                              h2_frame_headers:to_frames(h2_stream_set:stream_id(Stream),
+                                                                                         Headers,
+                                                                                         EncodeContext,
+                                                                                         PeerSettings#settings.max_frame_size,
+                                                                                         StreamComplete
+                                                                                        ),
+                                                              case Locks of
+                                                                  [] ->
+                                                                      ok;
+                                                                  _ ->
+                                                                      h2_stream_set:update_encode_context(Streams, NewContext)
+                                                              end,
+                                                              ct:pal("sending headers ~p", [StreamId]),
+                                                              sock:send(Socket, [h2_frame:to_binary(Frame) || Frame <- FramesToSend]),
+                                                              send_h(Stream, Headers),
+                                                              ok
+                                                      end);
+                _ ->
+                    timer:sleep(1),
+                    send_headers_(StreamId, Headers, Opts, Streams)
+            end;
         idle ->
             %% In theory this is a client maybe activating a stream,
             %% but in practice, we've already activated the stream in

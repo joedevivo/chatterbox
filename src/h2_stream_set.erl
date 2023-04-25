@@ -19,6 +19,7 @@
 -define(MY_NEXT_AVAILABLE_STREAM_ID, 7).
 -define(MY_LOWEST_STREAM_ID, 8).
 -define(THEIR_LOWEST_STREAM_ID, 9).
+-define(LAST_SENT_HEADERS, 9).
 
 -define(UNLOCKED, 0).
 -define(SHARED_LOCK, 1).
@@ -178,6 +179,7 @@
 %% Accessors
 -export(
    [
+    send_headers/2,
     queued_data/1,
     update_trailers/2,
     update_data_queue/3,
@@ -251,6 +253,7 @@ new(client, Socket, CallbackMod, CallbackOpts) ->
     atomics:put(StreamSet#stream_set.atomics, ?MY_NEXT_AVAILABLE_STREAM_ID, 1),
     atomics:put(StreamSet#stream_set.atomics, ?MY_LOWEST_STREAM_ID, 0),
     atomics:put(StreamSet#stream_set.atomics, ?THEIR_LOWEST_STREAM_ID, 0),
+    atomics:put(StreamSet#stream_set.atomics, ?LAST_SENT_HEADERS, 1 - 2),
     %% I'm a client, so mine are always odd numbered
     ets:insert_new(StreamSet#stream_set.table,
                    #peer_subset{
@@ -284,6 +287,7 @@ new(server, Socket, CallbackMod, CallbackOpts) ->
     atomics:put(StreamSet#stream_set.atomics, ?MY_NEXT_AVAILABLE_STREAM_ID, 2),
     atomics:put(StreamSet#stream_set.atomics, ?MY_LOWEST_STREAM_ID, 0),
     atomics:put(StreamSet#stream_set.atomics, ?THEIR_LOWEST_STREAM_ID, 0),
+    atomics:put(StreamSet#stream_set.atomics, ?LAST_SENT_HEADERS, 2 - 2),
     ets:insert_new(StreamSet#stream_set.table,
                    #peer_subset{
                       type=mine,
@@ -384,6 +388,17 @@ socket(#stream_set{socket=Sock}) ->
 
 connection(#stream_set{connection=Conn}) ->
     Conn.
+
+send_headers(StreamId, Streams) ->
+    ct:pal("want to init stream ~p", [StreamId]),
+    case atomics:compare_exchange(Streams#stream_set.atomics, ?LAST_SENT_HEADERS, StreamId - 2, StreamId) of
+        ok ->
+            ct:pal("ok to init ~p", [StreamId]),
+            ok;
+        _O ->
+            ct:pal("value was ~p", [_O]),
+            wait
+    end.
 
 get_settings(StreamSet) ->
     try {(hd(ets:lookup(StreamSet#stream_set.table, self_settings)))#connection_settings.settings, (hd(ets:lookup(StreamSet#stream_set.table, peer_settings)))#connection_settings.settings}
@@ -493,20 +508,12 @@ get_from_subset(Id,
 get_from_subset(Id, _PeerSubset, StreamSet) ->
     try ets:lookup(StreamSet#stream_set.table, Id)  of
         [] ->
-            timer:sleep(100),
-            try ets:lookup(StreamSet#stream_set.table, Id)  of
-                [] ->
-                    #idle_stream{id=Id};
-                [NewStream] ->
-                    NewStream
-            catch _:_ ->
-                      #idle_stream{id=Id}
-            end;
+            #closed_stream{id=Id};
         [Stream] ->
             Stream
     catch
         _:_ ->
-            #idle_stream{id=Id}
+            #closed_stream{id=Id}
     end.
 
 
