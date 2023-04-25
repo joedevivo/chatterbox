@@ -754,7 +754,7 @@ route_frame(Event, {H, _Payload},
 
             %% we have to change a bunch of stuff, so wait until we
             %% have the lock to do so
-            h2_stream_set:take_exclusive_lock(Streams, [streams, settings],
+            h2_stream_set:take_exclusive_lock(Streams, [settings],
                                               fun() ->
                                                       h2_stream_set:update_self_settings(Streams, NewSettings),
             UpdatedStreams1 =
@@ -1649,8 +1649,10 @@ spawn_data_receiver(Socket, Streams, Flow) ->
                                                                    _Tried ->
                                                                        recv_data(Stream, Frame),
                                                                        h2_stream_set:decrement_socket_recv_window(L, St),
-                                                                       h2_stream_set:upsert(
-                                                                         h2_stream_set:decrement_recv_window(L, Stream),
+                                                                       {ok, ok} = h2_stream_set:update(Header#frame_header.stream_id,
+                                                                                            fun(Str) ->
+                                                                                                    {h2_stream_set:decrement_recv_window(L, Str), ok}
+                                                                                            end,
                                                                          Streams),
                                                                        F(S, St, false, Decoder)
                                                                end;

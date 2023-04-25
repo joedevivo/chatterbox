@@ -167,7 +167,7 @@
     new/4,
     new_stream/5,
     get/2,
-    upsert/2,
+    update/3,
     take_lock/3,
     take_exclusive_lock/3,
     get_callback/1,
@@ -359,7 +359,8 @@ new_stream(
                            send_window_size=InitialSendWindow,
                            recv_window_size=InitialRecvWindow
                           },
-            case upsert(NewStream, StreamSet) of
+                   true = ets:insert_new(StreamSet#stream_set.table, NewStream),
+            case upsert_peer_subset(#idle_stream{id=StreamId}, NewStream, get_peer_subset(StreamId, StreamSet), StreamSet) of
                 {error, ?REFUSED_STREAM} ->
                     ct:pal("refused stream ~p", [StreamId]),
                     %% This should be very rare, if it ever happens at
@@ -373,9 +374,9 @@ new_stream(
                     %% process, or it will just hang out there.
                     h2_stream:stop(Pid),
                     {error, ?REFUSED_STREAM, #closed_stream{id=StreamId}};
-                NewStreamSet ->
+                ok ->
                     ct:pal("~p inserted stream ~p", [StreamSet#stream_set.type, StreamId]),
-                    {Pid, StreamId, NewStreamSet}
+                    {Pid, StreamId, StreamSet}
             end
     end.
 
@@ -439,12 +440,6 @@ get_their_peers(StreamSet) ->
     catch _:_ -> #peer_subset{}
     end.
 
-set_my_peers(StreamSet, Peers) ->
-    ets:insert(StreamSet#stream_set.table, Peers).
-
-set_their_peers(StreamSet, Peers) ->
-    ets:insert(StreamSet#stream_set.table, Peers).
-
 get_my_active_streams(StreamSet) ->
     case StreamSet#stream_set.type of
         client ->
@@ -468,16 +463,6 @@ get_their_active_streams(StreamSet) ->
                                                                       S
                                                               end))
     end.
-
--spec set_peer_subset(
-        Id :: stream_id(),
-        StreamSet :: stream_set(),
-        NewPeerSubset :: peer_subset()
-                         ) ->
-                             stream_set().
-set_peer_subset(_Id, StreamSet, NewPeerSubset) ->
-    ets:insert(StreamSet#stream_set.table, NewPeerSubset),
-    StreamSet.
 
 %% get/2 gets a stream. The logic in here basically just chooses which
 %% subset.
@@ -531,48 +516,76 @@ get_from_subset(Id, _PeerSubset, StreamSet) ->
             #idle_stream{id=Id}
     end.
 
--spec upsert(
-        Stream :: stream(),
-        StreamSet :: stream_set()) ->
-                    stream_set()
-                  | {error, error_code()}.
-%% Can't store idle streams
-upsert(#idle_stream{}, StreamSet) ->
-    StreamSet;
-upsert(Stream, StreamSet) ->
-    StreamId = stream_id(Stream),
-    PeerSubset = get_peer_subset(StreamId, StreamSet),
-    try upsert_peer_subset(Stream, PeerSubset, StreamSet) of
-        {error, Code} ->
-            {error, Code};
-        unchanged ->
-            StreamSet;
-        NewPeerSubset ->
-            set_peer_subset(StreamId, StreamSet, NewPeerSubset)
-    catch _:_ ->
-              StreamSet
+
+update(StreamId, Fun, StreamSet) ->
+    ct:pal("updating ~p with ~p", [StreamId, Fun]),
+    case get(StreamId, StreamSet) of
+        #idle_stream{} ->
+            %ct:pal("~p was idle", [StreamId]),
+            %ct:pal("transform ~p", [catch Fun(#idle_stream{id=StreamId})]),
+            case Fun(#idle_stream{id=StreamId}) of
+                {#idle_stream{}, _} ->
+                    %% Can't store idle streams
+                    ok;
+                {NewStream, Data} ->
+                    case ets:insert_new(StreamSet#stream_set.table, NewStream) of
+                        true ->
+                            PeerSubset = get_peer_subset(StreamId, StreamSet),
+                            case upsert_peer_subset(#idle_stream{id=StreamId}, NewStream, PeerSubset, StreamSet) of
+                                {error, Code} ->
+                                    {error, Code};
+                                ok ->
+                                    {ok, Data}
+                            end;
+                        false ->
+                            %% somebody beat us to it, try again
+                            update(StreamId, Fun, StreamSet)
+                    end;
+                ignore ->
+                    ok
+            end;
+        Stream ->
+            %ct:pal("~p was ~p", [StreamId, Stream]),
+            %ct:pal("transform ~p", [catch Fun(Stream)]),
+            case Fun(Stream) of
+                ignore ->
+                    ok;
+                {NewStream, Data} ->
+                    case ets:select_replace(StreamSet#stream_set.table, [{Stream, [], [{const, NewStream}]}]) of
+                        1 ->
+                            PeerSubset = get_peer_subset(StreamId, StreamSet),
+                            case upsert_peer_subset(Stream, NewStream, PeerSubset, StreamSet) of
+                                {error, Code} ->
+                                    {error, Code};
+                                ok ->
+                                    {ok, Data}
+                            end;
+                        0 ->
+                            update(StreamId, Fun, StreamSet)
+                    end
+            end
     end.
 
 -spec upsert_peer_subset(
+        OldStream :: idle_stream() | closed_stream() | active_stream(),
         Stream :: closed_stream() | active_stream(),
         PeerSubset :: peer_subset(),
         StreamSet :: stream_set()
                       ) ->
-                    peer_subset()
-                  | unchanged
+                    ok
                   | {error, error_code()}.
 %% Case 1: We're upserting a closed stream, it contains garbage we
 %% don't care about and it's in the range of streams we're actively
 %% tracking We remove it, and move the lowest_active pointer.
 upsert_peer_subset(
+  OldStream,
   #closed_stream{
      id=Id,
      garbage=true
-    }=Closed,
+    }=NewStream,
   PeerSubset, StreamSet)
   when Id >= PeerSubset#peer_subset.lowest_stream_id,
        Id < PeerSubset#peer_subset.next_available_stream_id ->
-    OldStream = get(Id, StreamSet),
     OldType = type(OldStream),
     ActiveDiff =
         case OldType of
@@ -580,14 +593,15 @@ upsert_peer_subset(
             active -> -1
         end,
 
-    ets:insert(StreamSet#stream_set.table, Closed),
     %% NewActive could now have a #closed_stream with no information
     %% in it as the lowest active stream, so we should drop those.
     NewActive = drop_unneeded_streams(StreamSet, Id),
 
+    NewPeerSubset =
     case NewActive of
         [] ->
             ct:pal("~p lowest stream is now ~p", [stream_set_type(StreamSet), PeerSubset#peer_subset.next_available_stream_id]),
+
             PeerSubset#peer_subset{
               lowest_stream_id=PeerSubset#peer_subset.next_available_stream_id,
               active_count=0
@@ -597,54 +611,74 @@ upsert_peer_subset(
             ct:pal("lowest stream is now ~p", [NewLowest]),
             PeerSubset#peer_subset{
               lowest_stream_id=NewLowest,
-              active_count=PeerSubset#peer_subset.active_count+ActiveDiff
+              active_count=max(0, PeerSubset#peer_subset.active_count+ActiveDiff)
              }
+    end,
+    case ets:select_replace(StreamSet#stream_set.table, [{PeerSubset, [], [{const, NewPeerSubset}]}]) of
+        1 ->
+            ok;
+        0 ->
+            ct:pal("upsert peer subset failed, retrying 1"),
+            upsert_peer_subset(OldStream, NewStream, get_peer_subset(Id, StreamSet), StreamSet)
     end;
 %% Case 2: Like case 1, but it's not garbage
 upsert_peer_subset(
+  OldStream,
   #closed_stream{
      id=Id,
      garbage=false
-    }=Closed,
+    }=NewStream,
   PeerSubset, StreamSet)
   when Id >= PeerSubset#peer_subset.lowest_stream_id,
        Id < PeerSubset#peer_subset.next_available_stream_id ->
-    OldStream = get(Id, StreamSet),
     OldType = type(OldStream),
-    ActiveDiff =
-        case OldType of
-            closed -> 0;
-            active -> -1
-        end,
-
-    ets:insert(StreamSet#stream_set.table, Closed),
-    PeerSubset#peer_subset{
-      active_count=PeerSubset#peer_subset.active_count+ActiveDiff
-     };
+    case OldType of
+        active when PeerSubset#peer_subset.active_count > 0 ->
+            NewPeerSubset = PeerSubset#peer_subset{active_count=max(0, PeerSubset#peer_subset.active_count - 1)},
+            case ets:select_replace(StreamSet#stream_set.table, [{PeerSubset, [], [{const, NewPeerSubset}]}]) of
+                1 ->
+                    ok;
+                0 ->
+                    ct:pal("old peer subset ~p", [PeerSubset]),
+                    ct:pal("new peer subset ~p", [NewPeerSubset]),
+                    ct:pal("upsert peer subset for ~p failed, retrying 2", [Id]),
+                    upsert_peer_subset(OldStream, NewStream, get_peer_subset(Id, StreamSet), StreamSet)
+            end;
+        _ -> ok
+    end;
 %% Case 3: It's closed, but greater than or equal to next available:
 upsert_peer_subset(
+  OldStream,
   #closed_stream{
      id=Id
-    } = Closed,
+    }=NewStream,
   PeerSubset, StreamSet)
  when Id >= PeerSubset#peer_subset.next_available_stream_id ->
-    ets:insert(StreamSet#stream_set.table, Closed),
-    PeerSubset#peer_subset{
-      next_available_stream_id=Id+2
-     };
+
+    case ets:select_replace(StreamSet#stream_set.table,
+                            ets:fun2ms(fun(#peer_subset{type=T, next_available_stream_id=I}=PS) when T == PeerSubset#peer_subset.type, Id >= I  ->
+                                               PS#peer_subset{next_available_stream_id=Id+2}
+                                       end)) of
+        1 ->
+            ok;
+        0 ->
+            ct:pal("upsert peer subset failed, retrying 3"),
+            upsert_peer_subset(OldStream, NewStream, get_peer_subset(Id, StreamSet), StreamSet)
+    end;
 %% Case 4: It's active, and in the range we're working with
 upsert_peer_subset(
+  _OldStream,
   #active_stream{
      id=Id
-    }=Stream,
-  PeerSubset, StreamSet)
+    },
+  PeerSubset, _StreamSet)
   when Id >= PeerSubset#peer_subset.lowest_stream_id,
        Id < PeerSubset#peer_subset.next_available_stream_id ->
-    ets:insert(StreamSet#stream_set.table, Stream),
-    unchanged;
+    ok;
 %% Case 5: It's active, but it wasn't active before and activating it
 %% would exceed our concurrent stream limits
 upsert_peer_subset(
+  _OldStream,
   #active_stream{},
   PeerSubset, _StreamSet)
   when PeerSubset#peer_subset.max_active =/= unlimited,
@@ -652,22 +686,30 @@ upsert_peer_subset(
     {error, ?REFUSED_STREAM};
 %% Case 6: It's active, and greater than the range we're tracking
 upsert_peer_subset(
+  OldStream,
   #active_stream{
      id=Id
-    }=Stream,
+    }=NewStream,
   PeerSubset, StreamSet)
  when Id >= PeerSubset#peer_subset.next_available_stream_id ->
-    ets:insert(StreamSet#stream_set.table, Stream),
-    PeerSubset#peer_subset{
-      next_available_stream_id=Id+2,
-      active_count=PeerSubset#peer_subset.active_count+1
-     };
+
+    case ets:select_replace(StreamSet#stream_set.table,
+                            ets:fun2ms(fun(#peer_subset{type=T, next_available_stream_id=I}=PS) when T == PeerSubset#peer_subset.type, Id >= I  ->
+                                               PS#peer_subset{next_available_stream_id=Id+2, active_count=PS#peer_subset.active_count+1}
+                                       end)) of
+        1 ->
+            ok;
+        0 ->
+            ct:pal("upsert peer subset failed, retrying 4"),
+            upsert_peer_subset(OldStream, NewStream, get_peer_subset(Id, StreamSet), StreamSet)
+    end;
 %% Catch All
 %% TODO: remove this match and crash instead?
 upsert_peer_subset(
+  _OldStream,
   _Stream,
   _PeerSubset, _StreamSet) ->
-    unchanged.
+    ok.
 
 
 drop_unneeded_streams(StreamSet, Id) ->
@@ -702,14 +744,19 @@ drop_unneeded_streams_(Other, _StreamSet, _Key) ->
         Streams :: stream_set()
                    ) ->
                    { stream(), stream_set()}.
-close(Stream,
+close(Stream0,
       garbage,
       StreamSet) ->
-    Closed = #closed_stream{
-                id = stream_id(Stream),
-                garbage=true
-               },
-    {Closed, upsert(Closed, StreamSet)};
+
+    {ok, Closed} = update(stream_id(Stream0),
+           fun(Stream) ->
+                   NewStream = #closed_stream{
+                      id = stream_id(Stream),
+                      garbage=true
+                     },
+                   {NewStream, NewStream}
+           end, StreamSet),
+    {Closed, StreamSet};
 close(Closed=#closed_stream{},
       _Response,
       Streams) ->
@@ -717,27 +764,49 @@ close(Closed=#closed_stream{},
 close(_Idle=#idle_stream{id=StreamId},
       {Headers, Body, Trailers},
       Streams) ->
-    Closed = #closed_stream{
-                id=StreamId,
-                response_headers=Headers,
-                response_body=Body,
-                response_trailers=Trailers
-               },
-    {Closed, upsert(Closed, Streams)};
+    case update(StreamId,
+                fun(#idle_stream{}) ->
+                        NewStream = #closed_stream{
+                                       id=StreamId,
+                                       response_headers=Headers,
+                                       response_body=Body,
+                                       response_trailers=Trailers
+                                      },
+                        {NewStream, NewStream};
+                   (#closed_stream{}=C) ->
+                        {C, C};
+                   (_) -> ignore
+                end, Streams) of
+        {ok, Closed} ->
+            {Closed, Streams};
+        ok ->
+            close(get(StreamId, Streams), {Headers, Body, Trailers}, Streams)
+    end;
+
 close(#active_stream{
-         id=Id,
-         notify_pid=NotifyPid
+         id=Id
         },
       {Headers, Body, Trailers},
       Streams) ->
-    Closed = #closed_stream{
-                id=Id,
-                response_headers=Headers,
-                response_body=Body,
-                response_trailers=Trailers,
-                notify_pid=NotifyPid
-               },
-    {Closed, upsert(Closed, Streams)}.
+    case update(Id,
+                fun(#active_stream{notify_pid=Pid}) ->
+                        NewStream = #closed_stream{
+                                       notify_pid=Pid,
+                                       id=Id,
+                                       response_headers=Headers,
+                                       response_body=Body,
+                                       response_trailers=Trailers
+                                      },
+                        {NewStream, NewStream};
+                   (#closed_stream{}=C) ->
+                        {C, C};
+                   (_) -> ignore
+                end, Streams) of
+        {ok, Closed} ->
+            {Closed, Streams};
+        ok ->
+            close(get(Id, Streams), {Headers, Body, Trailers}, Streams)
+    end.
 
 -spec update_all_recv_windows(Delta :: integer(),
                               Streams:: stream_set()) ->
@@ -764,9 +833,12 @@ update_all_send_windows(Delta, Streams) ->
                              Streams :: stream_set()) ->
                                     stream_set().
 update_their_max_active(NewMax, Streams) ->
-    Theirs = get_their_peers(Streams),
-    set_their_peers(Streams, Theirs#peer_subset{max_active=NewMax}),
-    Streams.
+    case ets:select_replace(Streams#stream_set.table, ets:fun2ms(fun(#peer_subset{type=theirs}=PS) -> PS#peer_subset{max_active=NewMax} end)) of
+        1 ->
+            Streams;
+        0 ->
+            update_their_max_active(NewMax, Streams)
+    end.
 
 get_next_available_stream_id(Streams) ->
     (get_my_peers(Streams))#peer_subset.next_available_stream_id.
@@ -775,15 +847,18 @@ get_next_available_stream_id(Streams) ->
                              Streams :: stream_set()) ->
                                     stream_set().
 update_my_max_active(NewMax, Streams) ->
-    Mine = get_my_peers(Streams),
-    set_my_peers(Streams, Mine#peer_subset{max_active=NewMax}),
-    Streams.
+    case ets:select_replace(Streams#stream_set.table, ets:fun2ms(fun(#peer_subset{type=mine}=PS) -> PS#peer_subset{max_active=NewMax} end)) of
+        1 ->
+            Streams;
+        0 ->
+            update_their_max_active(NewMax, Streams)
+    end.
 
 -spec send_all_we_can(Streams :: stream_set()) ->
                               {NewConnSendWindowSize :: integer(),
                                NewStreams :: stream_set()}.
 send_all_we_can(Streams) ->
-    AfterAfterWindowSize = take_exclusive_lock(Streams, [socket, streams], fun() ->
+    AfterAfterWindowSize = take_exclusive_lock(Streams, [socket], fun() ->
     ConnSendWindowSize = socket_send_window_size(Streams),
     {_SelfSettings, PeerSettings} = get_settings(Streams),
     MaxFrameSize = PeerSettings#settings.max_frame_size,
@@ -810,21 +885,21 @@ send_all_we_can(Streams) ->
                                NewStreams :: stream_set()}.
 
 send_what_we_can(StreamId, StreamFun, Streams) ->
-    {NewConnSendWindowSize, NewStream} = take_exclusive_lock(Streams, [socket], fun() ->
-                                                take_lock(Streams, [streams], fun() ->
-    ConnSendWindowSize = socket_send_window_size(Streams),
-    {_SelfSettings, PeerSettings} = get_settings(Streams),
-    MaxFrameSize = PeerSettings#settings.max_frame_size,
-    
-        s_send_what_we_can(ConnSendWindowSize,
-                           MaxFrameSize,
-                           Streams#stream_set.socket,
-                           StreamFun(get(StreamId, Streams)))
-                                                                              end)
-                                           end),
-    set_socket_send_window_size(NewConnSendWindowSize, Streams),
-    {NewConnSendWindowSize,
-     upsert(NewStream, Streams)}.
+    NewConnSendWindowSize =
+    take_exclusive_lock(Streams, [socket],
+                        fun() ->
+                                take_lock(Streams, [],
+                                          fun() ->
+                                                  {_SelfSettings, PeerSettings} = get_settings(Streams),
+                                                  MaxFrameSize = PeerSettings#settings.max_frame_size,
+
+                                                  s_send_what_we_can(MaxFrameSize,
+                                                                     StreamId,
+                                                                     StreamFun,
+                                                                     Streams)
+                                          end)
+                        end),
+    {NewConnSendWindowSize, Streams}.
 
 %% Send at the connection level
 -spec c_send_what_we_can(ConnSendWindowSize :: integer(),
@@ -841,131 +916,145 @@ c_send_what_we_can(ConnSendWindowSize, _MFS, _Streams, _StreamSet)
 c_send_what_we_can(SWS, _MFS, [], _StreamSet) ->
     SWS;
 %% Otherwise, try sending on the working stream
-c_send_what_we_can(SWS, MFS, [S|Streams], StreamSet) ->
-    {NewSWS, NewS} = s_send_what_we_can(SWS, MFS, StreamSet#stream_set.socket, S),
-    ets:insert(StreamSet#stream_set.table, NewS),
+c_send_what_we_can(_SWS, MFS, [S|Streams], StreamSet) ->
+    NewSWS = s_send_what_we_can(MFS, stream_id(S), fun(Stream) -> Stream end, StreamSet),
     c_send_what_we_can(NewSWS, MFS, Streams, StreamSet).
 
 %% Send at the stream level
--spec s_send_what_we_can(SWS :: integer(),
-                         MFS :: non_neg_integer(),
-                         Socket :: sock:socket(),
-                         Stream :: stream()) ->
+-spec s_send_what_we_can(MFS :: non_neg_integer(),
+                         StreamId :: stream_id(),
+                         StreamFun :: fun((stream()) -> stream()),
+                         StreamSet :: stream_set()) ->
                                 {integer(), stream()}.
-s_send_what_we_can(SWS, _, _, #active_stream{queued_data=Data,
-                                          trailers=undefined}=S)
-  when is_atom(Data) ->
-    {SWS, S};
-s_send_what_we_can(SWS, _, _, #active_stream{queued_data=Data,
-                                          id=_StreamId,
-                                          pid=Pid,
-                                          trailers=Trailers}=S)
-  when is_atom(Data) ->
-    h2_stream:send_trailers(Pid, Trailers),
-    {SWS, S#active_stream{trailers=undefined}};
-s_send_what_we_can(SWS, MFS, Socket, #active_stream{}=Stream) ->
-    %% We're coming in here with three numbers we need to look at:
-    %% * Connection send window size
-    %% * Stream send window size
-    %% * Maximimum frame size
+s_send_what_we_can(MFS, StreamId, StreamFun0, Streams) ->
+    StreamFun = 
+    fun(#active_stream{queued_data=Data, trailers=undefined}) when is_atom(Data) ->
+            ignore;
+       (#active_stream{queued_data=Data, pid=Pid, trailers=Trailers}=S) when is_atom(Data) ->
+            NewS = S#active_stream{trailers=undefined},
+            {NewS, {0, [{send_trailers, Pid, Trailers}]}};
+       (#active_stream{}=Stream) ->
 
-    %% If none of them are zero, we have to send something, so we're
-    %% going to figure out what's the biggest number we can send. If
-    %% that's more than we have to send, we'll send everything and put
-    %% an END_STREAM flag on it. Otherwise, we'll send as much as we
-    %% can. Then, based on which number was the limiting factor, we'll
-    %% make another decision
+            %% We're coming in here with three numbers we need to look at:
+            %% * Connection send window size
+            %% * Stream send window size
+            %% * Maximimum frame size
 
-    %% If it was MAX_FRAME_SIZE, then we recurse into this same
-    %% function, because we're able to send another frame of some
-    %% length.
+            %% If none of them are zero, we have to send something, so we're
+            %% going to figure out what's the biggest number we can send. If
+            %% that's more than we have to send, we'll send everything and put
+            %% an END_STREAM flag on it. Otherwise, we'll send as much as we
+            %% can. Then, based on which number was the limiting factor, we'll
+            %% make another decision
 
-    %% If it was connection send window size, we're blocked at the
-    %% connection level and we should break out of this recursion
+            %% If it was connection send window size, we're blocked at the
+            %% connection level and we should break out of this recursion
 
-    %% If it was stream send_window size, we're blocked on this
-    %% stream, but other streams can still go, so we'll break out of
-    %% this recursion, but not the connection level
+            %% If it was stream send_window size, we're blocked on this
+            %% stream, but other streams can still go, so we'll break out of
+            %% this recursion, but not the connection level
 
-    SSWS = Stream#active_stream.send_window_size,
-    QueueSize = byte_size(Stream#active_stream.queued_data),
+            SWS = socket_send_window_size(Streams),
+            SSWS = Stream#active_stream.send_window_size,
+            QueueSize = byte_size(Stream#active_stream.queued_data),
 
-    {MaxToSend, ExitStrategy} =
-        case {MFS =< SWS andalso MFS =< SSWS, SWS < SSWS} of
-            %% If MAX_FRAME_SIZE is the smallest, send one and recurse
-            {true, _} ->
-                {MFS, max_frame_size};
-            {false, true} ->
-                {SWS, connection};
-            _ ->
-                {SSWS, stream}
-        end,
-
-    {Frame, SentBytes, NewS} =
-        case MaxToSend > QueueSize of
-            true ->
-                Flags = case Stream#active_stream.body_complete of
-                            true ->
-                                case Stream of
-                                    #active_stream{trailers=undefined} ->
-                                        ?FLAG_END_STREAM;
-                                    _ ->
-                                        0
-                                end;
-                            false -> 0
-                        end,
-                %% We have the power to send everything
-                {{#frame_header{
-                     stream_id=Stream#active_stream.id,
-                     flags=Flags,
-                     type=?DATA,
-                     length=QueueSize
-                    },
-                  h2_frame_data:new(Stream#active_stream.queued_data)},  %% Full Body
-                 QueueSize,
-                 Stream#active_stream{
-                   queued_data=done,
-                   send_window_size=SSWS-QueueSize}};
-            false ->
-                <<BinToSend:MaxToSend/binary,Rest/binary>> = Stream#active_stream.queued_data,
-                {{#frame_header{
-                     stream_id=Stream#active_stream.id,
-                     type=?DATA,
-                     length=MaxToSend
-                    },
-                  h2_frame_data:new(BinToSend)},
-                 MaxToSend,
-                 Stream#active_stream{
-                   queued_data=Rest,
-                   send_window_size=SSWS-MaxToSend}}
-        end,
-
-        h2_stream:send_data(Stream#active_stream.pid, Frame),
-        %sock:send(Socket, h2_frame:to_binary(Frame)),a
-
-    NewS1 = case NewS of
-                #active_stream{trailers=undefined} ->
-                    NewS;
-                #active_stream{pid=Pid,
-                               queued_data=done,
-                               trailers=Trailers1} ->
-                    h2_stream:send_trailers(Pid, Trailers1),
-                    NewS#active_stream{trailers=undefined};
+            {MaxToSend, _ExitStrategy} =
+            case SWS < SSWS of
+                %% take the smallest of SWS or SSWS, read that
+                %% from the queue and break it up into MFS frames
+                true ->
+                    {SWS, connection};
                 _ ->
-                    NewS
+                    {SSWS, stream}
             end,
 
-    case ExitStrategy of
-        max_frame_size ->
-            s_send_what_we_can(SWS - SentBytes, Socket, MFS, NewS1);
-        stream ->
-            {SWS - SentBytes, NewS1};
-        connection ->
-            {SWS - SentBytes, NewS1}
-    end;
-s_send_what_we_can(SWS, _MFS, _Socket, NonActiveStream) ->
-    {SWS, NonActiveStream}.
+            {Frames, SentBytes, NewS} =
+            case MaxToSend > QueueSize of
+                true ->
+                    EndStream = case Stream#active_stream.body_complete of
+                                    true ->
+                                        case Stream of
+                                            #active_stream{trailers=undefined} ->
+                                                true;
+                                            _ ->
+                                                false
+                                        end;
+                                    false -> false
+                                end,
+                    %% We have the power to send everything
+                    {chunk_to_frames(Stream#active_stream.queued_data, MFS, Stream#active_stream.id, EndStream, []),
+                     QueueSize,
+                     Stream#active_stream{
+                       queued_data=done,
+                       send_window_size=SSWS-QueueSize}};
+                false ->
+                    <<BinToSend:MaxToSend/binary,Rest/binary>> = Stream#active_stream.queued_data,
+                    {chunk_to_frames(BinToSend, MFS, Stream#active_stream.id, false, []),
+                     MaxToSend,
+                     Stream#active_stream{
+                       queued_data=Rest,
+                       send_window_size=SSWS-MaxToSend}}
+            end,
 
+
+            %h2_stream:send_data(Stream#active_stream.pid, Frame),
+            Actions = [{send_data, Stream#active_stream.pid, Frames}],
+            %sock:send(Socket, h2_frame:to_binary(Frame)),
+
+            {NewS1, NewActions} =
+            case NewS of
+                #active_stream{pid=Pid,
+                               queued_data=done,
+                               trailers=Trailers1} when Trailers1 /= undefined ->
+                    {NewS#active_stream{trailers=undefined}, Actions ++ [{send_trailers, Pid, Trailers1}]};
+                _ ->
+                    {NewS, Actions}
+            end,
+
+            {NewS1, {SentBytes, NewActions}};
+       (_) ->
+            ignore
+    end,
+
+    case update(StreamId, fun(Stream0) -> StreamFun(StreamFun0(Stream0)) end, Streams) of
+        ok ->
+            NewSWS = socket_send_window_size(Streams),
+            NewSWS;
+        {ok, {BytesSent, Actions}} ->
+            NewSWS = decrement_socket_send_window(BytesSent, Streams),
+            %% ok, its now safe to apply these actions
+            apply_stream_actions(Actions),
+            NewSWS
+    end.
+
+apply_stream_actions([]) ->
+    ok;
+apply_stream_actions([{send_data, Pid, Frames}|Tail]) ->
+    [ h2_stream:send_data(Pid, Frame) || Frame <- Frames ],
+    apply_stream_actions(Tail);
+apply_stream_actions([{send_trailers, Pid, Trailers}]) ->
+    h2_stream:send_trailers(Pid, Trailers).
+
+chunk_to_frames(Bin, MaxFrameSize, StreamId, EndStream, Acc) when byte_size(Bin) > MaxFrameSize ->
+    <<BinToSend:MaxFrameSize/binary, Rest/binary>> = Bin,
+    chunk_to_frames(Rest, MaxFrameSize, StreamId, EndStream,
+                    [{#frame_header{
+                         stream_id=StreamId,
+                         type=?DATA,
+                         length=MaxFrameSize
+                        },
+                      h2_frame_data:new(BinToSend)}|Acc]);
+chunk_to_frames(BinToSend, _MaxFrameSize, StreamId, EndStream, Acc) ->
+    lists:reverse([{#frame_header{
+                       stream_id=StreamId,
+                       type=?DATA,
+                       flags= case EndStream of
+                                  true -> ?FLAG_END_STREAM;
+                                  _ -> 0
+                              end,
+                       length=byte_size(BinToSend)
+                      },
+                    h2_frame_data:new(BinToSend)}|Acc]).
 
 %% Record Accessors
 -spec stream_id(
@@ -1277,7 +1366,7 @@ hold_lock(Index, StreamSet, Type) ->
             do_hold_lock(Index, StreamSet, Type, OldState);
         _Other ->
             ct:pal("~p waiting to hold lock ~p", [self(), Index]),
-            timer:sleep(100),
+            timer:sleep(10),
             hold_lock(Index, StreamSet, Type)
     end.
 
