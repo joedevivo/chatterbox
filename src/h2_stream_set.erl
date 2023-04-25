@@ -874,7 +874,6 @@ send_all_we_can(Streams) ->
                              Streams)
                                            end),
 
-    set_socket_send_window_size(AfterAfterWindowSize, Streams),
     {AfterAfterWindowSize,
      Streams}.
 
@@ -963,13 +962,15 @@ s_send_what_we_can(MFS, StreamId, StreamFun0, Streams) ->
                 %% take the smallest of SWS or SSWS, read that
                 %% from the queue and break it up into MFS frames
                 true ->
-                    {SWS, connection};
+                    {max(0, SWS), connection};
                 _ ->
-                    {SSWS, stream}
+                    {max(0, SSWS), stream}
             end,
 
             {Frames, SentBytes, NewS} =
             case MaxToSend >= QueueSize of
+                _ when MaxToSend == 0 ->
+                    {[], 0, Stream};
                 true ->
                     EndStream = case Stream#active_stream.body_complete of
                                     true ->
@@ -999,7 +1000,12 @@ s_send_what_we_can(MFS, StreamId, StreamFun0, Streams) ->
 
 
             %h2_stream:send_data(Stream#active_stream.pid, Frame),
-            Actions = [{send_data, Stream#active_stream.pid, Frames}],
+            Actions = case Frames of
+                          [] ->
+                              [];
+                          _ ->
+                              [{send_data, Stream#active_stream.pid, Frames}]
+                      end,
             %sock:send(Socket, h2_frame:to_binary(Frame)),
 
             {NewS1, NewActions} =
