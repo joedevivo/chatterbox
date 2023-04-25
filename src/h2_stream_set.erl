@@ -1037,17 +1037,17 @@ s_send_what_we_can(MFS, StreamId, StreamFun0, Streams) ->
             NewSWS = socket_send_window_size(Streams),
             NewSWS;
         {ok, {BytesSent, OldStream, Actions}} ->
-            SWS = socket_send_window_size(Streams),
-            case BytesSent > SWS of
+            NewSWS = decrement_socket_send_window(BytesSent, Streams),
+            case BytesSent > NewSWS of
                 true ->
-                    ct:pal("OVERSENT ~p > ~p on ~p", [BytesSent, SWS, StreamId]),
+                    ct:pal("OVERSENT ~p > ~p on ~p", [BytesSent, NewSWS, StreamId]),
                     %% we delved too deep, and too greedily
                     %% try to roll things back
                     ets:insert(Streams#stream_set.table, StreamFun0(OldStream)),
+                    SWS = increment_socket_send_window(BytesSent, Streams),
                     SWS;
                 false ->
                     ct:pal("sent ~p on ~p", [BytesSent, StreamId]),
-                    NewSWS = decrement_socket_send_window(BytesSent, Streams),
                     %% ok, its now safe to apply these actions
                     apply_stream_actions(Actions),
                     NewSWS
