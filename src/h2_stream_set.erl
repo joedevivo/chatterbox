@@ -538,6 +538,7 @@ update(StreamId, Fun, StreamSet) ->
                                     {ok, Data}
                             end;
                         false ->
+                            ct:pal("update retry 1"),
                             %% somebody beat us to it, try again
                             update(StreamId, Fun, StreamSet)
                     end;
@@ -561,6 +562,7 @@ update(StreamId, Fun, StreamSet) ->
                                     {ok, Data}
                             end;
                         0 ->
+                            ct:pal("update retry 2"),
                             update(StreamId, Fun, StreamSet)
                     end
             end
@@ -748,6 +750,7 @@ close(Stream0,
       garbage,
       StreamSet) ->
 
+    ct:pal("closing  with garbage ~p", [stream_id(Stream0)]),
     {ok, Closed} = update(stream_id(Stream0),
            fun(Stream) ->
                    NewStream = #closed_stream{
@@ -764,6 +767,7 @@ close(Closed=#closed_stream{},
 close(_Idle=#idle_stream{id=StreamId},
       {Headers, Body, Trailers},
       Streams) ->
+    ct:pal("closing idle stream ~p", [StreamId]),
     case update(StreamId,
                 fun(#idle_stream{}) ->
                         NewStream = #closed_stream{
@@ -788,6 +792,7 @@ close(#active_stream{
         },
       {Headers, Body, Trailers},
       Streams) ->
+    ct:pal("closing active stream ~p", [Id]),
     case update(Id,
                 fun(#active_stream{notify_pid=Pid}) ->
                         NewStream = #closed_stream{
@@ -1025,9 +1030,11 @@ s_send_what_we_can(MFS, StreamId, StreamFun0, Streams) ->
 
     case update(StreamId, fun(Stream0) -> StreamFun(StreamFun0(Stream0)) end, Streams) of
         ok ->
+            ct:pal("no send on ~p", [StreamId]),
             NewSWS = socket_send_window_size(Streams),
             NewSWS;
         {ok, {BytesSent, Actions}} ->
+            ct:pal("sent ~p on ~p", [BytesSent, StreamId]),
             NewSWS = decrement_socket_send_window(BytesSent, Streams),
             %% ok, its now safe to apply these actions
             apply_stream_actions(Actions),
