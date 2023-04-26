@@ -12,14 +12,10 @@
 
 -define(RECV_WINDOW_SIZE, 1).
 -define(SEND_WINDOW_SIZE, 2).
--define(SEND_LOCK, 3).
--define(SETTINGS_LOCK, 4).
--define(STREAMS_LOCK, 5).
--define(ENCODER_LOCK, 6).
--define(MY_NEXT_AVAILABLE_STREAM_ID, 7).
--define(MY_LOWEST_STREAM_ID, 8).
--define(THEIR_LOWEST_STREAM_ID, 9).
--define(LAST_SENT_HEADERS, 9).
+-define(SETTINGS_LOCK, 3).
+-define(MY_NEXT_AVAILABLE_STREAM_ID, 4).
+-define(MY_LOWEST_STREAM_ID, 5).
+-define(THEIR_LOWEST_STREAM_ID, 6).
 
 -define(UNLOCKED, 0).
 -define(SHARED_LOCK, 1).
@@ -32,7 +28,7 @@
      %% Type determines which streams are mine, and which are theirs
      type :: client | server,
 
-     atomics = atomics:new(9, []),
+     atomics = atomics:new(6, []),
 
      socket :: sock:socket(),
 
@@ -56,7 +52,7 @@
 
 -record(context, {
           type = encode_context :: encode_context,
-          context = hpack:new_context() :: hpack:context()
+          context = hpack:new_context() :: hpack:context() | locked
          }).
 
 
@@ -179,7 +175,6 @@
 %% Accessors
 -export(
    [
-    send_headers/2,
     queued_data/1,
     update_trailers/2,
     update_data_queue/3,
@@ -214,7 +209,8 @@
     update_self_settings/2,
     update_peer_settings/2,
     get_encode_context/1,
-    update_encode_context/2
+    get_encode_context/2,
+    release_encode_context/2
    ]
   ).
 
@@ -243,17 +239,13 @@ new(client, Socket, CallbackMod, CallbackOpts) ->
         socket=Socket,
         connection=self(),
        type=client},
-    ets:insert_new(StreamSet#stream_set.table, #lock{id={lock, ?SEND_LOCK}}),
     ets:insert_new(StreamSet#stream_set.table, #lock{id={lock, ?SETTINGS_LOCK}}),
-    ets:insert_new(StreamSet#stream_set.table, #lock{id={lock, ?STREAMS_LOCK}}),
-    ets:insert_new(StreamSet#stream_set.table, #lock{id={lock, ?ENCODER_LOCK}}),
     ets:insert_new(StreamSet#stream_set.table, #connection_settings{type=self_settings}),
     ets:insert_new(StreamSet#stream_set.table, #connection_settings{type=peer_settings}),
     ets:insert_new(StreamSet#stream_set.table, #context{}),
     atomics:put(StreamSet#stream_set.atomics, ?MY_NEXT_AVAILABLE_STREAM_ID, 1),
     atomics:put(StreamSet#stream_set.atomics, ?MY_LOWEST_STREAM_ID, 0),
     atomics:put(StreamSet#stream_set.atomics, ?THEIR_LOWEST_STREAM_ID, 0),
-    atomics:put(StreamSet#stream_set.atomics, ?LAST_SENT_HEADERS, 1 - 2),
     %% I'm a client, so mine are always odd numbered
     ets:insert_new(StreamSet#stream_set.table,
                    #peer_subset{
@@ -276,10 +268,7 @@ new(server, Socket, CallbackMod, CallbackOpts) ->
        socket=Socket,
        connection=self(),
        type=server},
-    ets:insert_new(StreamSet#stream_set.table, #lock{id={lock, ?SEND_LOCK}}),
     ets:insert_new(StreamSet#stream_set.table, #lock{id={lock, ?SETTINGS_LOCK}}),
-    ets:insert_new(StreamSet#stream_set.table, #lock{id={lock, ?STREAMS_LOCK}}),
-    ets:insert_new(StreamSet#stream_set.table, #lock{id={lock, ?ENCODER_LOCK}}),
     ets:insert_new(StreamSet#stream_set.table, #connection_settings{type=self_settings}),
     ets:insert_new(StreamSet#stream_set.table, #connection_settings{type=peer_settings}),
     ets:insert_new(StreamSet#stream_set.table, #context{}),
@@ -287,7 +276,6 @@ new(server, Socket, CallbackMod, CallbackOpts) ->
     atomics:put(StreamSet#stream_set.atomics, ?MY_NEXT_AVAILABLE_STREAM_ID, 2),
     atomics:put(StreamSet#stream_set.atomics, ?MY_LOWEST_STREAM_ID, 0),
     atomics:put(StreamSet#stream_set.atomics, ?THEIR_LOWEST_STREAM_ID, 0),
-    atomics:put(StreamSet#stream_set.atomics, ?LAST_SENT_HEADERS, 2 - 2),
     ets:insert_new(StreamSet#stream_set.table,
                    #peer_subset{
                       type=mine,
@@ -389,14 +377,6 @@ socket(#stream_set{socket=Sock}) ->
 connection(#stream_set{connection=Conn}) ->
     Conn.
 
-send_headers(StreamId, Streams) ->
-    case atomics:compare_exchange(Streams#stream_set.atomics, ?LAST_SENT_HEADERS, StreamId - 2, StreamId) of
-        ok ->
-            ok;
-        _O ->
-            wait
-    end.
-
 get_settings(StreamSet) ->
     try {(hd(ets:lookup(StreamSet#stream_set.table, self_settings)))#connection_settings.settings, (hd(ets:lookup(StreamSet#stream_set.table, peer_settings)))#connection_settings.settings}
     catch _:_ ->
@@ -410,12 +390,36 @@ update_peer_settings(StreamSet, Settings) ->
     ets:insert(StreamSet#stream_set.table, #connection_settings{type=peer_settings, settings=Settings}).
 
 get_encode_context(StreamSet) ->
-    try (hd(ets:lookup(StreamSet#stream_set.table, encode_context)))#context.context
-    catch _:_ -> hpack:new_context()
+    get_encode_context(StreamSet, force).
+
+get_encode_context(StreamSet, Headers) ->
+    case (hd(ets:lookup(StreamSet#stream_set.table, encode_context))) of
+        #context{context=locked} ->
+            timer:sleep(1),
+            get_encode_context(StreamSet, Headers);
+        Encoder=#context{context=EncodeContext} ->
+            case Headers == force orelse hpack:all_fields_indexed(Headers, EncodeContext) of
+                true ->
+                    %% we don't have any new headers, so we don't need the lock
+                    {nolock, EncodeContext};
+                false ->
+                    case ets:select_replace(StreamSet#stream_set.table, [{Encoder, [], [{const, #context{type=encode_context, context=locked}}]}]) of
+                        1 ->
+                            %% ok we have the ownership of this now
+                            {lock, EncodeContext};
+                        0 ->
+                            timer:sleep(1),
+                            get_encode_context(StreamSet, Headers)
+                    end
+            end
     end.
 
-update_encode_context(StreamSet, Context) ->
-    ets:insert(StreamSet#stream_set.table, #context{type=encode_context, context=Context}).
+release_encode_context(_StreamSet, {nolock, _}) ->
+    ok;
+release_encode_context(StreamSet, {lock, NewEncoder}) ->
+    1 = ets:select_replace(StreamSet#stream_set.table, [{#context{type=encode_context, context=locked}, [], [{const, #context{type=encode_context, context=NewEncoder}}]}]),
+    ok.
+
 
 -spec get_peer_subset(
         stream_id(),
@@ -868,20 +872,13 @@ send_all_we_can(Streams) ->
                                NewStreams :: stream_set()}.
 
 send_what_we_can(StreamId, StreamFun, Streams) ->
-    NewConnSendWindowSize =
-    take_exclusive_lock(Streams, [socket],
-                        fun() ->
-                                take_lock(Streams, [],
-                                          fun() ->
-                                                  {_SelfSettings, PeerSettings} = get_settings(Streams),
-                                                  MaxFrameSize = PeerSettings#settings.max_frame_size,
+    {_SelfSettings, PeerSettings} = get_settings(Streams),
+    MaxFrameSize = PeerSettings#settings.max_frame_size,
 
-                                                  s_send_what_we_can(MaxFrameSize,
-                                                                     StreamId,
-                                                                     StreamFun,
-                                                                     Streams)
-                                          end)
-                        end),
+    NewConnSendWindowSize = s_send_what_we_can(MaxFrameSize,
+                       StreamId,
+                       StreamFun,
+                       Streams),
     {NewConnSendWindowSize, Streams}.
 
 %% Send at the connection level
@@ -1542,10 +1539,7 @@ release_exclusive_lock(Index, StreamSet) ->
             release_exclusive_lock(Index, StreamSet)
     end.
 
-lock_to_index(socket) -> ?SEND_LOCK;
-lock_to_index(settings) -> ?SETTINGS_LOCK;
-lock_to_index(streams) -> ?STREAMS_LOCK;
-lock_to_index(encoder) -> ?ENCODER_LOCK.
+lock_to_index(settings) -> ?SETTINGS_LOCK.
 
 get_holders(Index, StreamSet) ->
     [#lock{holders=Holders}] = ets:lookup(StreamSet#stream_set.table, {lock, Index}),

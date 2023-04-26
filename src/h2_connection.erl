@@ -321,35 +321,21 @@ send_trailers(Streams, StreamId, Trailers, Opts) ->
     send_trailers_(StreamId, Trailers, Opts, Streams).
 
 actually_send_trailers(Streams, StreamId, Trailers) ->
-    EncodeContext0 = h2_stream_set:get_encode_context(Streams),
-    Locks = case hpack:all_fields_indexed(Trailers, EncodeContext0) of
-                true ->
-                    [socket];
-                false ->
-                    [socket, encoder]
-            end,
-    h2_stream_set:take_exclusive_lock(Streams, Locks,
-                                      fun() ->
-                                              Stream = h2_stream_set:get(StreamId, Streams),
-                                              EncodeContext = h2_stream_set:get_encode_context(Streams),
-                                              {_SelfSettings, PeerSettings} = h2_stream_set:get_settings(Streams),
-                                              {FramesToSend, NewContext} =
-                                              h2_frame_headers:to_frames(h2_stream_set:stream_id(Stream),
-                                                                         Trailers,
-                                                                         EncodeContext,
-                                                                         PeerSettings#settings.max_frame_size,
-                                                                         true
-                                                                        ),
-                                              case Locks of
-                                                  [] ->
-                                                      ok;
-                                                  _ ->
-                                                      h2_stream_set:update_encode_context(Streams, NewContext)
-                                              end,
+    Stream = h2_stream_set:get(StreamId, Streams),
+    {_SelfSettings, PeerSettings} = h2_stream_set:get_settings(Streams),
+    {Lock, EncodeContext} = h2_stream_set:get_encode_context(Streams, Trailers),
+    {FramesToSend, NewContext} =
+    h2_frame_headers:to_frames(h2_stream_set:stream_id(Stream),
+                               Trailers,
+                               EncodeContext,
+                               PeerSettings#settings.max_frame_size,
+                               true
+                              ),
 
-                                              sock:send(h2_stream_set:socket(Streams), [h2_frame:to_binary(Frame) || Frame <- FramesToSend]),
-                                              ok
-                                      end).
+    sock:send(h2_stream_set:socket(Streams), [h2_frame:to_binary(Frame) || Frame <- FramesToSend]),
+
+    h2_stream_set:release_encode_context(Streams, {Lock, NewContext}),
+    ok.
 
 -spec send_body(h2_stream_set:stream_set(), stream_id(), binary()) -> ok.
 send_body(Pid, StreamId, Body) ->
@@ -603,16 +589,19 @@ route_frame(Event, {H, Payload},
             %% We've just got connection settings from a peer. He have a
             %% couple of jobs to do here w.r.t. flow control
 
-            Locks = [ encoder || proplists:get_value(?SETTINGS_HEADER_TABLE_SIZE, PList) /= undefined ] ++
-                    [ streams || proplists:get_value(?SETTINGS_MAX_CONCURRENT_STREAMS, PList) /= undefined orelse Delta /= 0 ] ++
-                    [ settings],
+            Locks = [ settings],
 
             h2_stream_set:take_exclusive_lock(Streams, Locks,
                                               fun() ->
                                                       h2_stream_set:update_peer_settings(Streams, NewPeerSettings),
-                                                      EncodeContext = h2_stream_set:get_encode_context(Streams),
-                                                      NewEncodeContext = hpack:new_max_table_size(HTS, EncodeContext),
-                                                      h2_stream_set:update_encode_context(Streams, NewEncodeContext),
+                                                      case proplists:get_value(?SETTINGS_HEADER_TABLE_SIZE, PList) /= undefined of
+                                                          true ->
+                                                              {lock, EncodeContext} = h2_stream_set:get_encode_context(Streams),
+                                                              NewEncodeContext = hpack:new_max_table_size(HTS, EncodeContext),
+                                                              h2_stream_set:release_encode_context(Streams, {lock, NewEncodeContext});
+                                                          false ->
+                                                              ok
+                                                      end,
                                                       %% If Delta != 0, we need to change every stream's
                                                       %% send_window_size in the state open or
                                                       %% half_closed_remote. We'll just send the message
@@ -925,35 +914,21 @@ handle_event(_, {send_headers, StreamId, Headers, Opts}, Conn) ->
 handle_event(_, {actually_send_trailers, StreamId, Trailers}, Conn=#connection{streams=Streams,
                                                                                socket=Socket}) ->
 
-    EncodeContext0 = h2_stream_set:get_encode_context(Streams),
-    Locks = case hpack:all_fields_indexed(Trailers, EncodeContext0) of
-                true ->
-                    [socket];
-                false ->
-                    [socket, encoder]
-            end,
-    h2_stream_set:take_exclusive_lock(Streams, Locks,
-                                      fun() ->
-                                              Stream = h2_stream_set:get(StreamId, Streams),
-                                              EncodeContext = h2_stream_set:get_encode_context(Streams),
-                                              {_SelfSettings, PeerSettings} = h2_stream_set:get_settings(Streams),
-                                              {FramesToSend, NewContext} =
-                                              h2_frame_headers:to_frames(h2_stream_set:stream_id(Stream),
-                                                                         Trailers,
-                                                                         EncodeContext,
-                                                                         PeerSettings#settings.max_frame_size,
-                                                                         true
-                                                                        ),
-                                              case Locks of
-                                                  [] ->
-                                                      ok;
-                                                  _ ->
-                                                      h2_stream_set:update_encode_context(Streams, NewContext)
-                                              end,
+    {Lock, EncodeContext} = h2_stream_set:get_encode_context(Streams, Trailers),
+    Stream = h2_stream_set:get(StreamId, Streams),
+    {_SelfSettings, PeerSettings} = h2_stream_set:get_settings(Streams),
+    {FramesToSend, NewContext} =
+    h2_frame_headers:to_frames(h2_stream_set:stream_id(Stream),
+                               Trailers,
+                               EncodeContext,
+                               PeerSettings#settings.max_frame_size,
+                               true
+                              ),
 
-                                              sock:send(Socket, [h2_frame:to_binary(Frame) || Frame <- FramesToSend]),
-                                              {keep_state, Conn}
-                                      end);
+    sock:send(Socket, [h2_frame:to_binary(Frame) || Frame <- FramesToSend]),
+
+    h2_stream_set:release_encode_context(Streams, {Lock, NewContext}),
+    {keep_state, Conn};
 handle_event(Event, {rst_stream, StreamId, ErrorCode},
              #connection{
                 streams = Streams,
@@ -1242,34 +1217,19 @@ send_headers_(StreamId, Headers, Opts, Streams) ->
     Stream = h2_stream_set:get(StreamId, Streams),
     case h2_stream_set:type(Stream) of
         active ->
-            EncodeContext0 = h2_stream_set:get_encode_context(Streams),
-            Locks = case hpack:all_fields_indexed(Headers, EncodeContext0) of
-                        true ->
-                            [];
-                        false ->
-                            [encoder]
-                    end,
-            h2_stream_set:take_exclusive_lock(Streams, Locks,
-                                              fun() ->
-                                                      {_SelfSettings, PeerSettings} = h2_stream_set:get_settings(Streams),
-                                                      EncodeContext = h2_stream_set:get_encode_context(Streams),
-                                                      {FramesToSend, NewContext} =
-                                                      h2_frame_headers:to_frames(h2_stream_set:stream_id(Stream),
-                                                                                 Headers,
-                                                                                 EncodeContext,
-                                                                                 PeerSettings#settings.max_frame_size,
-                                                                                 StreamComplete
-                                                                                ),
-                                                      case Locks of
-                                                          [] ->
-                                                              ok;
-                                                          _ ->
-                                                              h2_stream_set:update_encode_context(Streams, NewContext)
-                                                      end,
-                                                      sock:send(Socket, [h2_frame:to_binary(Frame) || Frame <- FramesToSend]),
-                                                      send_h(Stream, Headers),
-                                                      ok
-                                              end);
+            {_SelfSettings, PeerSettings} = h2_stream_set:get_settings(Streams),
+            {Lock, EncodeContext} = h2_stream_set:get_encode_context(Streams, Headers),
+            {FramesToSend, NewContext} =
+            h2_frame_headers:to_frames(h2_stream_set:stream_id(Stream),
+                                       Headers,
+                                       EncodeContext,
+                                       PeerSettings#settings.max_frame_size,
+                                       StreamComplete
+                                      ),
+            sock:send(Socket, [h2_frame:to_binary(Frame) || Frame <- FramesToSend]),
+            h2_stream_set:release_encode_context(Streams, {Lock, NewContext}),
+            send_h(Stream, Headers),
+            ok;
         idle ->
             %% In theory this is a client maybe activating a stream,
             %% but in practice, we've already activated the stream in
@@ -1304,41 +1264,25 @@ send_promise_(From, StreamId, Headers, NotifyPid, Conn=#connection{streams=Strea
                 {error, _Code} ->
                     Conn1;
                 {NextId0, _Pid} ->
-                    EncodeContext0 = h2_stream_set:get_encode_context(Streams),
-                    Locks = case hpack:all_fields_indexed(Headers, EncodeContext0) of
-                                true ->
-                                    [];
-                                false ->
-                                    [encoder]
-                            end,
-                    h2_stream_set:take_exclusive_lock(Streams, Locks,
-                                                      fun() ->
-                                                              OldContext = h2_stream_set:get_encode_context(Streams),
-                                                              %% TODO: This could be a series of frames, not just one
-                                                              {PromiseFrame, NewContext} =
-                                                              h2_frame_push_promise:to_frame(
-                                                                StreamId,
-                                                                NextId0,
-                                                                Headers,
-                                                                OldContext
-                                                               ),
+                    {Lock, OldContext} = h2_stream_set:get_encode_context(Streams, Headers),
+                    %% TODO: This could be a series of frames, not just one
+                    {PromiseFrame, NewContext} =
+                    h2_frame_push_promise:to_frame(
+                      StreamId,
+                      NextId0,
+                      Headers,
+                      OldContext
+                     ),
 
-                                                              %% Send the PP Frame
-                                                              Binary = h2_frame:to_binary(PromiseFrame),
-                                                              sock:send(h2_stream_set:socket(Streams), Binary),
+                    %% Send the PP Frame
+                    Binary = h2_frame:to_binary(PromiseFrame),
+                    sock:send(h2_stream_set:socket(Streams), Binary),
 
-                                                              case Locks of
-                                                                  [] ->
-                                                                      ok;
-                                                                  _ ->
-                                                                      h2_stream_set:update_encode_context(Streams, NewContext)
-                                                              end,
+                    h2_stream_set:release_encode_context(Streams, {Lock, NewContext}),
 
-                                                              %% Get the promised stream rolling
-                                                              h2_stream:send_pp(_Pid, Headers),
+                    %% Get the promised stream rolling
+                    h2_stream:send_pp(_Pid, Headers),
 
-                                                              ok
-                                                      end),
                     Conn1
             end,
     {keep_state, Conn2, [{reply, From, Reply}]}.
@@ -1389,9 +1333,7 @@ go_away_(ErrorCode, Reason, Socket, Streams) ->
     GoAwayBin = h2_frame:to_binary({#frame_header{
                                        stream_id=0
                                       }, GoAway}),
-    h2_stream_set:take_exclusive_lock(Streams, [socket], fun() ->
-                                                                 sock:send(Socket, GoAwayBin)
-                                                         end),
+    sock:send(Socket, GoAwayBin),
     ok.
 
 maybe_reply({call, From}, {next_state, NewState, NewData}, Msg) ->
@@ -1660,10 +1602,7 @@ spawn_data_receiver(Socket, Streams, Flow) ->
                                                Connection ! {go_away, ?FRAME_SIZE_ERROR};
                                            ?PING when ?NOT_FLAG((Header#frame_header.flags), ?FLAG_ACK) ->
                                                Ack = h2_frame_ping:ack(Payload),
-                                               h2_stream_set:take_exclusive_lock(St, [socket],
-                                                                                 fun() ->
-                                                                                         sock:send(S, h2_frame:to_binary(Ack))
-                                                                                 end),
+                                               sock:send(S, h2_frame:to_binary(Ack)),
                                                F(S, St, false, Decoder);
                                            ?PUSH_PROMISE when Type == server ->
                                                go_away_(?PROTOCOL_ERROR, <<"push_promise sent to server">>, S, St),
@@ -1842,17 +1781,14 @@ handle_socket_error(Reason, Conn) ->
     {stop, {shutdown, Reason}, Conn}.
 
 socksend(#connection{
-            socket=Socket,
-            streams=Streams
+            socket=Socket
            }, Data) ->
-    h2_stream_set:take_exclusive_lock(Streams, [socket], fun() ->
     case sock:send(Socket, Data) of
         ok ->
             ok;
         {error, Reason} ->
             {error, Reason}
-    end
-                                                         end).
+    end.
 
 %% Stream API: These will be moved
 
