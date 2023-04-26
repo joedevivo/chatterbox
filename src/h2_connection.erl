@@ -409,7 +409,7 @@ new_stream(Streams, CallbackMod, CallbackOpts, Headers, Opts, NotifyPid) ->
 new_stream(Streams, CallbackMod, CallbackOpts, Headers, Body, Opts, NotifyPid) ->
     gen_server:call(h2_stream_set:connection(Streams), {new_stream, CallbackMod, CallbackOpts, Headers, Body, Opts, NotifyPid}).
 
--spec send_promise(h2_stream_set:stream_set(), stream_id(), hpack:headers()) -> ok.
+-spec send_promise(h2_stream_set:stream_set(), stream_id(), hpack:headers()) -> {stream_id(), pid()} | {error, error_code()}.
 send_promise(Streams, StreamId, Headers) ->
     gen_server:call(h2_stream_set:connection(Streams), {send_promise, StreamId, Headers, self()}).
 
@@ -1266,7 +1266,6 @@ send_headers_(StreamId, Headers, Opts, Streams) ->
                                                           _ ->
                                                               h2_stream_set:update_encode_context(Streams, NewContext)
                                                       end,
-                                                      ct:pal("sending headers ~p", [StreamId]),
                                                       sock:send(Socket, [h2_frame:to_binary(Frame) || Frame <- FramesToSend]),
                                                       send_h(Stream, Headers),
                                                       ok

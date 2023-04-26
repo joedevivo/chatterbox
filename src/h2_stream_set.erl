@@ -390,13 +390,10 @@ connection(#stream_set{connection=Conn}) ->
     Conn.
 
 send_headers(StreamId, Streams) ->
-    ct:pal("want to init stream ~p", [StreamId]),
     case atomics:compare_exchange(Streams#stream_set.atomics, ?LAST_SENT_HEADERS, StreamId - 2, StreamId) of
         ok ->
-            ct:pal("ok to init ~p", [StreamId]),
             ok;
         _O ->
-            ct:pal("value was ~p", [_O]),
             wait
     end.
 
@@ -441,14 +438,14 @@ get_my_peers(StreamSet) ->
     Next = atomics:get(StreamSet#stream_set.atomics, ?MY_NEXT_AVAILABLE_STREAM_ID),
     Lowest = atomics:get(StreamSet#stream_set.atomics, ?MY_LOWEST_STREAM_ID),
     try (hd(ets:lookup(StreamSet#stream_set.table, mine)))#peer_subset{next_available_stream_id=Next, lowest_stream_id = Lowest}
-    catch _:_ -> #peer_subset{}
+    catch _:_ -> #peer_subset{type=mine, next_available_stream_id=0}
     end.
 
 -spec get_their_peers(stream_set()) -> peer_subset().
 get_their_peers(StreamSet) ->
     Lowest = atomics:get(StreamSet#stream_set.atomics, ?THEIR_LOWEST_STREAM_ID),
     try (hd(ets:lookup(StreamSet#stream_set.table, theirs)))#peer_subset{lowest_stream_id = Lowest}
-    catch _:_ -> #peer_subset{}
+    catch _:_ -> #peer_subset{type=theirs, next_available_stream_id=0}
     end.
 
 get_my_active_streams(StreamSet) ->
@@ -732,7 +729,7 @@ drop_unneeded_streams_(Other, _StreamSet, _Key) ->
 
 -spec close(
         Stream :: stream(),
-        Response :: garbage | {hpack:headers(), iodata()},
+        Response :: garbage | {hpack:headers(), iodata(), hpack:headers() | undefined},
         Streams :: stream_set()
                    ) ->
                    { stream(), stream_set()}.
@@ -911,7 +908,7 @@ c_send_what_we_can(MFS, [S|Streams], StreamSet) ->
                          StreamId :: stream_id(),
                          StreamFun :: fun((stream()) -> stream()),
                          StreamSet :: stream_set()) ->
-                                {integer(), stream()}.
+                                integer().
 s_send_what_we_can(MFS, StreamId, StreamFun0, Streams) ->
     StreamFun = 
     fun(#active_stream{queued_data=Data, trailers=undefined}) when is_atom(Data) ->
