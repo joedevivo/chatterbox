@@ -322,7 +322,7 @@ send_trailers(Streams, StreamId, Trailers, Opts) ->
 
 actually_send_trailers(Streams, StreamId, Trailers) ->
     Stream = h2_stream_set:get(StreamId, Streams),
-    {_SelfSettings, PeerSettings} = h2_stream_set:get_settings(Streams),
+    PeerSettings = h2_stream_set:get_peer_settings(Streams),
     {Lock, EncodeContext} = h2_stream_set:get_encode_context(Streams, Trailers),
     {FramesToSend, NewContext} =
     h2_frame_headers:to_frames(h2_stream_set:stream_id(Stream),
@@ -363,18 +363,18 @@ send_ping(Streams) ->
 -spec get_peer(h2_stream_set:stream_set()) ->
     {ok, {inet:ip_address(), inet:port_number()}} | {error, term()}.
 get_peer(Streams) ->
-    Pid = h2_stream_set:connection(Streams),
-    gen_statem:call(Pid, get_peer).
+    Socket = h2_stream_set:socket(Streams),
+    sock:peername(Socket).
 
 -spec get_peercert(h2_stream_set:stream_set()) ->
     {ok, binary()} | {error, term()}.
 get_peercert(Streams) ->
-    Pid = h2_stream_set:connection(Streams),
-    gen_statem:call(Pid, get_peercert).
+    Socket = h2_stream_set:socket(Streams),
+    sock:peercert(Socket).
 
 -spec is_push(h2_stream_set:stream_set()) -> boolean().
 is_push(Streams) ->
-    {_SelfSettings, #settings{enable_push=Push}} = h2_stream_set:get_settings(Streams),
+    #settings{enable_push=Push} = h2_stream_set:get_peer_settings(Streams),
     case Push of
         1 -> true;
         _ -> false
@@ -475,19 +475,12 @@ listen(Type, Msg, State) ->
                      connection()}.
 handshake(timeout, _, State) ->
     go_away(timeout, ?PROTOCOL_ERROR, <<"handshake timeout">>, State);
-handshake(Event, {frame, {FH, _Payload}=Frame}, State=#connection{streams=Streams}) ->
+handshake(Event, {settings, Frame}, State) ->
+    handle_settings(Event, Frame, State);
+handshake(Event, {frame, _}, State) ->
     %% The first frame should be the client settings as per
     %% RFC-7540#3.5
-    case FH#frame_header.type of
-        ?SETTINGS ->
-            %% take an exclusive lock since we know this is a settings frame
-            h2_stream_set:take_exclusive_lock(Streams, [settings],
-                                              fun () ->
-                                                      {SelfSettings, PeerSettings} = h2_stream_set:get_settings(Streams),
-                                                      route_frame(Event, Frame, SelfSettings, PeerSettings, State) end);
-        _ ->
-            go_away(Event, ?PROTOCOL_ERROR, <<"handshake frame not SETTINGS">>, State)
-    end;
+    go_away(Event, ?PROTOCOL_ERROR, <<"handshake frame not SETTINGS">>, State);
 handshake(Type, Msg, State) ->
     handle_event(Type, Msg, State).
 
@@ -495,11 +488,8 @@ connected(Event, {frame, Frame},
           #connection{streams=Streams}=Conn
          ) ->
 
-    h2_stream_set:take_lock(Streams, [settings],
-                            fun() ->
-                                    {SelfSettings, PeerSettings} = h2_stream_set:get_settings(Streams),
-                                    route_frame(Event, Frame, SelfSettings, PeerSettings, Conn)
-                            end);
+    {SelfSettings, PeerSettings} = h2_stream_set:get_settings(Streams),
+    route_frame(Event, Frame, SelfSettings, PeerSettings, Conn);
 connected(Type, Msg, State) ->
     handle_event(Type, Msg, State).
 
@@ -559,129 +549,6 @@ route_frame(Event, {#frame_header{length=L}, _},
 %%
 %% Here we'll handle anything that belongs on stream 0.
 
-%% SETTINGS, finally something that's ok on stream 0
-%% This is the non-ACK case, where settings have actually arrived
-route_frame(Event, {H, Payload},
-            _SelfSettings,
-            PS=#settings{
-                  initial_window_size=OldIWS,
-                  header_table_size=HTS
-                 },
-            #connection{
-               streams=Streams
-              }=Conn)
-    when H#frame_header.type == ?SETTINGS,
-         ?NOT_FLAG((H#frame_header.flags), ?FLAG_ACK) ->
-    %% Need a way of processing settings so I know which ones came in
-    %% on this one payload.
-    case h2_frame_settings:validate(Payload) of
-        ok ->
-            {settings, PList} = Payload,
-
-            Delta =
-                case proplists:get_value(?SETTINGS_INITIAL_WINDOW_SIZE, PList) of
-                    undefined ->
-                        0;
-                    NewIWS ->
-                        NewIWS - OldIWS
-                end,
-            NewPeerSettings = h2_frame_settings:overlay(PS, Payload),
-            %% We've just got connection settings from a peer. He have a
-            %% couple of jobs to do here w.r.t. flow control
-
-            Locks = [ settings],
-
-            h2_stream_set:take_exclusive_lock(Streams, Locks,
-                                              fun() ->
-                                                      h2_stream_set:update_peer_settings(Streams, NewPeerSettings),
-                                                      case proplists:get_value(?SETTINGS_HEADER_TABLE_SIZE, PList) /= undefined of
-                                                          true ->
-                                                              {lock, EncodeContext} = h2_stream_set:get_encode_context(Streams),
-                                                              NewEncodeContext = hpack:new_max_table_size(HTS, EncodeContext),
-                                                              h2_stream_set:release_encode_context(Streams, {lock, NewEncodeContext});
-                                                          false ->
-                                                              ok
-                                                      end,
-                                                      %% If Delta != 0, we need to change every stream's
-                                                      %% send_window_size in the state open or
-                                                      %% half_closed_remote. We'll just send the message
-                                                      %% everywhere. It's up to them if they need to do
-                                                      %% anything.
-                                                      UpdatedStreams1 =
-                                                      h2_stream_set:update_all_send_windows(Delta, Streams),
-
-                                                      UpdatedStreams2 =
-                                                      case proplists:get_value(?SETTINGS_MAX_CONCURRENT_STREAMS, PList) of
-                                                          undefined ->
-                                                              UpdatedStreams1;
-                                                          NewMax ->
-                                                              h2_stream_set:update_my_max_active(NewMax, UpdatedStreams1)
-                                                      end,
-
-
-                                                      socksend(Conn, h2_frame_settings:ack()),
-                                                      maybe_reply(Event, {next_state, connected, Conn#connection{
-                                                                                                   %% Why aren't we updating send_window_size here? Section 6.9.2 of
-                                                                                                   %% the spec says: "The connection flow-control window can only be
-                                                                                                   %% changed using WINDOW_UPDATE frames.",
-                                                                                                   streams=UpdatedStreams2
-                                                                                                  }}, ok)
-                                              end);
-        {error, Code} ->
-            go_away(Event, Code, <<"invalid frame settings">>, Conn)
-    end;
-
-%% This is the case where we got an ACK, so dequeue settings we're
-%% waiting to apply
-route_frame(Event, {H, _Payload},
-            #settings{
-               initial_window_size=OldIWS
-              },
-            _PeerSettings,
-            Conn=#connection{
-               settings_sent=SS,
-               streams=Streams})
-    when H#frame_header.type == ?SETTINGS,
-         ?IS_FLAG((H#frame_header.flags), ?FLAG_ACK) ->
-    case queue:out(SS) of
-        {{value, {_Ref, NewSettings}}, NewSS} ->
-
-            %% we have to change a bunch of stuff, so wait until we
-            %% have the lock to do so
-            h2_stream_set:take_exclusive_lock(Streams, [settings],
-                                              fun() ->
-                                                      h2_stream_set:update_self_settings(Streams, NewSettings),
-            UpdatedStreams1 =
-                case NewSettings#settings.initial_window_size of
-                    undefined ->
-                        ok;
-                    NewIWS ->
-                        Delta = NewIWS - OldIWS,
-                        case Delta > 0 of
-                            true -> send_window_update(self(), Delta);
-                            false -> ok
-                        end,
-                        h2_stream_set:update_all_recv_windows(Delta, Streams)
-                end,
-
-            UpdatedStreams2 =
-                case NewSettings#settings.max_concurrent_streams of
-                    undefined ->
-                        UpdatedStreams1;
-                    NewMax ->
-                        h2_stream_set:update_their_max_active(NewMax, UpdatedStreams1)
-                end,
-            maybe_reply(Event, {next_state,
-             connected,
-             Conn#connection{
-               streams=UpdatedStreams2,
-               settings_sent=NewSS
-               %% Same thing here, section 6.9.2
-              }}, ok)
-                                                              end);
-        _X ->
-            maybe_reply(Event, {next_state, closing, Conn}, ok)
-    end;
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Stream level frames
@@ -858,6 +725,123 @@ route_frame(Event, Frame, _SelfSettings, _PeerSettings, #connection{}=Conn) ->
     F = iolist_to_binary(io_lib:format("~p", [Frame])),
     go_away(Event, ?PROTOCOL_ERROR, <<"unhandled frame ", F/binary>>, Conn).
 
+
+%% SETTINGS, finally something that's ok on stream 0
+%% This is the non-ACK case, where settings have actually arrived
+handle_settings(Event, {H, Payload},
+            #connection{
+               streams=Streams
+              }=Conn)
+    when H#frame_header.type == ?SETTINGS,
+         ?NOT_FLAG((H#frame_header.flags), ?FLAG_ACK) ->
+    %% Need a way of processing settings so I know which ones came in
+    %% on this one payload.
+    case h2_frame_settings:validate(Payload) of
+        ok ->
+            {settings, PList} = Payload,
+
+            PS=#settings{
+               initial_window_size=OldIWS,
+               header_table_size=HTS
+              } = h2_stream_set:get_peer_settings_locked(Streams),
+
+            Delta =
+                case proplists:get_value(?SETTINGS_INITIAL_WINDOW_SIZE, PList) of
+                    undefined ->
+                        0;
+                    NewIWS ->
+                        NewIWS - OldIWS
+                end,
+            NewPeerSettings = h2_frame_settings:overlay(PS, Payload),
+            %% We've just got connection settings from a peer. He have a
+            %% couple of jobs to do here w.r.t. flow control
+
+            h2_stream_set:update_peer_settings(Streams, NewPeerSettings),
+            case proplists:get_value(?SETTINGS_HEADER_TABLE_SIZE, PList) /= undefined of
+                true ->
+                    {lock, EncodeContext} = h2_stream_set:get_encode_context(Streams),
+                    NewEncodeContext = hpack:new_max_table_size(HTS, EncodeContext),
+                    h2_stream_set:release_encode_context(Streams, {lock, NewEncodeContext});
+                false ->
+                    ok
+            end,
+            %% If Delta != 0, we need to change every stream's
+            %% send_window_size in the state open or
+            %% half_closed_remote. We'll just send the message
+            %% everywhere. It's up to them if they need to do
+            %% anything.
+            UpdatedStreams1 =
+            h2_stream_set:update_all_send_windows(Delta, Streams),
+
+            UpdatedStreams2 =
+            case proplists:get_value(?SETTINGS_MAX_CONCURRENT_STREAMS, PList) of
+                undefined ->
+                    UpdatedStreams1;
+                NewMax ->
+                    h2_stream_set:update_my_max_active(NewMax, UpdatedStreams1)
+            end,
+
+
+            socksend(Conn, h2_frame_settings:ack()),
+            maybe_reply(Event, {next_state, connected, Conn#connection{
+                                                         %% Why aren't we updating send_window_size here? Section 6.9.2 of
+                                                         %% the spec says: "The connection flow-control window can only be
+                                                         %% changed using WINDOW_UPDATE frames.",
+                                                         streams=UpdatedStreams2
+                                                        }}, ok);
+        {error, Code} ->
+            go_away(Event, Code, <<"invalid frame settings">>, Conn)
+    end;
+
+%% This is the case where we got an ACK, so dequeue settings we're
+%% waiting to apply
+handle_settings(Event, {H, _Payload},
+            Conn=#connection{
+               settings_sent=SS,
+               streams=Streams})
+    when H#frame_header.type == ?SETTINGS,
+         ?IS_FLAG((H#frame_header.flags), ?FLAG_ACK) ->
+    case queue:out(SS) of
+        {{value, {_Ref, NewSettings}}, NewSS} ->
+
+            %% we have to change a bunch of stuff, so wait until we
+            %% have the lock to do so
+            #settings{
+               initial_window_size=OldIWS
+              } = h2_stream_set:get_self_settings_locked(Streams),
+            h2_stream_set:update_self_settings(Streams, NewSettings),
+            UpdatedStreams1 =
+                case NewSettings#settings.initial_window_size of
+                    undefined ->
+                        ok;
+                    NewIWS ->
+                        Delta = NewIWS - OldIWS,
+                        case Delta > 0 of
+                            true -> send_window_update(self(), Delta);
+                            false -> ok
+                        end,
+                        h2_stream_set:update_all_recv_windows(Delta, Streams)
+                end,
+
+            UpdatedStreams2 =
+                case NewSettings#settings.max_concurrent_streams of
+                    undefined ->
+                        UpdatedStreams1;
+                    NewMax ->
+                        h2_stream_set:update_their_max_active(NewMax, UpdatedStreams1)
+                end,
+            maybe_reply(Event, {next_state,
+             connected,
+             Conn#connection{
+               streams=UpdatedStreams2,
+               settings_sent=NewSS
+               %% Same thing here, section 6.9.2
+              }}, ok);
+        _X ->
+            maybe_reply(Event, {next_state, closing, Conn}, ok)
+    end.
+
+
 handle_event(_, {stream_finished,
               StreamId,
               Headers,
@@ -916,7 +900,7 @@ handle_event(_, {actually_send_trailers, StreamId, Trailers}, Conn=#connection{s
 
     {Lock, EncodeContext} = h2_stream_set:get_encode_context(Streams, Trailers),
     Stream = h2_stream_set:get(StreamId, Streams),
-    {_SelfSettings, PeerSettings} = h2_stream_set:get_settings(Streams),
+    PeerSettings = h2_stream_set:get_peer_settings(Streams),
     {FramesToSend, NewContext} =
     h2_frame_headers:to_frames(h2_stream_set:stream_id(Stream),
                                Trailers,
@@ -980,6 +964,8 @@ handle_event(_, {send_request, NotifyPid, Headers, Body},
         {error, _Code} ->
             {keep_state, Conn}
     end;
+handle_event(Event, {settings, Frame}, State) ->
+    handle_settings(Event, Frame, State);
 handle_event(Event, {check_settings_ack, {Ref, NewSettings}},
              #connection{
                 settings_sent=SS
@@ -1031,36 +1017,6 @@ handle_event({call, From}, {new_stream, CallbackMod, CallbackState, Headers, Bod
     new_stream_(From, CallbackMod, CallbackState, Headers, Body, Opts, NotifyPid, Conn);
 handle_event({call, From}, {send_promise, StreamId, Headers, NotifyPid}, Conn) ->
     send_promise_(From, StreamId, Headers, NotifyPid, Conn);
-handle_event({call, From}, is_push,
-                  #connection{
-                     streams=Streams
-                    }=Conn) ->
-    {_SelfSettings, #settings{enable_push=Push}} = h2_stream_set:get_settings(Streams),
-    IsPush = case Push of
-        1 -> true;
-        _ -> false
-    end,
-    {keep_state, Conn, [{reply, From, IsPush}]};
-handle_event({call, From}, get_peer,
-                  #connection{
-                     socket=Socket
-                    }=Conn) ->
-    case sock:peername(Socket) of
-        {error, _}=Error ->
-            {keep_state, Conn, [{reply, From, Error}]};
-        {ok, _AddrPort}=OK ->
-            {keep_state, Conn, [{reply, From, OK}]}
-    end;
-handle_event({call, From}, get_peercert,
-                  #connection{
-                     socket=Socket
-                    }=Conn) ->
-    case sock:peercert(Socket) of
-        {error, _}=Error ->
-            {keep_state, Conn, [{reply, From, Error}]};
-        {ok, _Cert}=OK ->
-            {keep_state, Conn, [{reply, From, OK}]}
-    end;
 handle_event({call, From}, {send_request, NotifyPid, Headers, Body},
         #connection{
             streams=Streams
@@ -1431,9 +1387,9 @@ spawn_data_receiver(Socket, Streams, Flow) ->
                                        %% TODO move some of the cases of route_frame into here
                                        %% so we can send frames directly to the stream pids
                                        StreamId = Header#frame_header.stream_id,
-                                       {#settings{max_frame_size=MFS}, _} = h2_stream_set:get_settings(St),
+                                       #settings{max_frame_size=MFS} = h2_stream_set:get_self_settings(St),
                                        case Header#frame_header.type of
-                                           _ when L > MFS andalso false ->
+                                           _ when L > MFS ->
                                                go_away_(?FRAME_SIZE_ERROR, list_to_binary(io_lib:format("received frame of size ~p over max of ~p", [L, MFS])), S, St),
                                                Connection ! {go_away, ?FRAME_SIZE_ERROR};
                                            %% The first frame should be the client settings as per
@@ -1441,6 +1397,11 @@ spawn_data_receiver(Socket, Streams, Flow) ->
                                            HType when HType /= ?SETTINGS andalso First ->
                                                go_away_(?PROTOCOL_ERROR, <<"non settings frame sent first">>, S, St),
                                                Connection ! {go_away, ?PROTOCOL_ERROR};
+                                           ?SETTINGS ->
+                                               %% we want to handle settings specially here because
+                                               %% of the way they have to be updated
+                                               ok = gen_statem:call(Connection, {settings, Frame}),
+                                               F(S, St, false, Decoder);
                                            ?DATA ->
                                                L = Header#frame_header.length,
                                                case L > h2_stream_set:socket_recv_window_size(St) of
@@ -1646,8 +1607,8 @@ spawn_data_receiver(Socket, Streams, Flow) ->
                                                end;
 
                                            %% TODO ACK'd pings
-                                           %% TODO stream window updates (need to share send window size)
                                            _ ->
+                                               %% let the connection process handle anything else
                                                gen_statem:call(Connection, {frame, Frame}),
                                                F(S, St, false, Decoder)
                                        end
