@@ -196,12 +196,10 @@ sync_request(CliPid, Headers, Body) ->
       CliPid :: h2_stream_set:stream_set(), Headers :: hpack:headers(), Body :: binary(),
       Result :: {ok, stream_id()} | {error, error_code()}.
 send_request(CliPid, Headers, Body) ->
-    case h2_connection:new_stream(CliPid) of
+    case h2_connection:new_stream(CliPid, Headers, Body) of
         {error, _Code} = Err ->
             Err;
         {StreamId, _} ->
-            h2_connection:send_headers(CliPid, StreamId, Headers),
-            h2_connection:send_body(CliPid, StreamId, Body),
             {ok, StreamId}
     end.
 

@@ -29,12 +29,10 @@
          send_request/5,
          send_ping/1,
          is_push/1,
-         new_stream/1,
-         new_stream/2,
-         new_stream/4,
+         new_stream/3,
          new_stream/6,
          new_stream/7,
-         send_promise/4,
+         send_promise/3,
          get_response/2,
          get_peer/1,
          get_peercert/1,
@@ -368,21 +366,7 @@ send_request(Streams, Headers, Body) ->
 
 -spec send_request(h2_stream_set:stream_set(), hpack:headers(), binary(), atom(), list()) -> ok.
 send_request(Streams, Headers, Body, CallbackMod, CallbackOpts) ->
-    case h2_stream_set:new_stream(
-           next,
-           self(),
-           CallbackMod,
-           CallbackOpts,
-           Streams)
-    of
-        {error, _Code, _NewStream} ->
-            %% error creating new stream
-            ok;
-        {_Pid, NextId, GoodStreamSet} ->
-            send_headers_(NextId, Headers, [], GoodStreamSet),
-            send_body_(NextId, Body, [], GoodStreamSet)
-    end,
-    ok.
+    gen_server:call(h2_stream_set:connection(Streams), {new_stream, CallbackMod, CallbackOpts, Headers, Body, [], self()}).
 
 -spec send_ping(h2_stream_set:stream_set()) -> ok.
 send_ping(Streams) ->
@@ -410,103 +394,24 @@ is_push(Streams) ->
         _ -> false
     end.
 
--spec new_stream(h2_stream_set:stream_set()) -> {stream_id(), pid()} | {error, error_code()}.
-new_stream(Pid) ->
-    new_stream(Pid, self()).
-
--spec new_stream(h2_stream_set:stream_set(), pid()) ->
-                        {stream_id(), pid()}
-                      | {error, error_code()}.
-new_stream(Pid, NotifyPid) ->
-    {CallbackMod, CallbackOpts} = h2_stream_set:get_callback(Pid),
-    new_stream(Pid, CallbackMod, CallbackOpts, NotifyPid).
-
-new_stream(Pid, CallbackMod, CallbackOpts, NotifyPid) ->
-    case
-        h2_stream_set:new_stream(
-          next,
-          NotifyPid,
-          CallbackMod,
-          CallbackOpts,
-          Pid)
-    of
-        {error, Code, _NewStream} ->
-            %% TODO: probably want to have events like this available for metrics
-            %% tried to create new_stream but there are too many
-            {error, Code};
-        {StreamPid, NextId, _GoodStreamSet} ->
-            {NextId, StreamPid}
-    end.
-
+new_stream(Streams, Headers, Body) ->
+    gen_server:call(h2_stream_set:connection(Streams), {new_stream, undefined, [], Headers, Body, [], self()}).
 
 %% @doc `new_stream/6' accepts Headers so they can be sent within the connection process
 %% when a stream id is assigned. This ensures that another process couldn't also have
 %% requested a new stream and send its headers before the stream with a lower id, which
 %% results in the server closing the connection when it gets headers for the lower id stream.
 -spec new_stream(h2_stream_set:stream_set(), module(), term(), hpack:headers(), send_opts(), pid()) -> {stream_id(), pid()} | {error, error_code()}.
-new_stream(Pid, CallbackMod, CallbackOpts, Headers, Opts, NotifyPid) ->
-    case new_stream(Pid, CallbackMod, CallbackOpts, NotifyPid) of
-        {error, _} = Error ->
-            Error;
-        {StreamId, StreamPid} ->
-            send_headers_(StreamId, Headers, Opts, Pid),
-            {StreamId, StreamPid}
-    end.
+new_stream(Streams, CallbackMod, CallbackOpts, Headers, Opts, NotifyPid) ->
+    gen_server:call(h2_stream_set:connection(Streams), {new_stream, CallbackMod, CallbackOpts, Headers, Opts, NotifyPid}).
 
 -spec new_stream(h2_stream_set:stream_set(), module(), term(), hpack:headers(), any(), send_opts(), pid()) -> {stream_id(), pid()} | {error, error_code()}.
-new_stream(Pid, CallbackMod, CallbackOpts, Headers, Body, Opts, NotifyPid) ->
-    case new_stream(Pid, CallbackMod, CallbackOpts, NotifyPid) of
-        {error, _} = Error ->
-            Error;
-        {StreamId, StreamPid} ->
-            send_headers_(StreamId, Headers, [], Pid),
-            send_body_(StreamId, Body, Opts, Pid),
-            {StreamId, StreamPid}
-    end.
+new_stream(Streams, CallbackMod, CallbackOpts, Headers, Body, Opts, NotifyPid) ->
+    gen_server:call(h2_stream_set:connection(Streams), {new_stream, CallbackMod, CallbackOpts, Headers, Body, Opts, NotifyPid}).
 
--spec send_promise(h2_stream_set:stream_set(), stream_id(), stream_id(), hpack:headers()) -> ok.
-send_promise(Streams, StreamId, NewStreamId, Headers) ->
-    NewStream = h2_stream_set:get(NewStreamId, Streams),
-    case h2_stream_set:type(NewStream) of
-        active ->
-            EncodeContext0 = h2_stream_set:get_encode_context(Streams),
-            Locks = case hpack:all_fields_indexed(Headers, EncodeContext0) of
-                        true ->
-                            [socket];
-                        false ->
-                            [socket, encoder]
-                    end,
-            h2_stream_set:take_exclusive_lock(Streams, Locks,
-                                              fun() ->
-                                                      OldContext = h2_stream_set:get_encode_context(Streams),
-                                                      %% TODO: This could be a series of frames, not just one
-                                                      {PromiseFrame, NewContext} =
-                                                      h2_frame_push_promise:to_frame(
-                                                        StreamId,
-                                                        NewStreamId,
-                                                        Headers,
-                                                        OldContext
-                                                       ),
-
-                                                      %% Send the PP Frame
-                                                      Binary = h2_frame:to_binary(PromiseFrame),
-                                                      sock:send(h2_stream_set:socket(Streams), Binary),
-
-                                                      case Locks of
-                                                          [] ->
-                                                              ok;
-                                                          _ ->
-                                                              h2_stream_set:update_encode_context(Streams, NewContext)
-                                                      end,
-
-                                                      %% Get the promised stream rolling
-                                                      h2_stream:send_pp(h2_stream_set:stream_pid(NewStream), Headers),
-
-                                                      ok
-                                              end);
-        _ ->
-            ok
-    end.
+-spec send_promise(h2_stream_set:stream_set(), stream_id(), hpack:headers()) -> ok.
+send_promise(Streams, StreamId, Headers) ->
+    gen_server:call(h2_stream_set:connection(Streams), {send_promise, StreamId, Headers, self()}).
 
 -spec get_response(h2_stream_set:stream_set(), stream_id()) ->
                           {ok, {hpack:headers(), iodata(), iodata()}}
@@ -1100,52 +1005,6 @@ handle_event(_, {send_request, NotifyPid, Headers, Body},
         {error, _Code} ->
             {keep_state, Conn}
     end;
-handle_event(_, {send_promise, StreamId, NewStreamId, Headers},
-             #connection{
-                streams=Streams
-               }=Conn
-            ) ->
-    NewStream = h2_stream_set:get(NewStreamId, Streams),
-    case h2_stream_set:type(NewStream) of
-        active ->
-            EncodeContext0 = h2_stream_set:get_encode_context(Streams),
-            Locks = case hpack:all_fields_indexed(Headers, EncodeContext0) of
-                        true ->
-                            [];
-                        false ->
-                            [encoder]
-                    end,
-            h2_stream_set:take_exclusive_lock(Streams, Locks,
-                                              fun() ->
-                                                      OldContext = h2_stream_set:get_encode_context(Streams),
-                                                      %% TODO: This could be a series of frames, not just one
-                                                      {PromiseFrame, NewContext} =
-                                                      h2_frame_push_promise:to_frame(
-                                                        StreamId,
-                                                        NewStreamId,
-                                                        Headers,
-                                                        OldContext
-                                                       ),
-
-                                                      %% Send the PP Frame
-                                                      Binary = h2_frame:to_binary(PromiseFrame),
-                                                      socksend(Conn, Binary),
-
-                                                      case Locks of
-                                                          [] ->
-                                                              ok;
-                                                          _ ->
-                                                              h2_stream_set:update_encode_context(Streams, NewContext)
-                                                      end,
-
-                                                      %% Get the promised stream rolling
-                                                      h2_stream:send_pp(h2_stream_set:stream_pid(NewStream), Headers),
-
-                                                      {keep_state, Conn}
-                                              end);
-        _ ->
-            {keep_state, Conn}
-    end;
 handle_event(Event, {check_settings_ack, {Ref, NewSettings}},
              #connection{
                 settings_sent=SS
@@ -1191,18 +1050,12 @@ handle_event({call, From}, {get_response, StreamId},
                 {not_ready, Conn#connection.streams}
         end,
     {keep_state, Conn#connection{streams=NewStreams}, [{reply, From, Reply}]};
-handle_event({call, From}, {new_stream, NotifyPid},
-                  #connection{
-                     streams=Streams
-                    }=Conn) ->
-    {CallbackMod, CallbackOpts} = h2_stream_set:get_callback(Streams),
-    new_stream_(From, CallbackMod, CallbackOpts, NotifyPid, Conn);
-handle_event({call, From}, {new_stream, CallbackMod, CallbackState, NotifyPid}, Conn) ->
-    new_stream_(From, CallbackMod, CallbackState, NotifyPid, Conn);
 handle_event({call, From}, {new_stream, CallbackMod, CallbackState, Headers, Opts, NotifyPid}, Conn) ->
     new_stream_(From, CallbackMod, CallbackState, Headers, Opts, NotifyPid, Conn);
 handle_event({call, From}, {new_stream, CallbackMod, CallbackState, Headers, Body, Opts, NotifyPid}, Conn) ->
     new_stream_(From, CallbackMod, CallbackState, Headers, Body, Opts, NotifyPid, Conn);
+handle_event({call, From}, {send_promise, StreamId, Headers, NotifyPid}, Conn) ->
+    send_promise_(From, StreamId, Headers, NotifyPid, Conn);
 handle_event({call, From}, is_push,
                   #connection{
                      streams=Streams
@@ -1321,27 +1174,6 @@ terminate(_Reason, _StateName, _Conn=#connection{}) ->
 terminate(_Reason, _StateName, _State) ->
     ok.
 
-new_stream_(From, CallbackMod, CallbackState, NotifyPid, Conn=#connection{streams=Streams}) ->
-    {Reply, NewStreams} =
-        case
-            h2_stream_set:new_stream(
-              next,
-              NotifyPid,
-              CallbackMod,
-              CallbackState,
-              Streams)
-        of
-            {error, Code, _NewStream} ->
-                %% TODO: probably want to have events like this available for metrics
-                %% tried to create new_stream but there are too many
-                {{error, Code}, Streams};
-            {Pid, NextId, GoodStreamSet} ->
-                {{NextId, Pid}, GoodStreamSet}
-        end,
-    {keep_state, Conn#connection{
-                                 streams=NewStreams
-                                }, [{reply, From, Reply}]}.
-
 new_stream_(From, CallbackMod, CallbackState, Headers, Opts, NotifyPid, Conn=#connection{streams=Streams}) ->
     {Reply, NewStreams} =
         case
@@ -1403,7 +1235,6 @@ new_stream_(From, CallbackMod, CallbackState, Headers, Body, Opts, NotifyPid, Co
             end,
     {keep_state, Conn2, [{reply, From, Reply}]}.
 
-
 send_headers_(StreamId, Headers, Opts, Streams) ->
     StreamComplete = proplists:get_value(send_end_stream, Opts, false),
     Socket = h2_stream_set:socket(Streams),
@@ -1418,40 +1249,28 @@ send_headers_(StreamId, Headers, Opts, Streams) ->
                         false ->
                             [encoder]
                     end,
-            Res = h2_stream_set:take_exclusive_lock(Streams, Locks,
-                                                    fun() ->
-                                                            case h2_stream_set:stream_set_type(Streams) /= h2_stream_set:type(Stream) orelse h2_stream_set:send_headers(StreamId, Streams) == ok of
-                                                                true ->
-                                                                    {_SelfSettings, PeerSettings} = h2_stream_set:get_settings(Streams),
-                                                                    EncodeContext = h2_stream_set:get_encode_context(Streams),
-                                                                    {FramesToSend, NewContext} =
-                                                                    h2_frame_headers:to_frames(h2_stream_set:stream_id(Stream),
-                                                                                               Headers,
-                                                                                               EncodeContext,
-                                                                                               PeerSettings#settings.max_frame_size,
-                                                                                               StreamComplete
-                                                                                              ),
-                                                                    case Locks of
-                                                                        [] ->
-                                                                            ok;
-                                                                        _ ->
-                                                                            h2_stream_set:update_encode_context(Streams, NewContext)
-                                                                    end,
-                                                                    ct:pal("sending headers ~p", [StreamId]),
-                                                                    sock:send(Socket, [h2_frame:to_binary(Frame) || Frame <- FramesToSend]),
-                                                                    send_h(Stream, Headers),
-                                                                    ok;
-                                                                false ->
-                                                                    wait
-                                                            end
-                                                    end),
-            case Res of
-                ok ->
-                    ok;
-                wait ->
-                    timer:sleep(1),
-                    send_headers_(StreamId, Headers, Opts, Streams)
-            end;
+            h2_stream_set:take_exclusive_lock(Streams, Locks,
+                                              fun() ->
+                                                      {_SelfSettings, PeerSettings} = h2_stream_set:get_settings(Streams),
+                                                      EncodeContext = h2_stream_set:get_encode_context(Streams),
+                                                      {FramesToSend, NewContext} =
+                                                      h2_frame_headers:to_frames(h2_stream_set:stream_id(Stream),
+                                                                                 Headers,
+                                                                                 EncodeContext,
+                                                                                 PeerSettings#settings.max_frame_size,
+                                                                                 StreamComplete
+                                                                                ),
+                                                      case Locks of
+                                                          [] ->
+                                                              ok;
+                                                          _ ->
+                                                              h2_stream_set:update_encode_context(Streams, NewContext)
+                                                      end,
+                                                      ct:pal("sending headers ~p", [StreamId]),
+                                                      sock:send(Socket, [h2_frame:to_binary(Frame) || Frame <- FramesToSend]),
+                                                      send_h(Stream, Headers),
+                                                      ok
+                                              end);
         idle ->
             %% In theory this is a client maybe activating a stream,
             %% but in practice, we've already activated the stream in
@@ -1460,6 +1279,71 @@ send_headers_(StreamId, Headers, Opts, Streams) ->
         closed ->
             ok
     end.
+
+send_promise_(From, StreamId, Headers, NotifyPid, Conn=#connection{streams=Streams}) ->
+    {Reply, NewStreams} =
+        case
+            h2_stream_set:new_stream(
+              next,
+              NotifyPid,
+              undefined,
+              [],
+              Streams)
+        of
+            {error, Code, _NewStream} ->
+                %% TODO: probably want to have events like this available for metrics
+                %% tried to create new_stream but there are too many
+                {{error, Code}, Streams};
+            {Pid, NextId, GoodStreamSet} ->
+                {{NextId, Pid}, GoodStreamSet}
+        end,
+
+    Conn1 = Conn#connection{
+              streams=NewStreams
+             },
+    Conn2 = case Reply of
+                {error, _Code} ->
+                    Conn1;
+                {NextId0, _Pid} ->
+                    EncodeContext0 = h2_stream_set:get_encode_context(Streams),
+                    Locks = case hpack:all_fields_indexed(Headers, EncodeContext0) of
+                                true ->
+                                    [];
+                                false ->
+                                    [encoder]
+                            end,
+                    h2_stream_set:take_exclusive_lock(Streams, Locks,
+                                                      fun() ->
+                                                              OldContext = h2_stream_set:get_encode_context(Streams),
+                                                              %% TODO: This could be a series of frames, not just one
+                                                              {PromiseFrame, NewContext} =
+                                                              h2_frame_push_promise:to_frame(
+                                                                StreamId,
+                                                                NextId0,
+                                                                Headers,
+                                                                OldContext
+                                                               ),
+
+                                                              %% Send the PP Frame
+                                                              Binary = h2_frame:to_binary(PromiseFrame),
+                                                              sock:send(h2_stream_set:socket(Streams), Binary),
+
+                                                              case Locks of
+                                                                  [] ->
+                                                                      ok;
+                                                                  _ ->
+                                                                      h2_stream_set:update_encode_context(Streams, NewContext)
+                                                              end,
+
+                                                              %% Get the promised stream rolling
+                                                              h2_stream:send_pp(_Pid, Headers),
+
+                                                              ok
+                                                      end),
+                    Conn1
+            end,
+    {keep_state, Conn2, [{reply, From, Reply}]}.
+
 
 send_trailers_(StreamId, Trailers, Opts, Streams) ->
     BodyComplete = proplists:get_value(send_end_stream, Opts, true),

@@ -104,10 +104,8 @@ on_end_stream(State=#cb_static{connection_pid=ConnPid,
 
                         lists:foldl(
                           fun(R, Acc) ->
-                                  {NewStreamId, _} = h2_connection:new_stream(ConnPid),
-                                  PHeaders = generate_push_promise_headers(Headers, <<$/,R/binary>>
-                                                                          ),
-                                  h2_connection:send_promise(ConnPid, StreamId, NewStreamId, PHeaders),
+                                  PHeaders = generate_push_promise_headers(Headers, <<$/,R/binary>>),
+                                  {NewStreamId, _} = h2_connection:send_promise(ConnPid, StreamId, PHeaders),
                                   [{NewStreamId, PHeaders}|Acc]
                           end,
                           [],
