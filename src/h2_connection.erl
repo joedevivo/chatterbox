@@ -1196,13 +1196,14 @@ send_headers_(StreamId, Headers, Opts, Streams) ->
     end.
 
 send_promise_(From, StreamId, Headers, NotifyPid, Conn=#connection{streams=Streams}) ->
+    {CallbackMod, CallbackOpts} = h2_stream_set:get_callback(Streams),
     {Reply, NewStreams} =
         case
             h2_stream_set:new_stream(
               next,
               NotifyPid,
-              undefined,
-              [],
+              CallbackMod,
+              CallbackOpts,
               Streams)
         of
             {error, Code, _NewStream} ->
@@ -1471,7 +1472,7 @@ spawn_data_receiver(Socket, Streams, Flow) ->
                                                              Streams) of
                                                            {error, ErrorCode, NewStream} ->
                                                                rst_stream__(NewStream, ErrorCode, S),
-                                                               none;
+                                                               F(S, St, false, Decoder);
                                                            {_, _, _NewStreams} ->
                                                                headers
                                                        end;

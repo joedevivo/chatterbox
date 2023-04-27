@@ -49,10 +49,13 @@ on_end_stream(State=#state{conn_pid=ConnPid,
                        {<<":status">>,<<"200">>}
                       ],
     h2_connection:send_headers(ConnPid, StreamId, ResponseHeaders),
+    ct:pal("server sent headers"),
     h2_connection:send_body(ConnPid, StreamId, crypto:strong_rand_bytes(?SEND_BYTES),
                             [{send_end_stream, false}]),
+    ct:pal("server sent 68 bytes of data"),
     timer:sleep(200),
     h2_connection:send_body(ConnPid, StreamId, crypto:strong_rand_bytes(?SEND_BYTES)),
+    ct:pal("server sent 68 bytes of data"),
     {ok, State}.
 
 handle_info(Event, State) ->

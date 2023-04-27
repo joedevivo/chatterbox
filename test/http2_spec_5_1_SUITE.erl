@@ -106,6 +106,7 @@ total_streams_above_max_concurrent(Config) ->
        true),
     http2c:send_unaltered_frames(Client, HFinal),
 
+    ct:pal("A stream too far should be ~p", [AStreamTooFar]),
     %% Response should be a real response, because we haven't exceeded
     %% anything
     Response = http2c:wait_for_n_frames(Client, AStreamTooFar, 2),
