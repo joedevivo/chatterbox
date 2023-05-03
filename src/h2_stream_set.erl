@@ -427,7 +427,7 @@ get_encode_context(StreamSet, Headers) ->
             timer:sleep(1),
             get_encode_context(StreamSet, Headers);
         Encoder=#context{context=EncodeContext} ->
-            case Headers /= force orelse hpack:all_fields_indexed(Headers, EncodeContext) of
+            case Headers /= force andalso hpack:all_fields_indexed(Headers, EncodeContext) of
                 true ->
                     %% we don't have any new headers, so we don't need the lock
                     {nolock, EncodeContext};
