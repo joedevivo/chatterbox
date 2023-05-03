@@ -209,6 +209,7 @@ init({client, Transport, Host, Port, SSLOptions, Http2Settings, ConnectionSettin
     ConnectTimeout = maps:get(connect_timeout, ConnectionSettings, 5000),
     TcpUserTimeout = maps:get(tcp_user_timeout, ConnectionSettings, 0),
     SocketOptions = maps:get(socket_options, ConnectionSettings, []),
+    put('__h2_connection_details', {client, Transport, Host, Port}),
     case Transport:connect(Host, Port, client_options(Transport, SSLOptions, SocketOptions), ConnectTimeout) of
         {ok, Socket} ->
             ok = sock:setopts({Transport, Socket}, [{packet, raw}, binary, {active, false}]),
@@ -240,6 +241,7 @@ init({client, Transport, Host, Port, SSLOptions, Http2Settings, ConnectionSettin
 init({client_ssl_upgrade, Host, Port, InitialMessage, SSLOptions, Http2Settings, ConnectionSettings}) ->
     ConnectTimeout = maps:get(connect_timeout, ConnectionSettings, 5000),
     SocketOptions = maps:get(socket_options, ConnectionSettings, []),
+    put('__h2_connection_details', {client, ssl_upgrade, Host, Port}),
     case gen_tcp:connect(Host, Port, [{active, false}], ConnectTimeout) of
         {ok, TCP} ->
             gen_tcp:send(TCP, InitialMessage),
@@ -536,13 +538,6 @@ closing(Type, Msg, State) ->
     {next_state,
      connected | continuation | closing ,
      connection()}.
-%% Bad Length of frame, exceedes maximum allowed size
-route_frame(Event, {#frame_header{length=L}, _},
-            #settings{max_frame_size=MFS},
-            _PeerSettings,
-            Conn)
-    when L > MFS ->
-    go_away(Event, ?FRAME_SIZE_ERROR, Conn);
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Connection Level Frames
@@ -555,85 +550,9 @@ route_frame(Event, {#frame_header{length=L}, _},
 %%
 
 
-route_frame(Event, {#frame_header{type=?HEADERS}=FH, _Payload},
-            _SelfSettings,
-            _PeerSettings,
-            #connection{}=Conn)
-  when Conn#connection.type == server,
-       FH#frame_header.stream_id rem 2 == 0 ->
-    go_away(Event, ?PROTOCOL_ERROR, <<"HEADERS for even stream id">>, Conn);
 
-route_frame(Event, {H, _Payload},
-            _SelfSettings,
-            _PeerSettings,
-            #connection{}=Conn)
-    when H#frame_header.type == ?PRIORITY,
-         H#frame_header.stream_id == 0 ->
-    go_away(Event, ?PROTOCOL_ERROR, <<"priority set on stream 0">>, Conn);
-route_frame(Event, {H, _Payload},
-            _SelfSettings,
-            _PeerSettings,
-            #connection{} = Conn)
-    when H#frame_header.type == ?PRIORITY ->
-    maybe_reply(Event, {next_state, connected, Conn}, ok);
-
-route_frame(
-  Event,
-  {#frame_header{
-      stream_id=StreamId,
-      type=?RST_STREAM
-      },
-   _Payload},
-  _SelfSettings,
-  _PeerSettings,
-  #connection{} = Conn) ->
-    %% TODO: anything with this?
-    %% EC = h2_frame_rst_stream:error_code(Payload),
-    Streams = Conn#connection.streams,
-    Stream = h2_stream_set:get(StreamId, Streams),
-    case h2_stream_set:type(Stream) of
-        idle ->
-            go_away(Event, ?PROTOCOL_ERROR, <<"RST on idle stream">>, Conn);
-        _Stream ->
-            %% TODO: RST_STREAM support
-            maybe_reply(Event, {next_state, connected, Conn}, ok)
-    end;
-route_frame(Event, {H=#frame_header{}, _P},
-            _SelfSettings,
-            _PeerSettings,
-            #connection{} =Conn)
-    when H#frame_header.type == ?PUSH_PROMISE,
-         Conn#connection.type == server ->
-    go_away(Event, ?PROTOCOL_ERROR, <<"push promise sent to server">>, Conn);
 
 %% PING
-%% If not stream 0, then connection error
-route_frame(Event, {H, _Payload},
-            _SelfSettings,
-            _PeerSettings,
-            #connection{} = Conn)
-    when H#frame_header.type == ?PING,
-         H#frame_header.stream_id =/= 0 ->
-    go_away(Event, ?PROTOCOL_ERROR, <<"ping on stream /= 0">>, Conn);
-%% If length != 8, FRAME_SIZE_ERROR
-%% TODO: I think this case is already covered in h2_frame now
-route_frame(Event, {H, _Payload},
-            _SelfSettings,
-            _PeerSettings,
-           #connection{}=Conn)
-    when H#frame_header.type == ?PING,
-         H#frame_header.length =/= 8 ->
-    go_away(Event, ?FRAME_SIZE_ERROR, Conn);
-%% If PING && !ACK, must ACK
-route_frame(Event, {H, Ping},
-            _SelfSettings,
-            _PeerSettings,
-            #connection{}=Conn)
-    when H#frame_header.type == ?PING,
-         ?NOT_FLAG((H#frame_header.flags), ?FLAG_ACK) ->
-    Ack = h2_frame_ping:ack(Ping),
-    socksend(Conn, h2_frame:to_binary(Ack)),
-    maybe_reply(Event, {next_state, connected, Conn}, ok);
 route_frame(Event, {H, Payload},
             _SelfSettings,
             _PeerSettings,
@@ -655,66 +574,6 @@ route_frame(Event, {H=#frame_header{stream_id=0}, _Payload},
     when H#frame_header.type == ?GOAWAY ->
     go_away(Event, ?NO_ERROR, Conn);
 
-%% Window Update
-route_frame(Event,
-  {#frame_header{
-      stream_id=0,
-      type=?WINDOW_UPDATE
-     },
-   Payload},
-  _SelfSettings,
-  _PeerSettings,
-  #connection{
-     streams=Streams
-    }=Conn) ->
-    WSI = h2_frame_window_update:size_increment(Payload),
-    NewSendWindow = h2_stream_set:increment_socket_send_window(WSI, Streams),
-    case NewSendWindow > 2147483647 of
-        true ->
-            go_away(Event, ?FLOW_CONTROL_ERROR, Conn);
-        false ->
-            %% TODO: Priority Sort! Right now, it's just sorting on
-            %% lowest stream_id first
-            %Streams = h2_stream_set:sort(Conn#connection.streams),
-
-                h2_stream_set:send_all_we_can(
-                  Streams
-                 ),
-            maybe_reply(Event, {next_state, connected,
-             Conn}, ok)
-    end;
-route_frame(Event,
-  {#frame_header{type=?WINDOW_UPDATE}=FH,
-   Payload},
-  _SelfSettings,
-  _PeerSettings,
-  #connection{}=Conn
- ) ->
-    StreamId = FH#frame_header.stream_id,
-    Streams = Conn#connection.streams,
-    WSI = h2_frame_window_update:size_increment(Payload),
-    Stream0 = h2_stream_set:get(StreamId, Streams),
-    case h2_stream_set:type(Stream0) of
-        idle ->
-            go_away(Event, ?PROTOCOL_ERROR, list_to_binary(io_lib:format("window update on idle stream ~p", [StreamId])), Conn);
-        closed ->
-            rst_stream_(Event, Stream0, ?STREAM_CLOSED, Conn);
-        active ->
-            NewSSWS = h2_stream_set:send_window_size(Stream0)+WSI,
-
-            case NewSSWS > 2147483647 of
-                true ->
-                    rst_stream_(Event, Stream0, ?FLOW_CONTROL_ERROR, Conn);
-                false ->
-                        h2_stream_set:send_what_we_can(
-                            StreamId,
-                            fun(Stream) ->
-                                    h2_stream_set:increment_send_window_size(WSI, Stream)
-                            end, Streams),
-                    maybe_reply(Event, {next_state, connected,
-                     Conn}, ok)
-            end
-    end;
 route_frame(Event, {#frame_header{type=T}, _}, _SelfSettings, _PeerSettings, Conn)
   when T > ?CONTINUATION ->
     maybe_reply(Event, {next_state, connected, Conn}, ok);
@@ -1606,10 +1465,50 @@ spawn_data_receiver(Socket, Streams, Flow) ->
 
                                                        F(S, St, false, NewDecoder)
                                                end;
+                                           ?WINDOW_UPDATE when StreamId == 0 ->
+                                               WSI = h2_frame_window_update:size_increment(Payload),
+                                               NewSendWindow = h2_stream_set:increment_socket_send_window(WSI, St),
+                                               case NewSendWindow > 2147483647 of
+                                                   true ->
+                                                       go_away_(?FLOW_CONTROL_ERROR, <<"stream 0 window update exceeded limit">>, S, St),
+                                                       Connection ! {go_away, ?FLOW_CONTROL_ERROR};
+                                                   false ->
+                                                       %% TODO: Priority Sort! Right now, it's just sorting on
+                                                       %% lowest stream_id first
+                                                       %Streams = h2_stream_set:sort(Conn#connection.streams),
 
-                                           %% TODO ACK'd pings
+                                                       h2_stream_set:send_all_we_can(
+                                                         St
+                                                        ),
+                                                       F(S, St, false, Decoder)
+                                               end;
+                                           ?WINDOW_UPDATE ->
+                                               WSI = h2_frame_window_update:size_increment(Payload),
+                                               Stream0 = h2_stream_set:get(StreamId, St),
+                                               case h2_stream_set:type(Stream0) of
+                                                   idle ->
+                                                       go_away_(?PROTOCOL_ERROR, list_to_binary(io_lib:format("window update on idle stream ~p", [StreamId])), S, St),
+                                                       Connection ! {go_away, ?PROTOCOL_ERROR};
+                                                   closed ->
+                                                       rst_stream__(Stream0, ?STREAM_CLOSED, S);
+                                                   active ->
+                                                       NewSSWS = h2_stream_set:send_window_size(Stream0)+WSI,
+
+                                                       case NewSSWS > 2147483647 of
+                                                           true ->
+                                                               rst_stream__(Stream0, ?FLOW_CONTROL_ERROR, S);
+                                                           false ->
+                                                               h2_stream_set:send_what_we_can(
+                                                                 StreamId,
+                                                                 fun(Stream) ->
+                                                                         h2_stream_set:increment_send_window_size(WSI, Stream)
+                                                                 end, Streams),
+                                                               F(S, St, false, Decoder)
+                                                       end
+                                               end;
                                            _ ->
                                                %% let the connection process handle anything else
+                                               %% which is only PING acks and GOAWAYs
                                                gen_statem:call(Connection, {frame, Frame}),
                                                F(S, St, false, Decoder)
                                        end
@@ -1681,6 +1580,12 @@ start_http2_server(
         ok ->
             Flow = application:get_env(chatterbox, server_flow_control, auto),
             Receiver = spawn_data_receiver(Socket, Conn#connection.streams, Flow),
+            case sock:peername(Socket) of
+                {ok, {Host, Port}} ->
+                    put('__h2_connection_details', {server, element(1, Socket), Host, Port});
+                _ ->
+                    ok
+            end,
             NewState =
                 Conn#connection{
                   type=server,
