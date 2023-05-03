@@ -1490,7 +1490,8 @@ spawn_data_receiver(Socket, Streams, Flow) ->
                                                        go_away_(?PROTOCOL_ERROR, list_to_binary(io_lib:format("window update on idle stream ~p", [StreamId])), S, St),
                                                        Connection ! {go_away, ?PROTOCOL_ERROR};
                                                    closed ->
-                                                       rst_stream__(Stream0, ?STREAM_CLOSED, S);
+                                                       rst_stream__(Stream0, ?STREAM_CLOSED, S),
+                                                       F(S, St, false, Decoder);
                                                    active ->
                                                        NewSSWS = h2_stream_set:send_window_size(Stream0)+WSI,
 
@@ -1502,7 +1503,7 @@ spawn_data_receiver(Socket, Streams, Flow) ->
                                                                  StreamId,
                                                                  fun(Stream) ->
                                                                          h2_stream_set:increment_send_window_size(WSI, Stream)
-                                                                 end, Streams),
+                                                                 end, St),
                                                                F(S, St, false, Decoder)
                                                        end
                                                end;
