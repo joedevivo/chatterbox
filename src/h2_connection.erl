@@ -1228,7 +1228,9 @@ spawn_data_receiver(Socket, Streams, Flow) ->
     h2_stream_set:set_socket_send_window_size(?DEFAULT_INITIAL_WINDOW_SIZE, Streams),
     Type = h2_stream_set:stream_set_type(Streams),
     {CallbackMod, CallbackOpts} = h2_stream_set:get_callback(Streams),
+    ConnDetails = get('__h2_connection_details'),
     spawn_link(fun() ->
+                       put('__h2_connection_details', ConnDetails),
                        fun F(S, St, First, Decoder) ->
                                case h2_frame:read(S, infinity) of
                                    {error, closed} ->
@@ -1580,13 +1582,13 @@ start_http2_server(
     case accept_preface(Socket) of
         ok ->
             Flow = application:get_env(chatterbox, server_flow_control, auto),
-            Receiver = spawn_data_receiver(Socket, Conn#connection.streams, Flow),
             case sock:peername(Socket) of
                 {ok, {Host, Port}} ->
                     put('__h2_connection_details', {server, element(1, Socket), Host, Port});
                 _ ->
                     ok
             end,
+            Receiver = spawn_data_receiver(Socket, Conn#connection.streams, Flow),
             NewState =
                 Conn#connection{
                   type=server,
