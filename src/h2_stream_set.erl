@@ -483,30 +483,6 @@ get_their_peers(StreamSet) ->
     catch _:_ -> #peer_subset{type=theirs, next_available_stream_id=0}
     end.
 
-get_my_active_streams(StreamSet) ->
-    case StreamSet#stream_set.type of
-        client ->
-            ets:select(StreamSet#stream_set.table, ets:fun2ms(fun(S=#active_stream{id=Id}) when Id rem 2 == 1 ->
-                                                                      S
-                                                              end));
-        server ->
-            ets:select(StreamSet#stream_set.table, ets:fun2ms(fun(S=#active_stream{id=Id}) when Id rem 2 == 0 ->
-                                                                      S
-                                                              end))
-    end.
-
-get_their_active_streams(StreamSet) ->
-    case StreamSet#stream_set.type of
-        client ->
-            ets:select(StreamSet#stream_set.table, ets:fun2ms(fun(S=#active_stream{id=Id}) when Id rem 2 == 0 ->
-                                                                      S
-                                                              end));
-        server ->
-            ets:select(StreamSet#stream_set.table, ets:fun2ms(fun(S=#active_stream{id=Id}) when Id rem 2 == 1 ->
-                                                                      S
-                                                              end))
-    end.
-
 %% get/2 gets a stream. The logic in here basically just chooses which
 %% subset.
 -spec get(Id :: stream_id(),
@@ -936,14 +912,15 @@ update_my_max_active(NewMax, Streams) ->
 send_all_we_can(Streams) ->
     PeerSettings = get_peer_settings(Streams),
     MaxFrameSize = PeerSettings#settings.max_frame_size,
-    c_send_what_we_can(
-      MaxFrameSize,
-      get_their_active_streams(Streams),
-      Streams),
-    c_send_what_we_can(
-      MaxFrameSize,
-      get_my_active_streams(Streams),
-      Streams),
+    
+    %% TODO be smarter about where we start off (remember where we last stopped, etc),
+    %% inspect priorities, etc
+    case ets:select(Streams#stream_set.table, ets:fun2ms(fun(AS=#active_stream{}) -> AS end), 20) of
+        '$end_of_table' ->
+            ok;
+        Res ->
+            c_send_what_we_can(MaxFrameSize, Res, Streams)
+    end,
 
     {socket_send_window_size(Streams),
      Streams}.
@@ -967,13 +944,18 @@ send_what_we_can(StreamId, StreamFun, Streams) ->
 
 %% Send at the connection level
 -spec c_send_what_we_can(MaxFrameSize :: non_neg_integer(),
-                         Streams :: [stream()],
+                         Streams :: {[stream()], ets:continuation()},
                          StreamSet :: stream_set()
                         ) ->
                                 integer().
-c_send_what_we_can(_MFS, [], StreamSet) ->
-    socket_send_window_size(StreamSet);
-c_send_what_we_can(MFS, [S|Streams], StreamSet) ->
+c_send_what_we_can(MFS, {[], CC}, StreamSet) ->
+    case ets:select(CC) of
+        '$end_of_table' ->
+            socket_send_window_size(StreamSet);
+        Res ->
+            c_send_what_we_can(MFS, Res, StreamSet)
+    end;
+c_send_what_we_can(MFS, {[S|Streams], CC}, StreamSet) ->
     NewSWS = s_send_what_we_can(MFS, stream_id(S), fun(Stream) -> Stream end, StreamSet),
     case NewSWS =< 0 of
         true ->
@@ -981,7 +963,7 @@ c_send_what_we_can(MFS, [S|Streams], StreamSet) ->
             NewSWS;
         false ->
             %% Otherwise, try sending on the next stream
-            c_send_what_we_can(MFS, Streams, StreamSet)
+            c_send_what_we_can(MFS, {Streams, CC}, StreamSet)
     end.
 
 %% Send at the stream level
