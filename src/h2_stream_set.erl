@@ -373,59 +373,78 @@ connection(#stream_set{connection=Conn}) ->
     Conn.
 
 get_self_settings(StreamSet) ->
-    case hd(ets:lookup(StreamSet#stream_set.table, self_settings)) of
+    try hd(ets:lookup(StreamSet#stream_set.table, self_settings)) of
         #connection_settings{settings=locked} ->
             timer:sleep(1),
             get_self_settings(StreamSet);
         #connection_settings{settings=Settings} ->
             Settings
+    catch
+        error:badarg ->
+            #settings{}
     end.
 
 get_peer_settings(StreamSet) ->
-    case hd(ets:lookup(StreamSet#stream_set.table, peer_settings)) of
+    try hd(ets:lookup(StreamSet#stream_set.table, peer_settings)) of
         #connection_settings{settings=locked} ->
             timer:sleep(1),
             get_self_settings(StreamSet);
         #connection_settings{settings=Settings} ->
             Settings
+    catch error:badarg ->
+              #settings{}
     end.
 
 get_self_settings_locked(StreamSet=#stream_set{table=T}) ->
     SelfSettings = get_self_settings(StreamSet),
-    case ets:select_replace(T, [{#connection_settings{type=self_settings, settings=SelfSettings}, [], [{const, #connection_settings{type=self_settings, settings=locked}}]}]) of
+    try ets:select_replace(T, [{#connection_settings{type=self_settings, settings=SelfSettings}, [], [{const, #connection_settings{type=self_settings, settings=locked}}]}]) of
         1 ->
             SelfSettings;
         0 ->
             timer:sleep(1),
             get_self_settings_locked(StreamSet)
+    catch
+        error:badarg ->
+            #settings{}
     end.
 
 get_peer_settings_locked(StreamSet=#stream_set{table=T}) ->
     PeerSettings = get_peer_settings(StreamSet),
-    case ets:select_replace(T, [{#connection_settings{type=peer_settings, settings=PeerSettings}, [], [{const, #connection_settings{type=peer_settings, settings=locked}}]}]) of
+    try ets:select_replace(T, [{#connection_settings{type=peer_settings, settings=PeerSettings}, [], [{const, #connection_settings{type=peer_settings, settings=locked}}]}]) of
         1 ->
             PeerSettings;
         0 ->
             timer:sleep(1),
             get_peer_settings_locked(StreamSet)
+    catch
+        error:badarg ->
+            #settings{}
     end.
 
 get_settings(StreamSet) ->
     {get_self_settings(StreamSet), get_peer_settings(StreamSet)}.
 
 update_self_settings(#stream_set{table=T}, Settings) ->
-    1 = ets:select_replace(T, [{#connection_settings{type=self_settings, settings=locked}, [], [{const, #connection_settings{type=self_settings, settings=Settings}}]}]),
-    ok.
+    try ets:select_replace(T, [{#connection_settings{type=self_settings, settings=locked}, [], [{const, #connection_settings{type=self_settings, settings=Settings}}]}]) of
+        1 -> ok
+    catch 
+        error:badarg ->
+              ok
+    end.
 
 update_peer_settings(#stream_set{table=T}, Settings) ->
-    1 = ets:select_replace(T, [{#connection_settings{type=peer_settings, settings=locked}, [], [{const, #connection_settings{type=peer_settings, settings=Settings}}]}]),
-    ok.
+    try ets:select_replace(T, [{#connection_settings{type=peer_settings, settings=locked}, [], [{const, #connection_settings{type=peer_settings, settings=Settings}}]}]) of
+        1 -> ok
+    catch
+        error:badarg ->
+            ok
+    end.
 
 get_encode_context(StreamSet) ->
     get_encode_context(StreamSet, force).
 
 get_encode_context(StreamSet, Headers) ->
-    case (hd(ets:lookup(StreamSet#stream_set.table, encode_context))) of
+    try (hd(ets:lookup(StreamSet#stream_set.table, encode_context))) of
         #context{context=locked} ->
             timer:sleep(1),
             get_encode_context(StreamSet, Headers);
@@ -444,6 +463,9 @@ get_encode_context(StreamSet, Headers) ->
                             get_encode_context(StreamSet, Headers)
                     end
             end
+    catch
+        error:badarg ->
+            hpack:new_context()
     end.
 
 release_encode_context(_StreamSet, {nolock, _}) ->
@@ -475,7 +497,7 @@ get_my_peers(StreamSet) ->
     Lowest = atomics:get(StreamSet#stream_set.atomics, ?MY_LOWEST_STREAM_ID),
     Active = atomics:get(StreamSet#stream_set.atomics, ?MY_ACTIVE_COUNT),
     try (hd(ets:lookup(StreamSet#stream_set.table, mine)))#peer_subset{next_available_stream_id=Next, lowest_stream_id = Lowest, active_count=Active}
-    catch _:_ -> #peer_subset{type=mine, next_available_stream_id=0}
+    catch error:badarg -> #peer_subset{type=mine, next_available_stream_id=0}
     end.
 
 -spec get_their_peers(stream_set()) -> peer_subset().
@@ -484,7 +506,7 @@ get_their_peers(StreamSet) ->
     Lowest = atomics:get(StreamSet#stream_set.atomics, ?THEIR_LOWEST_STREAM_ID),
     Active = atomics:get(StreamSet#stream_set.atomics, ?THEIR_ACTIVE_COUNT),
     try (hd(ets:lookup(StreamSet#stream_set.table, theirs)))#peer_subset{lowest_stream_id = Lowest, active_count=Active, next_available_stream_id=Next}
-    catch _:_ -> #peer_subset{type=theirs, next_available_stream_id=0}
+    catch error:badarg -> #peer_subset{type=theirs, next_available_stream_id=0}
     end.
 
 %% get/2 gets a stream. The logic in here basically just chooses which
@@ -524,7 +546,7 @@ get_from_subset(Id, _PeerSubset, StreamSet) ->
         [Stream] ->
             Stream
     catch
-        _:_ ->
+        error:badarg ->
             #closed_stream{id=Id}
     end.
 
@@ -591,43 +613,25 @@ upsert_peer_subset(
   #closed_stream{
      id=Id,
      garbage=true
-    }=NewStream,
+    },
   PeerSubset, StreamSet)
   when Id == PeerSubset#peer_subset.lowest_stream_id ->
     %% NewActive could now have a #closed_stream with no information
     %% in it as the lowest active stream, so we should drop those.
-    NewActive = drop_unneeded_streams(StreamSet, Id),
+    _NewActive = drop_unneeded_streams(StreamSet, Id),
 
-    NewPeerSubset =
-    case NewActive of
-        [] ->
-            PeerSubset#peer_subset{
-              lowest_stream_id=PeerSubset#peer_subset.next_available_stream_id
-             };
-        [NewLowestStream|_] ->
-            NewLowest = stream_id(NewLowestStream),
-            PeerSubset#peer_subset{
-              lowest_stream_id=NewLowest
-             }
-    end,
-    case ets:select_replace(StreamSet#stream_set.table, [{PeerSubset, [], [{const, NewPeerSubset}]}]) of
-        1 ->
-            case OldStream of
-                #active_stream{} ->
-                    _Counter = case PeerSubset#peer_subset.type of
-                                  mine ->
-                                      ?MY_ACTIVE_COUNT;
-                                  theirs ->
-                                      ?THEIR_ACTIVE_COUNT
-                              end,
-                    %atomics:sub(StreamSet#stream_set.atomics, Counter, 1),
-                    ok;
-                _ ->
-                    ok
-            end;
-        0 ->
-            timer:sleep(1),
-            upsert_peer_subset(OldStream, NewStream, get_peer_subset(Id, StreamSet), StreamSet)
+    case OldStream of
+        #active_stream{} ->
+            _Counter = case PeerSubset#peer_subset.type of
+                           mine ->
+                               ?MY_ACTIVE_COUNT;
+                           theirs ->
+                               ?THEIR_ACTIVE_COUNT
+                       end,
+            %atomics:sub(StreamSet#stream_set.atomics, Counter, 1),
+            ok;
+        _ ->
+            ok
     end;
 %% Case 2: Like case 1, but it's not garbage
 upsert_peer_subset(
