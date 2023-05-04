@@ -196,6 +196,7 @@ init([
       CB=undefined,
       _CBOptions
      ]) ->
+    erlang:monitor(process, ConnectionPid),
     {ok, idle, #stream_state{
                   callback_mod=CB,
                   stream_id=StreamId,
@@ -211,6 +212,7 @@ init([
       CB,
       CBOptions
      ]) ->
+    erlang:monitor(process, ConnectionPid),
     %% don't block stream init with a slow callback init
     self() ! {init_callback, CBOptions},
     {ok, idle, #stream_state{
@@ -832,6 +834,8 @@ handle_event({call, From}, Event, State=#stream_state{callback_mod=CB,
     {keep_state, State#stream_state{callback_state=CallbackState1}, [{reply, From, Reply}]};
 handle_event(cast, {rst_stream, ErrorCode}, State=#stream_state{}) ->
     rst_stream_(ErrorCode, State);
+handle_event(info, {'DOWN', _Ref, process, Pid, Reason}, #stream_state{connection=Pid}) ->
+    {stop, Reason};
 handle_event(cast, Event, State=#stream_state{callback_mod=CB,
                                               callback_state=CallbackState}) when CB /= undefined ->
     CallbackState1 = CB:handle_info(Event, CallbackState),
