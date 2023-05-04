@@ -13,10 +13,11 @@
 -define(RECV_WINDOW_SIZE, 1).
 -define(SEND_WINDOW_SIZE, 2).
 -define(MY_NEXT_AVAILABLE_STREAM_ID, 3).
--define(MY_LOWEST_STREAM_ID, 4).
--define(THEIR_LOWEST_STREAM_ID, 5).
--define(MY_ACTIVE_COUNT, 6).
--define(THEIR_ACTIVE_COUNT, 7).
+-define(THEIR_NEXT_AVAILABLE_STREAM_ID, 4).
+-define(MY_LOWEST_STREAM_ID, 5).
+-define(THEIR_LOWEST_STREAM_ID, 6).
+-define(MY_ACTIVE_COUNT, 7).
+-define(THEIR_ACTIVE_COUNT, 8).
 
 -record(
    stream_set,
@@ -24,7 +25,7 @@
      %% Type determines which streams are mine, and which are theirs
      type :: client | server,
 
-     atomics = atomics:new(7, []),
+     atomics = atomics:new(8, []),
 
      socket :: sock:socket(),
 
@@ -233,8 +234,9 @@ new(client, Socket, CallbackMod, CallbackOpts) ->
     ets:insert_new(StreamSet#stream_set.table, #connection_settings{type=peer_settings}),
     ets:insert_new(StreamSet#stream_set.table, #context{}),
     atomics:put(StreamSet#stream_set.atomics, ?MY_NEXT_AVAILABLE_STREAM_ID, 1),
-    atomics:put(StreamSet#stream_set.atomics, ?MY_LOWEST_STREAM_ID, 0),
-    atomics:put(StreamSet#stream_set.atomics, ?THEIR_LOWEST_STREAM_ID, 0),
+    atomics:put(StreamSet#stream_set.atomics, ?MY_LOWEST_STREAM_ID, 1),
+    atomics:put(StreamSet#stream_set.atomics, ?THEIR_LOWEST_STREAM_ID, 2),
+    atomics:put(StreamSet#stream_set.atomics, ?THEIR_NEXT_AVAILABLE_STREAM_ID, 2),
     atomics:put(StreamSet#stream_set.atomics, ?MY_ACTIVE_COUNT, 0),
     atomics:put(StreamSet#stream_set.atomics, ?THEIR_ACTIVE_COUNT, 0),
     %% I'm a client, so mine are always odd numbered
@@ -264,8 +266,9 @@ new(server, Socket, CallbackMod, CallbackOpts) ->
     ets:insert_new(StreamSet#stream_set.table, #context{}),
     %% I'm a server, so mine are always even numbered
     atomics:put(StreamSet#stream_set.atomics, ?MY_NEXT_AVAILABLE_STREAM_ID, 2),
-    atomics:put(StreamSet#stream_set.atomics, ?MY_LOWEST_STREAM_ID, 0),
-    atomics:put(StreamSet#stream_set.atomics, ?THEIR_LOWEST_STREAM_ID, 0),
+    atomics:put(StreamSet#stream_set.atomics, ?MY_LOWEST_STREAM_ID, 2),
+    atomics:put(StreamSet#stream_set.atomics, ?THEIR_LOWEST_STREAM_ID, 1),
+    atomics:put(StreamSet#stream_set.atomics, ?THEIR_NEXT_AVAILABLE_STREAM_ID, 1),
     atomics:put(StreamSet#stream_set.atomics, ?MY_ACTIVE_COUNT, 0),
     atomics:put(StreamSet#stream_set.atomics, ?THEIR_ACTIVE_COUNT, 0),
     ets:insert_new(StreamSet#stream_set.table,
@@ -477,9 +480,10 @@ get_my_peers(StreamSet) ->
 
 -spec get_their_peers(stream_set()) -> peer_subset().
 get_their_peers(StreamSet) ->
+    Next = atomics:get(StreamSet#stream_set.atomics, ?THEIR_NEXT_AVAILABLE_STREAM_ID),
     Lowest = atomics:get(StreamSet#stream_set.atomics, ?THEIR_LOWEST_STREAM_ID),
     Active = atomics:get(StreamSet#stream_set.atomics, ?THEIR_ACTIVE_COUNT),
-    try (hd(ets:lookup(StreamSet#stream_set.table, theirs)))#peer_subset{lowest_stream_id = Lowest, active_count=Active}
+    try (hd(ets:lookup(StreamSet#stream_set.table, theirs)))#peer_subset{lowest_stream_id = Lowest, active_count=Active, next_available_stream_id=Next}
     catch _:_ -> #peer_subset{type=theirs, next_available_stream_id=0}
     end.
 
@@ -589,8 +593,7 @@ upsert_peer_subset(
      garbage=true
     }=NewStream,
   PeerSubset, StreamSet)
-  when Id >= PeerSubset#peer_subset.lowest_stream_id,
-       Id < PeerSubset#peer_subset.next_available_stream_id ->
+  when Id == PeerSubset#peer_subset.lowest_stream_id ->
     %% NewActive could now have a #closed_stream with no information
     %% in it as the lowest active stream, so we should drop those.
     NewActive = drop_unneeded_streams(StreamSet, Id),
@@ -654,7 +657,7 @@ upsert_peer_subset(
   OldStream,
   #closed_stream{
      id=Id
-    }=NewStream,
+    },
   PeerSubset, StreamSet)
  when Id >= PeerSubset#peer_subset.next_available_stream_id ->
     case PeerSubset#peer_subset.type of
@@ -668,23 +671,14 @@ upsert_peer_subset(
             end,
             atomics:add(StreamSet#stream_set.atomics, ?MY_NEXT_AVAILABLE_STREAM_ID, 2);
         theirs ->
-            %% TODO make this a counter too?
-            case ets:select_replace(StreamSet#stream_set.table,
-                                    ets:fun2ms(fun(#peer_subset{type=T, next_available_stream_id=I}=PS) when T == PeerSubset#peer_subset.type, Id >= I  ->
-                                                       PS#peer_subset{next_available_stream_id=Id+2}
-                                               end)) of
-                1 ->
-                    case OldStream of
-                        #active_stream{} ->
-                            atomics:sub(StreamSet#stream_set.atomics, ?THEIR_ACTIVE_COUNT, 1),
-                            ok;
-                        _ ->
-                            ok
-                    end;
-                0 ->
-                    timer:sleep(1),
-                    upsert_peer_subset(OldStream, NewStream, get_peer_subset(Id, StreamSet), StreamSet)
-            end
+            case OldStream of
+                #active_stream{} ->
+                    atomics:sub(StreamSet#stream_set.atomics, ?THEIR_ACTIVE_COUNT, 1),
+                    ok;
+                _ ->
+                    ok
+            end,
+            atomics:put(StreamSet#stream_set.atomics, ?THEIR_NEXT_AVAILABLE_STREAM_ID, Id+2)
     end;
 %% Case 4: It's active, and in the range we're working with
 upsert_peer_subset(
@@ -719,10 +713,10 @@ upsert_peer_subset(
     {error, ?REFUSED_STREAM};
 %% Case 6: It's active, and greater than the range we're tracking
 upsert_peer_subset(
-  OldStream,
+  _OldStream,
   #active_stream{
      id=Id
-    }=NewStream,
+    },
   PeerSubset, StreamSet)
  when Id >= PeerSubset#peer_subset.next_available_stream_id ->
     case PeerSubset#peer_subset.type of
@@ -731,17 +725,9 @@ upsert_peer_subset(
             atomics:add(StreamSet#stream_set.atomics, ?MY_ACTIVE_COUNT, 1),
             ok;
         theirs ->
-            case ets:select_replace(StreamSet#stream_set.table,
-                                    ets:fun2ms(fun(#peer_subset{type=T, next_available_stream_id=I}=PS) when T == PeerSubset#peer_subset.type, Id >= I  ->
-                                                       PS#peer_subset{next_available_stream_id=Id+2}
-                                               end)) of
-                1 ->
-                    atomics:add(StreamSet#stream_set.atomics, ?THEIR_ACTIVE_COUNT, 1),
-                    ok;
-                0 ->
-                    timer:sleep(1),
-                    upsert_peer_subset(OldStream, NewStream, get_peer_subset(Id, StreamSet), StreamSet)
-            end
+            atomics:put(StreamSet#stream_set.atomics, ?THEIR_NEXT_AVAILABLE_STREAM_ID, Id+2),
+            atomics:add(StreamSet#stream_set.atomics, ?THEIR_ACTIVE_COUNT, 1),
+            ok
     end;
 %% Catch All
 %% TODO: remove this match and crash instead?
