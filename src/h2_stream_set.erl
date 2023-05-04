@@ -678,7 +678,7 @@ upsert_peer_subset(
                 _ ->
                     ok
             end,
-            atomics:put(StreamSet#stream_set.atomics, ?THEIR_NEXT_AVAILABLE_STREAM_ID, Id+2)
+            atomics:compare_exchange(StreamSet#stream_set.atomics, ?THEIR_NEXT_AVAILABLE_STREAM_ID, PeerSubset#peer_subset.next_available_stream_id, Id+2)
     end;
 %% Case 4: It's active, and in the range we're working with
 upsert_peer_subset(
@@ -725,7 +725,7 @@ upsert_peer_subset(
             atomics:add(StreamSet#stream_set.atomics, ?MY_ACTIVE_COUNT, 1),
             ok;
         theirs ->
-            atomics:put(StreamSet#stream_set.atomics, ?THEIR_NEXT_AVAILABLE_STREAM_ID, Id+2),
+            atomics:compare_exchange(StreamSet#stream_set.atomics, ?THEIR_NEXT_AVAILABLE_STREAM_ID, PeerSubset#peer_subset.next_available_stream_id, Id+2),
             atomics:add(StreamSet#stream_set.atomics, ?THEIR_ACTIVE_COUNT, 1),
             ok
     end;
