@@ -1211,7 +1211,7 @@ send_settings(SettingsToSend,
       settings_sent=queue:in({Ref, SettingsToSend}, SS)
      }.
 
--spec send_ack_timeout({reference(), settings()}) -> pid().
+-spec send_ack_timeout({reference(), settings()}) -> reference().
 send_ack_timeout(SS) ->
     Self = self(),
     erlang:send_after(5000, Self, {check_settings_ack,SS}).
@@ -1339,8 +1339,6 @@ spawn_data_receiver(Socket, Streams, Flow) ->
                                                        headers
                                                end,
                                                case ContinuationType of
-                                                   none ->
-                                                       F(S, St, false, Decoder);
                                                    _ ->
                                                        Frames = case ?IS_FLAG((Header#frame_header.flags), ?FLAG_END_HEADERS) of
                                                                     true ->
