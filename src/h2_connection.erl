@@ -1214,11 +1214,7 @@ send_settings(SettingsToSend,
 -spec send_ack_timeout({reference(), settings()}) -> pid().
 send_ack_timeout(SS) ->
     Self = self(),
-    SendAck = fun() ->
-                  timer:sleep(5000),
-                  gen_statem:cast(Self, {check_settings_ack,SS})
-              end,
-    spawn_link(SendAck).
+    erlang:send_after(5000, Self, {check_settings_ack,SS}).
 
 %% private socket handling
 
