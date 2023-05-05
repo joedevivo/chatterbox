@@ -1189,295 +1189,293 @@ spawn_data_receiver(Socket, Streams, Flow) ->
     h2_stream_set:set_socket_recv_window_size(?DEFAULT_INITIAL_WINDOW_SIZE, Streams),
     h2_stream_set:set_socket_send_window_size(?DEFAULT_INITIAL_WINDOW_SIZE, Streams),
     Type = h2_stream_set:stream_set_type(Streams),
-    {CallbackMod, CallbackOpts} = h2_stream_set:get_callback(Streams),
     ConnDetails = get('__h2_connection_details'),
     spawn_link(fun() ->
                        put('__h2_connection_details', ConnDetails),
-                       fun F(S, St, First, Decoder) ->
-                               case h2_frame:read(S, infinity) of
-                                   {error, closed} ->
-                                       Connection ! socket_closed(S);
-                                   {error, Reason} ->
-                                       Connection ! socket_error(S, Reason);
-                                   {stream_error, 0, Code} ->
-                                       %% Remaining Bytes don't matter, we're closing up shop.
-                                       go_away_(Code, <<"stream error">>, S, St),
-                                       Connection ! {go_away, Code};
-                                   {stream_error, StreamId, Code} ->
-                                       Stream = h2_stream_set:get(StreamId, St),
-                                       rst_stream__(Stream, Code, S),
-                                       F(S, St, false, Decoder);
-                                   {#frame_header{length=L} = Header, Payload} = Frame ->
-                                       %% TODO move some of the cases of route_frame into here
-                                       %% so we can send frames directly to the stream pids
-                                       StreamId = Header#frame_header.stream_id,
-                                       #settings{max_frame_size=MFS} = h2_stream_set:get_self_settings(St),
-                                       case Header#frame_header.type of
-                                           _ when L > MFS ->
-                                               go_away_(?FRAME_SIZE_ERROR, list_to_binary(io_lib:format("received frame of size ~p over max of ~p", [L, MFS])), S, St),
-                                               Connection ! {go_away, ?FRAME_SIZE_ERROR};
-                                           %% The first frame should be the client settings as per
-                                           %% RFC-7540#3.5
-                                           HType when HType /= ?SETTINGS andalso First ->
-                                               go_away_(?PROTOCOL_ERROR, <<"non settings frame sent first">>, S, St),
-                                               Connection ! {go_away, ?PROTOCOL_ERROR};
-                                           ?SETTINGS ->
-                                               %% we want to handle settings specially here because
-                                               %% of the way they have to be updated
-                                               ok = gen_statem:call(Connection, {settings, Frame}),
-                                               F(S, St, false, Decoder);
-                                           ?DATA ->
-                                               L = Header#frame_header.length,
-                                               case L > h2_stream_set:socket_recv_window_size(St) of
-                                                   true ->
-                                                       go_away_(?FLOW_CONTROL_ERROR, S, St),
-                                                       Connection ! {go_away, ?FLOW_CONTROL_ERROR};
-                                                   false ->
-                                                       Stream = h2_stream_set:get(Header#frame_header.stream_id, Streams),
-
-                                                       case h2_stream_set:type(Stream) of
-                                                           active ->
-                                                               case {
-                                                                 h2_stream_set:recv_window_size(Stream) < L,
-                                                                 Flow,
-                                                                 L > 0
-                                                                } of
-                                                                   {true, _, _} ->
-                                                                       rst_stream__(Stream,
-                                                                                   ?FLOW_CONTROL_ERROR,
-                                                                                   S);
-                                                                   %% If flow control is set to auto, and L > 0, send
-                                                                   %% window updates back to the peer. If L == 0, we're
-                                                                   %% not allowed to send window_updates of size 0, so we
-                                                                   %% hit the next clause
-                                                                   {false, auto, true} ->
-                                                                       %% Make window size great again
-                                                                       h2_frame_window_update:send(S,
-                                                                                                   L, Header#frame_header.stream_id),
-                                                                       %send_window_update(Connection, L),
-                                                                       h2_stream_set:decrement_socket_recv_window(L, St),
-                                                                       recv_data(Stream, Frame),
-                                                                       h2_frame_window_update:send(S, L, 0),
-                                                                       h2_stream_set:increment_socket_recv_window(L, St),
-                                                                       F(S, St, false, Decoder);
-                                                                   %% Either
-                                                                   %% {false, auto, true} or
-                                                                   %% {false, manual, _DoesntMatter}
-                                                                   _Tried ->
-                                                                       recv_data(Stream, Frame),
-                                                                       h2_stream_set:decrement_socket_recv_window(L, St),
-                                                                       {ok, ok} = h2_stream_set:update(Header#frame_header.stream_id,
-                                                                                            fun(Str) ->
-                                                                                                    {h2_stream_set:decrement_recv_window(L, Str), ok}
-                                                                                            end,
-                                                                         Streams),
-                                                                       F(S, St, false, Decoder)
-                                                               end;
-                                                           StreamType ->
-                                                               go_away_(?PROTOCOL_ERROR, list_to_binary(io_lib:format("data on ~p stream ~p", [StreamType, Header#frame_header.stream_id])), S, St),
-                                                               Connection ! {go_away, ?PROTOCOL_ERROR}
-                                                       end
-                                               end;
-                                           ?HEADERS when Type == server, StreamId rem 2 == 0 ->
-                                               go_away_(?PROTOCOL_ERROR, <<"Headers on even streamid on server">>, S, St),
-                                               Connection ! {go_away, ?PROTOCOL_ERROR};
-                                           ?HEADERS when Type == server ->
-                                               Stream0 = h2_stream_set:get(StreamId, Streams),
-                                               ContinuationType =
-                                               case h2_stream_set:type(Stream0) of
-                                                   idle ->
-                                                       case
-                                                           h2_stream_set:new_stream(
-                                                             StreamId,
-                                                             Connection,
-                                                             CallbackMod,
-                                                             CallbackOpts,
-                                                             Streams) of
-                                                           {error, ErrorCode, NewStream} ->
-                                                               rst_stream__(NewStream, ErrorCode, S),
-                                                               F(S, St, false, Decoder);
-                                                           {_, _, _NewStreams} ->
-                                                               headers
-                                                       end;
-                                                   active ->
-                                                       trailers;
-                                                   _ ->
-                                                       headers
-                                               end,
-                                               case ContinuationType of
-                                                   _ ->
-                                                       Frames = case ?IS_FLAG((Header#frame_header.flags), ?FLAG_END_HEADERS) of
-                                                                    true ->
-                                                                        %% complete headers frame, just do it
-                                                                        [Frame];
-                                                                    false ->
-                                                                        read_continuations(Connection, S, StreamId, St, [Frame])
-                                                                end,
-                                                       HeadersBin = h2_frame_headers:from_frames(Frames),
-                                                       case hpack:decode(HeadersBin, Decoder) of
-                                                           {error, compression_error} ->
-                                                               go_away_(?COMPRESSION_ERROR, S, St),
-                                                               Connection ! {go_away, ?COMPRESSION_ERROR};
-                                                           {ok, {Headers, NewDecoder}} ->
-                                                               Stream = h2_stream_set:get(StreamId, St),
-                                                               %% always headers or trailers!
-                                                               recv_h_(Stream, S, Headers),
-                                                               case ?IS_FLAG((Header#frame_header.flags), ?FLAG_END_STREAM) of
-                                                                   true ->
-                                                                       recv_es_(Stream, S);
-                                                                   false ->
-                                                                       ok
-                                                               end,
-                                                               F(S, St, false, NewDecoder)
-                                                       end
-                                               end;
-                                           ?HEADERS when Type == client ->
-                                               Frames = case ?IS_FLAG((Header#frame_header.flags), ?FLAG_END_HEADERS) of
-                                                            true ->
-                                                                %% complete headers frame, just do it
-                                                                [Frame];
-                                                            false ->
-                                                                read_continuations(Connection, S, StreamId, St, [Frame])
-                                                        end,
-                                               HeadersBin = h2_frame_headers:from_frames(Frames),
-                                               case hpack:decode(HeadersBin, Decoder) of
-                                                   {error, compression_error} ->
-                                                       go_away_(?COMPRESSION_ERROR, S, St),
-                                                       Connection ! {go_away, ?COMPRESSION_ERROR};
-                                                   {ok, {Headers, NewDecoder}} ->
-                                                       Stream = h2_stream_set:get(StreamId, St),
-                                                       %% always headers or trailers!
-                                                       recv_h_(Stream, S, Headers),
-                                                       case ?IS_FLAG((Header#frame_header.flags), ?FLAG_END_STREAM) of
-                                                           true ->
-                                                               recv_es_(Stream, S);
-                                                           false ->
-                                                               ok
-                                                       end,
-                                                       F(S, St, false, NewDecoder)
-                                               end;
-                                           ?PRIORITY when StreamId == 0 ->
-                                               go_away_(?PROTOCOL_ERROR, <<"set priority on stream 0">>, S, St),
-                                               Connection ! {go_away, ?PROTOCOL_ERROR};
-                                           ?PRIORITY ->
-                                               %% seems unimplemented?
-                                               F(S, St, false, Decoder);
-                                           ?RST_STREAM when StreamId == 0 ->
-                                               go_away_(?PROTOCOL_ERROR, <<"RST on stream 0">>, S, St),
-                                               Connection ! {go_away, ?PROTOCOL_ERROR};
-                                           ?RST_STREAM ->
-                                               Stream = h2_stream_set:get(StreamId, St),
-                                               %% TODO: anything with this?
-                                               %% EC = h2_frame_rst_stream:error_code(Payload),
-                                               case h2_stream_set:type(Stream) of
-                                                   idle ->
-                                                       go_away_(?PROTOCOL_ERROR, <<"RST on idle stream">>, S, St),
-                                                       Connection ! {go_away, ?PROTOCOL_ERROR};
-                                                   _Stream ->
-                                                       %% TODO: RST_STREAM support
-                                                       F(S, St, false, Decoder)
-                                               end;
-                                           ?PING when StreamId /= 0 ->
-                                               go_away_(?PROTOCOL_ERROR, <<"ping on stream /= 0">>, S, St),
-                                               Connection ! {go_away, ?PROTOCOL_ERROR};
-                                           ?PING when Header#frame_header.length /= 8 ->
-                                               go_away_(?FRAME_SIZE_ERROR, <<"Header length is not 8">>, S, St),
-                                               Connection ! {go_away, ?FRAME_SIZE_ERROR};
-                                           ?PING when ?NOT_FLAG((Header#frame_header.flags), ?FLAG_ACK) ->
-                                               Ack = h2_frame_ping:ack(Payload),
-                                               sock:send(S, h2_frame:to_binary(Ack)),
-                                               F(S, St, false, Decoder);
-                                           ?PUSH_PROMISE when Type == server ->
-                                               go_away_(?PROTOCOL_ERROR, <<"push_promise sent to server">>, S, St),
-                                               Connection ! {go_away, ?PROTOCOL_ERROR};
-                                           ?PUSH_PROMISE when Type == client ->
-                                               PSID = h2_frame_push_promise:promised_stream_id(Payload),
-                                               Old = h2_stream_set:get(StreamId, Streams),
-                                               NotifyPid = h2_stream_set:notify_pid(Old),
-                                               h2_stream_set:new_stream(
-                                                 PSID,
-                                                 NotifyPid,
-                                                 CallbackMod,
-                                                 CallbackOpts,
-                                                 Streams),
-
-                                               Frames = case ?IS_FLAG((Header#frame_header.flags), ?FLAG_END_HEADERS) of
-                                                            true ->
-                                                                %% complete headers frame, just do it
-                                                                [Frame];
-                                                            false ->
-                                                                read_continuations(Connection, S, StreamId, St, [Frame])
-                                                        end,
-                                               PromiseBin = h2_frame_headers:from_frames(Frames),
-                                               case hpack:decode(PromiseBin, Decoder) of
-                                                   {error, compression_error} ->
-                                                       go_away_(?COMPRESSION_ERROR, S, St),
-                                                       Connection ! {go_away, ?COMPRESSION_ERROR};
-                                                   {ok, {Promise, NewDecoder}} ->
-
-                                                       New = h2_stream_set:get(PSID, Streams),
-                                                       recv_pp(New, Promise),
-
-                                                       case ?IS_FLAG((Header#frame_header.flags), ?FLAG_END_STREAM) of
-                                                           true ->
-                                                               recv_es_(Old, S);
-                                                           false ->
-                                                               ok
-                                                       end,
-
-                                                       F(S, St, false, NewDecoder)
-                                               end;
-                                           ?WINDOW_UPDATE when StreamId == 0 ->
-                                               WSI = h2_frame_window_update:size_increment(Payload),
-                                               NewSendWindow = h2_stream_set:increment_socket_send_window(WSI, St),
-                                               case NewSendWindow > 2147483647 of
-                                                   true ->
-                                                       go_away_(?FLOW_CONTROL_ERROR, <<"stream 0 window update exceeded limit">>, S, St),
-                                                       Connection ! {go_away, ?FLOW_CONTROL_ERROR};
-                                                   false ->
-                                                       %% TODO: Priority Sort! Right now, it's just sorting on
-                                                       %% lowest stream_id first
-                                                       %Streams = h2_stream_set:sort(Conn#connection.streams),
-
-                                                       h2_stream_set:send_all_we_can(
-                                                         St
-                                                        ),
-                                                       F(S, St, false, Decoder)
-                                               end;
-                                           ?WINDOW_UPDATE ->
-                                               WSI = h2_frame_window_update:size_increment(Payload),
-                                               Stream0 = h2_stream_set:get(StreamId, St),
-                                               case h2_stream_set:type(Stream0) of
-                                                   idle ->
-                                                       go_away_(?PROTOCOL_ERROR, list_to_binary(io_lib:format("window update on idle stream ~p", [StreamId])), S, St),
-                                                       Connection ! {go_away, ?PROTOCOL_ERROR};
-                                                   closed ->
-                                                       rst_stream__(Stream0, ?STREAM_CLOSED, S),
-                                                       F(S, St, false, Decoder);
-                                                   active ->
-                                                       NewSSWS = h2_stream_set:send_window_size(Stream0)+WSI,
-
-                                                       case NewSSWS > 2147483647 of
-                                                           true ->
-                                                               rst_stream__(Stream0, ?FLOW_CONTROL_ERROR, S);
-                                                           false ->
-                                                               h2_stream_set:send_what_we_can(
-                                                                 StreamId,
-                                                                 fun(Stream) ->
-                                                                         h2_stream_set:increment_send_window_size(WSI, Stream)
-                                                                 end, St),
-                                                               F(S, St, false, Decoder)
-                                                       end
-                                               end;
-                                           _ ->
-                                               %% let the connection process handle anything else
-                                               %% which is only PING acks and GOAWAYs
-                                               gen_statem:call(Connection, {frame, Frame}),
-                                               F(S, St, false, Decoder)
-                                       end
-                               end
-                       end(Socket, Streams, true, hpack:new_context())
+                       receive_data(Socket, Streams, Connection, Flow, Type, true, hpack:new_context())
                end).
+
+
+receive_data(Socket, Streams, Connection, Flow, Type, First, Decoder) ->
+    case h2_frame:read(Socket, infinity) of
+        {error, closed} ->
+            Connection ! socket_closed(Socket);
+        {error, Reason} ->
+            Connection ! socket_error(Socket, Reason);
+        {stream_error, 0, Code} ->
+            %% Remaining Bytes don't matter, we're closing up shop.
+            go_away_(Code, <<"stream error">>, Socket, Streams),
+            Connection ! {go_away, Code};
+        {stream_error, StreamId, Code} ->
+            Stream = h2_stream_set:get(StreamId, Streams),
+            rst_stream__(Stream, Code, Socket),
+            receive_data(Socket, Streams, Connection, Flow, Type, First, Decoder);
+        {#frame_header{length=L} = Header, Payload} = Frame ->
+            %% TODO move some of the cases of route_frame into here
+            %% so we can send frames directly to the stream pids
+            StreamId = Header#frame_header.stream_id,
+            #settings{max_frame_size=MFS} = h2_stream_set:get_self_settings(Streams),
+            case Header#frame_header.type of
+                _ when L > MFS ->
+                    go_away_(?FRAME_SIZE_ERROR, list_to_binary(io_lib:format("received frame of size ~p over max of ~p", [L, MFS])), Socket, Streams),
+                    Connection ! {go_away, ?FRAME_SIZE_ERROR};
+                %% The first frame should be the client settings as per
+                %% RFC-7540#3.5
+                HType when HType /= ?SETTINGS andalso First ->
+                    go_away_(?PROTOCOL_ERROR, <<"non settings frame sent first">>, Socket, Streams),
+                    Connection ! {go_away, ?PROTOCOL_ERROR};
+                ?SETTINGS ->
+                    %% we want to handle settings specially here because
+                    %% of the way they have to be updated
+                    ok = gen_statem:call(Connection, {settings, Frame}),
+                    receive_data(Socket, Streams, Connection, Flow, Type, false, Decoder);
+                ?DATA ->
+                    case L > h2_stream_set:socket_recv_window_size(Streams) of
+                        true ->
+                            go_away_(?FLOW_CONTROL_ERROR, Socket, Streams),
+                            Connection ! {go_away, ?FLOW_CONTROL_ERROR};
+                        false ->
+                            Stream = h2_stream_set:get(Header#frame_header.stream_id, Streams),
+
+                            case h2_stream_set:type(Stream) of
+                                active ->
+                                    case {
+                                      h2_stream_set:recv_window_size(Stream) < L,
+                                      Flow,
+                                      L > 0
+                                     } of
+                                        {true, _, _} ->
+                                            rst_stream__(Stream,
+                                                         ?FLOW_CONTROL_ERROR,
+                                                         Socket);
+                                        %% If flow control is set to auto, and L > 0, send
+                                        %% window updates back to the peer. If L == 0, we're
+                                        %% not allowed to send window_updates of size 0, so we
+                                        %% hit the next clause
+                                        {false, auto, true} ->
+                                            %% Make window size great again
+                                            h2_frame_window_update:send(Socket,
+                                                                        L, Header#frame_header.stream_id),
+                                            %send_window_update(Connection, L),
+                                            h2_stream_set:decrement_socket_recv_window(L, Streams),
+                                            recv_data(Stream, Frame),
+                                            h2_frame_window_update:send(Socket, L, 0),
+                                            h2_stream_set:increment_socket_recv_window(L, Streams),
+                                            receive_data(Socket, Streams, Connection, Flow, Type, false, Decoder);
+                                        %% Either
+                                        %% {false, auto, true} or
+                                        %% {false, manual, _DoesntMatter}
+                                        _Tried ->
+                                            recv_data(Stream, Frame),
+                                            h2_stream_set:decrement_socket_recv_window(L, Streams),
+                                            {ok, ok} = h2_stream_set:update(Header#frame_header.stream_id,
+                                                                            fun(Str) ->
+                                                                                    {h2_stream_set:decrement_recv_window(L, Str), ok}
+                                                                            end,
+                                                                            Streams),
+                                            receive_data(Socket, Streams, Connection, Flow, Type, false, Decoder)
+                                    end;
+                                StreamType ->
+                                    go_away_(?PROTOCOL_ERROR, list_to_binary(io_lib:format("data on ~p stream ~p", [StreamType, Header#frame_header.stream_id])), Socket, Streams),
+                                    Connection ! {go_away, ?PROTOCOL_ERROR}
+                            end
+                    end;
+                ?HEADERS when Type == server, StreamId rem 2 == 0 ->
+                    go_away_(?PROTOCOL_ERROR, <<"Headers on even streamid on server">>, Socket, Streams),
+                    Connection ! {go_away, ?PROTOCOL_ERROR};
+                ?HEADERS when Type == server ->
+                    Stream0 = h2_stream_set:get(StreamId, Streams),
+                    ContinuationType =
+                    case h2_stream_set:type(Stream0) of
+                        idle ->
+                            {CallbackMod, CallbackOpts} = h2_stream_set:get_callback(Streams),
+                            case
+                                h2_stream_set:new_stream(
+                                  StreamId,
+                                  Connection,
+                                  CallbackMod,
+                                  CallbackOpts,
+                                  Streams) of
+                                {error, ErrorCode, NewStream} ->
+                                    rst_stream__(NewStream, ErrorCode, Socket),
+                                    receive_data(Socket, Streams, Connection, Flow, Type, false, Decoder);
+                                {_, _, _NewStreams} ->
+                                    headers
+                            end;
+                        active ->
+                            trailers;
+                        _ ->
+                            headers
+                    end,
+                    case ContinuationType of
+                        _ ->
+                            Frames = case ?IS_FLAG((Header#frame_header.flags), ?FLAG_END_HEADERS) of
+                                         true ->
+                                             %% complete headers frame, just do it
+                                             [Frame];
+                                         false ->
+                                             read_continuations(Connection, Socket, StreamId, Streams, [Frame])
+                                     end,
+                            HeadersBin = h2_frame_headers:from_frames(Frames),
+                            case hpack:decode(HeadersBin, Decoder) of
+                                {error, compression_error} ->
+                                    go_away_(?COMPRESSION_ERROR, Socket, Streams),
+                                    Connection ! {go_away, ?COMPRESSION_ERROR};
+                                {ok, {Headers, NewDecoder}} ->
+                                    Stream = h2_stream_set:get(StreamId, Streams),
+                                    %% always headers or trailers!
+                                    recv_h_(Stream, Socket, Headers),
+                                    case ?IS_FLAG((Header#frame_header.flags), ?FLAG_END_STREAM) of
+                                        true ->
+                                            recv_es_(Stream, Socket);
+                                        false ->
+                                            ok
+                                    end,
+                                    receive_data(Socket, Streams, Connection, Flow, Type, false, NewDecoder)
+                            end
+                    end;
+                ?HEADERS when Type == client ->
+                    Frames = case ?IS_FLAG((Header#frame_header.flags), ?FLAG_END_HEADERS) of
+                                 true ->
+                                     %% complete headers frame, just do it
+                                     [Frame];
+                                 false ->
+                                     read_continuations(Connection, Socket, StreamId, Streams, [Frame])
+                             end,
+                    HeadersBin = h2_frame_headers:from_frames(Frames),
+                    case hpack:decode(HeadersBin, Decoder) of
+                        {error, compression_error} ->
+                            go_away_(?COMPRESSION_ERROR, Socket, Streams),
+                            Connection ! {go_away, ?COMPRESSION_ERROR};
+                        {ok, {Headers, NewDecoder}} ->
+                            Stream = h2_stream_set:get(StreamId, Streams),
+                            %% always headers or trailers!
+                            recv_h_(Stream, Socket, Headers),
+                            case ?IS_FLAG((Header#frame_header.flags), ?FLAG_END_STREAM) of
+                                true ->
+                                    recv_es_(Stream, Socket);
+                                false ->
+                                    ok
+                            end,
+                            receive_data(Socket, Streams, Connection, Flow, Type, false, NewDecoder)
+                    end;
+                ?PRIORITY when StreamId == 0 ->
+                    go_away_(?PROTOCOL_ERROR, <<"set priority on stream 0">>, Socket, Streams),
+                    Connection ! {go_away, ?PROTOCOL_ERROR};
+                ?PRIORITY ->
+                    %% seems unimplemented?
+                    receive_data(Socket, Streams, Connection, Flow, Type, false, Decoder);
+                ?RST_STREAM when StreamId == 0 ->
+                    go_away_(?PROTOCOL_ERROR, <<"RST on stream 0">>, Socket, Streams),
+                    Connection ! {go_away, ?PROTOCOL_ERROR};
+                ?RST_STREAM ->
+                    Stream = h2_stream_set:get(StreamId, Streams),
+                    %% TODO: anything with this?
+                    %% EC = h2_frame_rst_stream:error_code(Payload),
+                    case h2_stream_set:type(Stream) of
+                        idle ->
+                            go_away_(?PROTOCOL_ERROR, <<"RST on idle stream">>, Socket, Streams),
+                            Connection ! {go_away, ?PROTOCOL_ERROR};
+                        _Stream ->
+                            %% TODO: RST_STREAM support
+                            receive_data(Socket, Streams, Connection, Flow, Type, false, Decoder)
+                    end;
+                ?PING when StreamId /= 0 ->
+                    go_away_(?PROTOCOL_ERROR, <<"ping on stream /= 0">>, Socket, Streams),
+                    Connection ! {go_away, ?PROTOCOL_ERROR};
+                ?PING when Header#frame_header.length /= 8 ->
+                    go_away_(?FRAME_SIZE_ERROR, <<"Header length is not 8">>, Socket, Streams),
+                    Connection ! {go_away, ?FRAME_SIZE_ERROR};
+                ?PING when ?NOT_FLAG((Header#frame_header.flags), ?FLAG_ACK) ->
+                    Ack = h2_frame_ping:ack(Payload),
+                    sock:send(Socket, h2_frame:to_binary(Ack)),
+                    receive_data(Socket, Streams, Connection, Flow, Type, false, Decoder);
+                ?PUSH_PROMISE when Type == server ->
+                    go_away_(?PROTOCOL_ERROR, <<"push_promise sent to server">>, Socket, Streams),
+                    Connection ! {go_away, ?PROTOCOL_ERROR};
+                ?PUSH_PROMISE when Type == client ->
+                    PSID = h2_frame_push_promise:promised_stream_id(Payload),
+                    Old = h2_stream_set:get(StreamId, Streams),
+                    NotifyPid = h2_stream_set:notify_pid(Old),
+                    {CallbackMod, CallbackOpts} = h2_stream_set:get_callback(Streams),
+                    h2_stream_set:new_stream(
+                      PSID,
+                      NotifyPid,
+                      CallbackMod,
+                      CallbackOpts,
+                      Streams),
+
+                    Frames = case ?IS_FLAG((Header#frame_header.flags), ?FLAG_END_HEADERS) of
+                                 true ->
+                                     %% complete headers frame, just do it
+                                     [Frame];
+                                 false ->
+                                     read_continuations(Connection, Socket, StreamId, Streams, [Frame])
+                             end,
+                    PromiseBin = h2_frame_headers:from_frames(Frames),
+                    case hpack:decode(PromiseBin, Decoder) of
+                        {error, compression_error} ->
+                            go_away_(?COMPRESSION_ERROR, Socket, Streams),
+                            Connection ! {go_away, ?COMPRESSION_ERROR};
+                        {ok, {Promise, NewDecoder}} ->
+
+                            New = h2_stream_set:get(PSID, Streams),
+                            recv_pp(New, Promise),
+
+                            case ?IS_FLAG((Header#frame_header.flags), ?FLAG_END_STREAM) of
+                                true ->
+                                    recv_es_(Old, Socket);
+                                false ->
+                                    ok
+                            end,
+
+                            receive_data(Socket, Streams, Connection, Flow, Type, false, NewDecoder)
+                    end;
+                ?WINDOW_UPDATE when StreamId == 0 ->
+                    WSI = h2_frame_window_update:size_increment(Payload),
+                    NewSendWindow = h2_stream_set:increment_socket_send_window(WSI, Streams),
+                    case NewSendWindow > 2147483647 of
+                        true ->
+                            go_away_(?FLOW_CONTROL_ERROR, <<"stream 0 window update exceeded limit">>, Socket, Streams),
+                            Connection ! {go_away, ?FLOW_CONTROL_ERROR};
+                        false ->
+                            %% TODO: Priority Sort! Right now, it's just sorting on
+                            %% lowest stream_id first
+                            h2_stream_set:send_all_we_can(Streams),
+                            receive_data(Socket, Streams, Connection, Flow, Type, false, Decoder)
+                    end;
+                ?WINDOW_UPDATE ->
+                    WSI = h2_frame_window_update:size_increment(Payload),
+                    Stream0 = h2_stream_set:get(StreamId, Streams),
+                    case h2_stream_set:type(Stream0) of
+                        idle ->
+                            go_away_(?PROTOCOL_ERROR, list_to_binary(io_lib:format("window update on idle stream ~p", [StreamId])), Socket, Streams),
+                            Connection ! {go_away, ?PROTOCOL_ERROR};
+                        closed ->
+                            rst_stream__(Stream0, ?STREAM_CLOSED, Socket),
+                            receive_data(Socket, Streams, Connection, Flow, Type, false, Decoder);
+                        active ->
+                            NewSSWS = h2_stream_set:send_window_size(Stream0)+WSI,
+
+                            case NewSSWS > 2147483647 of
+                                true ->
+                                    rst_stream__(Stream0, ?FLOW_CONTROL_ERROR, Socket);
+                                false ->
+                                    h2_stream_set:send_what_we_can(
+                                      StreamId,
+                                      fun(Stream) ->
+                                              h2_stream_set:increment_send_window_size(WSI, Stream)
+                                      end, Streams),
+                                    receive_data(Socket, Streams, Connection, Flow, Type, false, Decoder)
+                            end
+                    end;
+                _ ->
+                    %% let the connection process handle anything else
+                    %% which is only PING acks and GOAWAYs
+                    gen_statem:call(Connection, {frame, Frame}),
+                    receive_data(Socket, Streams, Connection, Flow, Type, false, Decoder)
+            end
+    end.
 
 read_continuations(Connection, Socket, StreamId, Streams, Acc) ->
     case h2_frame:read(Socket, infinity) of
