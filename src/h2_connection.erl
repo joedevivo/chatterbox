@@ -57,7 +57,6 @@
          listen/3,
          handshake/3,
          connected/3,
-         continuation/3,
          closing/3
         ]).
 
@@ -74,25 +73,12 @@
           server_settings = #settings{} :: settings()
          }).
 
--record(continuation_state, {
-          stream_id                 :: stream_id(),
-          promised_id = undefined   :: undefined | stream_id(),
-          frames      = []          :: [h2_frame:frame()],
-          type                      :: headers | push_promise | trailers,
-          end_stream  = false       :: boolean(),
-          end_headers = false       :: boolean()
-}).
-
 -record(connection, {
           type = undefined :: client | server | undefined,
           receiver :: pid() | undefined,
-          ssl_options = [],
-          listen_ref :: non_neg_integer() | undefined,
           socket = undefined :: sock:socket(),
           settings_sent = queue:new() :: queue:queue(),
           streams :: h2_stream_set:stream_set(),
-          buffer = empty :: empty | {binary, binary()} | {frame, h2_frame:header(), binary()},
-          continuation = undefined :: undefined | #continuation_state{},
           pings = #{} :: #{binary() => {pid(), non_neg_integer()}},
           %% if true then set a stream as garbage in the stream_set
           garbage_on_end = false :: boolean()
@@ -495,26 +481,6 @@ connected(Event, {frame, Frame},
 connected(Type, Msg, State) ->
     handle_event(Type, Msg, State).
 
-%% The continuation state in entered after receiving a HEADERS frame
-%% with no ?END_HEADERS flag set, we're locked waiting for contiunation
-%% frames on the same stream to preserve the decoding context state
-%continuation(Event, {frame,
- %             {#frame_header{
- %                stream_id=StreamId,
- %                 type=?CONTINUATION
- %                }, _}=Frame},
- %            #connection{
- %               continuation = #continuation_state{
- %                                 stream_id = StreamId
- %                                }
- %              }=Conn) ->
- %   route_frame(Event, Frame, Conn);
-continuation(Event, {frame, _}, Conn) ->
-    %% got a frame that's not part of the continuation
-    go_away(Event, ?PROTOCOL_ERROR, <<"continuation violated, server">>, Conn);
-continuation(Type, Msg, State) ->
-    handle_event(Type, Msg, State).
-
 %% The closing state should deal with frames on the wire still, I
 %% think. But we should just close it up now.
 closing(_, _Message,
@@ -536,7 +502,7 @@ closing(Type, Msg, State) ->
         PeerSettings :: settings(),
         connection()) ->
     {next_state,
-     connected | continuation | closing ,
+     connected | closing ,
      connection()}.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
