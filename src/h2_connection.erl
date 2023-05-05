@@ -1260,8 +1260,7 @@ receive_data(Socket, Streams, Connection, Flow, Type, First, Decoder) ->
                                             h2_stream_set:decrement_socket_recv_window(L, Streams),
                                             recv_data(Stream, Frame),
                                             h2_frame_window_update:send(Socket, L, 0),
-                                            h2_stream_set:increment_socket_recv_window(L, Streams),
-                                            receive_data(Socket, Streams, Connection, Flow, Type, false, Decoder);
+                                            h2_stream_set:increment_socket_recv_window(L, Streams);
                                         %% Either
                                         %% {false, auto, true} or
                                         %% {false, manual, _DoesntMatter}
@@ -1272,9 +1271,9 @@ receive_data(Socket, Streams, Connection, Flow, Type, First, Decoder) ->
                                                                             fun(Str) ->
                                                                                     {h2_stream_set:decrement_recv_window(L, Str), ok}
                                                                             end,
-                                                                            Streams),
-                                            receive_data(Socket, Streams, Connection, Flow, Type, false, Decoder)
-                                    end;
+                                                                            Streams)
+                                    end,
+                                    receive_data(Socket, Streams, Connection, Flow, Type, false, Decoder);
                                 StreamType ->
                                     go_away_(?PROTOCOL_ERROR, list_to_binary(io_lib:format("data on ~p stream ~p", [StreamType, Header#frame_header.stream_id])), Socket, Streams),
                                     Connection ! {go_away, ?PROTOCOL_ERROR}
@@ -1298,7 +1297,7 @@ receive_data(Socket, Streams, Connection, Flow, Type, First, Decoder) ->
                                   Streams) of
                                 {error, ErrorCode, NewStream} ->
                                     rst_stream__(NewStream, ErrorCode, Socket),
-                                    receive_data(Socket, Streams, Connection, Flow, Type, false, Decoder);
+                                    none;
                                 {_, _, _NewStreams} ->
                                     headers
                             end;
@@ -1308,6 +1307,8 @@ receive_data(Socket, Streams, Connection, Flow, Type, First, Decoder) ->
                             headers
                     end,
                     case ContinuationType of
+                        none ->
+                            receive_data(Socket, Streams, Connection, Flow, Type, false, Decoder);
                         _ ->
                             Frames = case ?IS_FLAG((Header#frame_header.flags), ?FLAG_END_HEADERS) of
                                          true ->
@@ -1384,7 +1385,7 @@ receive_data(Socket, Streams, Connection, Flow, Type, First, Decoder) ->
                     go_away_(?PROTOCOL_ERROR, <<"ping on stream /= 0">>, Socket, Streams),
                     Connection ! {go_away, ?PROTOCOL_ERROR};
                 ?PING when Header#frame_header.length /= 8 ->
-                    go_away_(?FRAME_SIZE_ERROR, <<"Header length is not 8">>, Socket, Streams),
+                    go_away_(?FRAME_SIZE_ERROR, <<"Ping packet length is not 8">>, Socket, Streams),
                     Connection ! {go_away, ?FRAME_SIZE_ERROR};
                 ?PING when ?NOT_FLAG((Header#frame_header.flags), ?FLAG_ACK) ->
                     Ack = h2_frame_ping:ack(Payload),
@@ -1459,7 +1460,8 @@ receive_data(Socket, Streams, Connection, Flow, Type, First, Decoder) ->
 
                             case NewSSWS > 2147483647 of
                                 true ->
-                                    rst_stream__(Stream0, ?FLOW_CONTROL_ERROR, Socket);
+                                    rst_stream__(Stream0, ?FLOW_CONTROL_ERROR, Socket),
+                                    receive_data(Socket, Streams, Connection, Flow, Type, false, Decoder);
                                 false ->
                                     h2_stream_set:send_what_we_can(
                                       StreamId,
