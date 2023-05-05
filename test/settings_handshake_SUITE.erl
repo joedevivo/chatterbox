@@ -38,7 +38,7 @@ times_out_on_no_ack_of_server_settings(Config) ->
 
     {ok, Socket} = Transport:connect("localhost", Port, Options),
 
-    Transport:send(Socket, <<?PREFACE>>),
+    Transport:send(Socket, ?PREFACE),
 
     %% Now send client settings so the problem becomes that we do not ack
     ClientSettings = #settings{},
@@ -82,7 +82,7 @@ protocol_error_on_never_send_client_settings(Config) ->
 
     {ok, Socket} = Transport:connect("localhost", Port, Options),
 
-    Transport:send(Socket, <<?PREFACE>>),
+    Transport:send(Socket, ?PREFACE),
 
     %% This is the settings frame. Do not ACK
     {ok, _Settings1 = <<0,0,L,4,0,0,0,0,0>>} = Transport:recv(Socket, 9, 1000),

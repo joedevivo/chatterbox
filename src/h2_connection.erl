@@ -203,7 +203,7 @@ init({client, Transport, Host, Port, SSLOptions, Http2Settings, ConnectionSettin
                 0 -> ok;
                 _ -> sock:setopts({Transport, Socket}, [{raw,6,18,<<TcpUserTimeout:32/native>>}])
             end,
-            Transport:send(Socket, <<?PREFACE>>),
+            Transport:send(Socket, ?PREFACE),
             Flow = application:get_env(chatterbox, client_flow_control, auto),
             CallbackMod = maps:get(stream_callback_mod, ConnectionSettings, undefined),
             CallbackOpts = maps:get(stream_callback_opts, ConnectionSettings, []),
@@ -234,7 +234,7 @@ init({client_ssl_upgrade, Host, Port, InitialMessage, SSLOptions, Http2Settings,
             case ssl:connect(TCP, client_options(ssl, SSLOptions, SocketOptions)) of
                 {ok, Socket} ->
                     ok = ssl:setopts(Socket, [{packet, raw}, binary, {active, false}]),
-                    ssl:send(Socket, <<?PREFACE>>),
+                    ssl:send(Socket, ?PREFACE),
                     CallbackMod = maps:get(stream_callback_mod, ConnectionSettings, undefined),
                     CallbackOpts = maps:get(stream_callback_opts, ConnectionSettings, []),
                     Streams = h2_stream_set:new(client, {ssl, Socket}, CallbackMod, CallbackOpts),
@@ -1565,16 +1565,10 @@ start_http2_server(
 %% We're going to iterate through the preface string until we're done
 %% or hit a mismatch
 accept_preface(Socket) ->
-    accept_preface(Socket, <<?PREFACE>>).
-
-accept_preface(_Socket, <<>>) ->
-    ok;
-accept_preface(Socket, <<Char:8,Rem/binary>>) ->
-    case sock:recv(Socket, 1, 5000) of
-        {ok, <<Char>>} ->
-            accept_preface(Socket, Rem);
-        _E ->
-            sock:close(Socket),
+    case sock:recv(Socket, byte_size(?PREFACE), 5000) of
+        {ok, ?PREFACE} ->
+            ok;
+        _ ->
             {error, invalid_preface}
     end.
 

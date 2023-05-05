@@ -94,7 +94,7 @@
 -type transport() :: gen_tcp | ssl.
 -type socket() :: {gen_tcp, inet:socket()|undefined} | {ssl, ssl:sslsocket()|undefined}.
 
--define(PREFACE, "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n").
+-define(PREFACE, <<"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n">>).
 
 -define(DEFAULT_INITIAL_WINDOW_SIZE, 65535).
 

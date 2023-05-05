@@ -131,7 +131,7 @@ init([]) ->
     {ok, Socket} = Transport:connect(Host, Port, Options),
 
     %% Send the preamble
-    Transport:send(Socket, <<?PREFACE>>),
+    Transport:send(Socket, ?PREFACE),
 
     %% Settings Handshake
     {_SSH, ServerSettings} = h2_frame:read({Transport, Socket}, 1000),
