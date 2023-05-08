@@ -853,6 +853,8 @@ close(#active_stream{
 -spec update_all_recv_windows(Delta :: integer(),
                               Streams:: stream_set()) ->
                                      stream_set().
+update_all_recv_windows(0, Streams) ->
+    Streams;
 update_all_recv_windows(Delta, Streams) ->
 
     ets:select_replace(Streams#stream_set.table,
@@ -864,6 +866,8 @@ update_all_recv_windows(Delta, Streams) ->
 -spec update_all_send_windows(Delta :: integer(),
                               Streams:: stream_set()) ->
                                      stream_set().
+update_all_send_windows(0, Streams) ->
+    Streams;
 update_all_send_windows(Delta, Streams) ->
     ets:select_replace(Streams#stream_set.table,
       ets:fun2ms(fun(S=#active_stream{send_window_size=Size}) ->

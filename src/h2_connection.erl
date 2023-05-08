@@ -1253,14 +1253,23 @@ receive_data(Socket, Streams, Connection, Flow, Type, First, Decoder) ->
                                         %% not allowed to send window_updates of size 0, so we
                                         %% hit the next clause
                                         {false, auto, true} ->
-                                            %% Make window size great again
-                                            h2_frame_window_update:send(Socket,
-                                                                        L, Header#frame_header.stream_id),
+                                            %% Make window size great again if we've used up half our buffer
+                                            #settings{
+                                                  initial_window_size=IWS
+                                                 } = h2_stream_set:get_peer_settings(Streams),
+                                            case {h2_stream_set:decrement_socket_recv_window(L, Streams), IWS div 2} of
+                                                {Rem, Half} when Rem < Half ->
+                                                    %% refill the window
+                                                    h2_frame_window_update:send(Socket, IWS - Rem, 0),
+                                                    h2_stream_set:increment_socket_recv_window(IWS - Rem, Streams);
+                                                _ ->
+                                                    ok
+                                            end,
+
                                             %send_window_update(Connection, L),
-                                            h2_stream_set:decrement_socket_recv_window(L, Streams),
                                             recv_data(Stream, Frame),
-                                            h2_frame_window_update:send(Socket, L, 0),
-                                            h2_stream_set:increment_socket_recv_window(L, Streams);
+                                            h2_frame_window_update:send(Socket,
+                                                                        L, Header#frame_header.stream_id);
                                         %% Either
                                         %% {false, auto, true} or
                                         %% {false, manual, _DoesntMatter}
