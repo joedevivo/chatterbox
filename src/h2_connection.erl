@@ -490,6 +490,10 @@ connected(info, actually_send_all_we_can, State) ->
 connected(info, {'DOWN', Ref, process, _, _}, State=#connection{send_all_we_can_timer=Ref}) ->
     NewRef = erlang:send_after(1000, self(), actually_send_all_we_can),
     {keep_state, State#connection{send_all_we_can_timer=NewRef}};
+connected(info, send_all_we_can, State) ->
+    %% TODO keep track of how many of these came in while we were waiting/processing
+    %% and use that to decide if we need to immediately schedule another one
+    {keep_state, State};
 connected(Type, Msg, State) ->
     handle_event(Type, Msg, State).
 
