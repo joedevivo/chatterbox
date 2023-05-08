@@ -471,8 +471,12 @@ get_encode_context(StreamSet, Headers) ->
 release_encode_context(_StreamSet, {nolock, _}) ->
     ok;
 release_encode_context(StreamSet, {lock, NewEncoder}) ->
-    1 = ets:select_replace(StreamSet#stream_set.table, [{#context{type=encode_context, context=locked}, [], [{const, #context{type=encode_context, context=NewEncoder}}]}]),
-    ok.
+    try ets:select_replace(StreamSet#stream_set.table, [{#context{type=encode_context, context=locked}, [], [{const, #context{type=encode_context, context=NewEncoder}}]}]) of
+        1 -> ok
+    catch
+        error:badarg ->
+            ok
+    end.
 
 
 -spec get_peer_subset(
@@ -581,7 +585,7 @@ update(StreamId, Fun, StreamSet) ->
                 ignore ->
                     ok;
                 {NewStream, Data} ->
-                    case ets:select_replace(StreamSet#stream_set.table, [{Stream, [], [{const, NewStream}]}]) of
+                    try ets:select_replace(StreamSet#stream_set.table, [{Stream, [], [{const, NewStream}]}]) of
                         1 ->
                             PeerSubset = get_peer_subset(StreamId, StreamSet),
                             case upsert_peer_subset(Stream, NewStream, PeerSubset, StreamSet) of
@@ -593,6 +597,8 @@ update(StreamId, Fun, StreamSet) ->
                         0 ->
                             timer:sleep(1),
                             update(StreamId, Fun, StreamSet)
+                    catch
+                        error:badarg -> ok
                     end
             end
     end.
@@ -857,7 +863,7 @@ update_all_recv_windows(0, Streams) ->
     Streams;
 update_all_recv_windows(Delta, Streams) ->
 
-    ets:select_replace(Streams#stream_set.table,
+    catch ets:select_replace(Streams#stream_set.table,
       ets:fun2ms(fun(S=#active_stream{recv_window_size=Size}) ->
                          S#active_stream{recv_window_size=Size+Delta}
                  end)),
@@ -869,7 +875,7 @@ update_all_recv_windows(Delta, Streams) ->
 update_all_send_windows(0, Streams) ->
     Streams;
 update_all_send_windows(Delta, Streams) ->
-    ets:select_replace(Streams#stream_set.table,
+    catch ets:select_replace(Streams#stream_set.table,
       ets:fun2ms(fun(S=#active_stream{send_window_size=Size}) ->
                          S#active_stream{send_window_size=Size+Delta}
                  end)),
@@ -879,11 +885,14 @@ update_all_send_windows(Delta, Streams) ->
                              Streams :: stream_set()) ->
                                     stream_set().
 update_their_max_active(NewMax, Streams) ->
-    case ets:select_replace(Streams#stream_set.table, ets:fun2ms(fun(#peer_subset{type=theirs}=PS) -> PS#peer_subset{max_active=NewMax} end)) of
+    try ets:select_replace(Streams#stream_set.table, ets:fun2ms(fun(#peer_subset{type=theirs}=PS) -> PS#peer_subset{max_active=NewMax} end)) of
         1 ->
             Streams;
         0 ->
             update_their_max_active(NewMax, Streams)
+    catch
+        error:badarg ->
+            Streams
     end.
 
 get_next_available_stream_id(Streams) ->
@@ -893,11 +902,14 @@ get_next_available_stream_id(Streams) ->
                              Streams :: stream_set()) ->
                                     stream_set().
 update_my_max_active(NewMax, Streams) ->
-    case ets:select_replace(Streams#stream_set.table, ets:fun2ms(fun(#peer_subset{type=mine}=PS) -> PS#peer_subset{max_active=NewMax} end)) of
+    try ets:select_replace(Streams#stream_set.table, ets:fun2ms(fun(#peer_subset{type=mine}=PS) -> PS#peer_subset{max_active=NewMax} end)) of
         1 ->
             Streams;
         0 ->
             update_their_max_active(NewMax, Streams)
+    catch
+        error:badarg ->
+            Streams
     end.
 
 -spec send_all_we_can(Streams :: stream_set()) ->
