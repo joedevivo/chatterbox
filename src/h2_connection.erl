@@ -79,6 +79,7 @@
           socket = undefined :: sock:socket(),
           settings_sent = queue:new() :: queue:queue(),
           streams :: h2_stream_set:stream_set(),
+          send_all_we_can_timer :: reference() | undefined,
           pings = #{} :: #{binary() => {pid(), non_neg_integer()}},
           %% if true then set a stream as garbage in the stream_set
           garbage_on_end = false :: boolean()
@@ -478,6 +479,17 @@ connected(Event, {frame, Frame},
 
     {SelfSettings, PeerSettings} = h2_stream_set:get_settings(Streams),
     route_frame(Event, Frame, SelfSettings, PeerSettings, Conn);
+connected(info, send_all_we_can, State=#connection{send_all_we_can_timer=undefined}) ->
+    Ref = erlang:send_after(1000, self(), actually_send_all_we_can),
+    {keep_state, State#connection{send_all_we_can_timer=Ref}};
+connected(info, actually_send_all_we_can, State) ->
+    {_, Ref} = spawn_monitor(fun() ->
+                          h2_stream_set:send_all_we_can(State#connection.streams)
+                  end),
+    {keep_state, State#connection{send_all_we_can_timer=Ref}};
+connected(info, {'DOWN', Ref, process, _, _}, State=#connection{send_all_we_can_timer=Ref}) ->
+    NewRef = erlang:send_after(1000, self(), actually_send_all_we_can),
+    {keep_state, State#connection{send_all_we_can_timer=NewRef}};
 connected(Type, Msg, State) ->
     handle_event(Type, Msg, State).
 
@@ -1451,7 +1463,8 @@ receive_data(Socket, Streams, Connection, Flow, Type, First, Decoder) ->
                         false ->
                             %% TODO: Priority Sort! Right now, it's just sorting on
                             %% lowest stream_id first
-                            h2_stream_set:send_all_we_can(Streams),
+                            Connection ! send_all_we_can,
+                            %h2_stream_set:send_all_we_can(Streams),
                             receive_data(Socket, Streams, Connection, Flow, Type, false, Decoder)
                     end;
                 ?WINDOW_UPDATE ->
