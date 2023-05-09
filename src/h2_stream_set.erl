@@ -925,7 +925,7 @@ send_all_we_can(Streams) ->
     %% TODO be smarter about where we start off (remember where we last stopped, etc),
     %% inspect priorities, etc
     Last = atomics:get(Streams#stream_set.atomics, ?LAST_SEND_ALL_WE_CAN_STREAM_ID),
-    case ets:select(Streams#stream_set.table, ets:fun2ms(fun(AS=#active_stream{id=Id}) when Id > Last -> AS end), 20) of
+    case ets:select(Streams#stream_set.table, ets:fun2ms(fun(AS=#active_stream{id=Id, queued_data=D, trailers=T}) when Id > Last andalso ((not is_atom(D)) orelse T /= undefined)  -> AS end), 20) of
         '$end_of_table' ->
             ok;
         Res ->
@@ -939,7 +939,7 @@ send_all_we_can(Streams) ->
         true ->
             %% we didn't run out of send window, so now traverse the
             %% streams we have not inspected yet
-            case ets:select(Streams#stream_set.table, ets:fun2ms(fun(AS=#active_stream{id=Id}) when Id =< Last -> AS end), 20) of
+            case ets:select(Streams#stream_set.table, ets:fun2ms(fun(AS=#active_stream{id=Id, queued_data=D, trailers=T}) when Id =< Last andalso ((not is_atom(D)) orelse T /= undefined)  -> AS end), 20) of
                 '$end_of_table' ->
                     ok;
                 Res2 ->
