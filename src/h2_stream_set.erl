@@ -18,6 +18,7 @@
 -define(THEIR_LOWEST_STREAM_ID, 6).
 -define(MY_ACTIVE_COUNT, 7).
 -define(THEIR_ACTIVE_COUNT, 8).
+-define(LAST_SEND_ALL_WE_CAN_STREAM_ID, 9).
 
 -record(
    stream_set,
@@ -25,7 +26,7 @@
      %% Type determines which streams are mine, and which are theirs
      type :: client | server,
 
-     atomics = atomics:new(8, []),
+     atomics = atomics:new(9, []),
 
      socket :: sock:socket(),
 
@@ -239,6 +240,7 @@ new(client, Socket, CallbackMod, CallbackOpts) ->
     atomics:put(StreamSet#stream_set.atomics, ?THEIR_NEXT_AVAILABLE_STREAM_ID, 2),
     atomics:put(StreamSet#stream_set.atomics, ?MY_ACTIVE_COUNT, 0),
     atomics:put(StreamSet#stream_set.atomics, ?THEIR_ACTIVE_COUNT, 0),
+    atomics:put(StreamSet#stream_set.atomics, ?LAST_SEND_ALL_WE_CAN_STREAM_ID, 0),
     %% I'm a client, so mine are always odd numbered
     ets:insert_new(StreamSet#stream_set.table,
                    #peer_subset{
@@ -271,6 +273,7 @@ new(server, Socket, CallbackMod, CallbackOpts) ->
     atomics:put(StreamSet#stream_set.atomics, ?THEIR_NEXT_AVAILABLE_STREAM_ID, 1),
     atomics:put(StreamSet#stream_set.atomics, ?MY_ACTIVE_COUNT, 0),
     atomics:put(StreamSet#stream_set.atomics, ?THEIR_ACTIVE_COUNT, 0),
+    atomics:put(StreamSet#stream_set.atomics, ?LAST_SEND_ALL_WE_CAN_STREAM_ID, 0),
     ets:insert_new(StreamSet#stream_set.table,
                    #peer_subset{
                       type=mine,
@@ -921,12 +924,32 @@ send_all_we_can(Streams) ->
     
     %% TODO be smarter about where we start off (remember where we last stopped, etc),
     %% inspect priorities, etc
-    case ets:select(Streams#stream_set.table, ets:fun2ms(fun(AS=#active_stream{}) -> AS end), 20) of
+    Last = atomics:get(Streams#stream_set.atomics, ?LAST_SEND_ALL_WE_CAN_STREAM_ID),
+    case ets:select(Streams#stream_set.table, ets:fun2ms(fun(AS=#active_stream{id=Id}) when Id > Last -> AS end), 20) of
         '$end_of_table' ->
             ok;
         Res ->
             c_send_what_we_can(MaxFrameSize, Res, Streams)
     end,
+
+
+    Last2 = atomics:get(Streams#stream_set.atomics, ?LAST_SEND_ALL_WE_CAN_STREAM_ID),
+
+    case Last == Last2 of
+        true ->
+            %% we didn't run out of send window, so now traverse the
+            %% streams we have not inspected yet
+            case ets:select(Streams#stream_set.table, ets:fun2ms(fun(AS=#active_stream{id=Id}) when Id =< Last -> AS end), 20) of
+                '$end_of_table' ->
+                    ok;
+                Res2 ->
+                    c_send_what_we_can(MaxFrameSize, Res2, Streams)
+            end;
+        false ->
+            %% we exhausted the send window, so do nothing here
+            ok
+    end,
+
 
     {socket_send_window_size(Streams),
      Streams}.
@@ -966,6 +989,8 @@ c_send_what_we_can(MFS, {[S|Streams], CC}, StreamSet) ->
     case NewSWS =< 0 of
         true ->
             %% If we hit =< 0, done
+            %% track where we stopped
+            atomics:put(StreamSet#stream_set.atomics, ?LAST_SEND_ALL_WE_CAN_STREAM_ID, stream_id(S)),
             NewSWS;
         false ->
             %% Otherwise, try sending on the next stream

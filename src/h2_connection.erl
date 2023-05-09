@@ -80,6 +80,7 @@
           settings_sent = queue:new() :: queue:queue(),
           streams :: h2_stream_set:stream_set(),
           send_all_we_can_timer :: reference() | undefined,
+          missed_send_all_we_can = false :: boolean(),
           pings = #{} :: #{binary() => {pid(), non_neg_integer()}},
           %% if true then set a stream as garbage in the stream_set
           garbage_on_end = false :: boolean()
@@ -480,20 +481,34 @@ connected(Event, {frame, Frame},
     {SelfSettings, PeerSettings} = h2_stream_set:get_settings(Streams),
     route_frame(Event, Frame, SelfSettings, PeerSettings, Conn);
 connected(info, send_all_we_can, State=#connection{send_all_we_can_timer=undefined}) ->
-    Ref = erlang:send_after(1000, self(), actually_send_all_we_can),
+    %% either the connection is new, or we haven't gotten
+    %% a stream 0 window update in a while
+    %% in this case send it immediately
+    Ref = erlang:send_after(0, self(), actually_send_all_we_can),
     {keep_state, State#connection{send_all_we_can_timer=Ref}};
 connected(info, actually_send_all_we_can, State) ->
+    %% time to do the thing, but do it in a spawn so we don't block
+    %% the connection
     {_, Ref} = spawn_monitor(fun() ->
                           h2_stream_set:send_all_we_can(State#connection.streams)
                   end),
     {keep_state, State#connection{send_all_we_can_timer=Ref}};
 connected(info, {'DOWN', Ref, process, _, _}, State=#connection{send_all_we_can_timer=Ref}) ->
-    NewRef = erlang:send_after(1000, self(), actually_send_all_we_can),
-    {keep_state, State#connection{send_all_we_can_timer=NewRef}};
+    %% its done, decide if we need to schedule another one
+    case State#connection.missed_send_all_we_can of
+        true ->
+            %% more window updates came in, schedule another
+            %% send_all_we_can after a period of time
+            NewRef = erlang:send_after(application:get_env(chatterbox, stream_0_coalesce_window_update_time, 500), self(), actually_send_all_we_can),
+            {keep_state, State#connection{send_all_we_can_timer=NewRef, missed_send_all_we_can=false}};
+        false ->
+            %% no more came in, don't bother trying to do anything
+            {keep_state, State#connection{send_all_we_can_timer=undefined}}
+    end;
 connected(info, send_all_we_can, State) ->
-    %% TODO keep track of how many of these came in while we were waiting/processing
+    %% keep track of if any of these came in while we were waiting/processing
     %% and use that to decide if we need to immediately schedule another one
-    {keep_state, State};
+    {keep_state, State#connection{missed_send_all_we_can=true}};
 connected(Type, Msg, State) ->
     handle_event(Type, Msg, State).
 
