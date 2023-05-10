@@ -587,6 +587,9 @@ update(StreamId, Fun, StreamSet) ->
             case Fun(Stream) of
                 ignore ->
                     ok;
+                {Stream, Data} ->
+                    %% stream did not change
+                    {ok, Data};
                 {NewStream, Data} ->
                     try ets:select_replace(StreamSet#stream_set.table, [{Stream, [], [{const, NewStream}]}]) of
                         1 ->

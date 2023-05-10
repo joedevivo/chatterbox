@@ -1302,7 +1302,7 @@ receive_data(Socket, Streams, Connection, Flow, Type, First, Decoder) ->
                                             h2_frame_window_update:send(Socket,
                                                                         L, Header#frame_header.stream_id);
                                         %% Either
-                                        %% {false, auto, true} or
+                                        %% {false, auto, false} or
                                         %% {false, manual, _DoesntMatter}
                                         _Tried ->
                                             recv_data(Stream, Frame),
