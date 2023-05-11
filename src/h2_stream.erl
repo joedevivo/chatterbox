@@ -760,15 +760,16 @@ closed(timeout, _,
         case h2_stream_set:type(Stream) of
             active ->
                 NotifyPid = h2_stream_set:notify_pid(Stream),
-                GarbageOnEnd = false, %% TODO maybe make this work?
+                GarbageOnEnd = h2_stream_set:get_garbage_on_end(Streams),
                 Response =
-                case {Type, GarbageOnEnd} of
-                    {server, _} -> garbage;
-                    {client, false} -> {StreamState#stream_state.response_headers,
-                                        StreamState#stream_state.response_body,
-                                        StreamState#stream_state.response_trailers}
-                                       %{client, true} -> garbage
-                end,
+                    case {Type, GarbageOnEnd} of
+                        {server, _} -> garbage;
+                        {client, true} -> garbage;
+                        {client, false} -> {StreamState#stream_state.response_headers,
+                                            StreamState#stream_state.response_body,
+                                            StreamState#stream_state.response_trailers}
+                        
+                    end,
                 {_NewStream, _NewStreams} =
                 h2_stream_set:close(
                   Stream,

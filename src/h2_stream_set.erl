@@ -38,7 +38,8 @@
      %% Streams initiated by the other peer
      %% theirs :: peer_subset()
      callback_mod = undefined :: atom(),
-     callback_opts = [] :: list()
+     callback_opts = [] :: list(),
+     garbage_on_end = false :: boolean()
    }).
 -type stream_set() :: #stream_set{}.
 -export_type([stream_set/0]).
@@ -202,7 +203,9 @@
     update_peer_settings/2,
     get_encode_context/1,
     get_encode_context/2,
-    release_encode_context/2
+    release_encode_context/2,
+    get_garbage_on_end/1,
+    set_garbage_on_end/2
    ]
   ).
 
@@ -290,20 +293,19 @@ new(server, Socket, CallbackMod, CallbackOpts) ->
     StreamSet.
 
 -spec new_stream(
-        StreamId :: stream_id() | next,
-        NotifyPid :: pid(),
-        CBMod :: module(),
-        CBOpts :: list(),
-        StreamSet :: stream_set()) ->
-                        {pid(), stream_id(), stream_set()}
-                            | {error, error_code(), closed_stream()}.
+    StreamId :: stream_id() | next,
+    NotifyPid :: pid(),
+    CBMod :: module(),
+    CBOpts :: list(),
+    StreamSet :: stream_set()
+) -> {pid(), stream_id(), stream_set()} | {error, error_code(), closed_stream()}.
 new_stream(
-          StreamId0,
-          NotifyPid,
-          CBMod,
-          CBOpts,
-          StreamSet) ->
-
+    StreamId0,
+    NotifyPid,
+    CBMod,
+    CBOpts,
+    StreamSet
+) ->
     {SelfSettings, PeerSettings} = get_settings(StreamSet),
     InitialSendWindow = PeerSettings#settings.initial_window_size,
     InitialRecvWindow = SelfSettings#settings.initial_window_size,
@@ -481,6 +483,13 @@ release_encode_context(StreamSet, {lock, NewEncoder}) ->
             ok
     end.
 
+-spec get_garbage_on_end(StreamSet :: stream_set()) -> boolean().
+get_garbage_on_end(StreamSet) ->
+    StreamSet#stream_set.garbage_on_end.
+
+-spec set_garbage_on_end(StreamSet :: stream_set(), GarbageOnEnd :: boolean()) -> stream_set().
+set_garbage_on_end(StreamSet, GarbageOnEnd) ->
+    StreamSet#stream_set{garbage_on_end=GarbageOnEnd}.
 
 -spec get_peer_subset(
         stream_id(),

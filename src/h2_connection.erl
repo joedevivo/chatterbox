@@ -197,6 +197,7 @@ init({client, Transport, Host, Port, SSLOptions, Http2Settings, ConnectionSettin
     ConnectTimeout = maps:get(connect_timeout, ConnectionSettings, 5000),
     TcpUserTimeout = maps:get(tcp_user_timeout, ConnectionSettings, 0),
     SocketOptions = maps:get(socket_options, ConnectionSettings, []),
+    GarbageOnEnd = maps:get(garbage_on_end, ConnectionSettings, false),
     put('__h2_connection_details', {client, Transport, Host, Port}),
     case Transport:connect(Host, Port, client_options(Transport, SSLOptions, SocketOptions), ConnectTimeout) of
         {ok, Socket} ->
@@ -209,13 +210,16 @@ init({client, Transport, Host, Port, SSLOptions, Http2Settings, ConnectionSettin
             Flow = application:get_env(chatterbox, client_flow_control, auto),
             CallbackMod = maps:get(stream_callback_mod, ConnectionSettings, undefined),
             CallbackOpts = maps:get(stream_callback_opts, ConnectionSettings, []),
-            Streams = h2_stream_set:new(client, {Transport, Socket}, CallbackMod, CallbackOpts),
+            Streams = h2_stream_set:set_garbage_on_end(
+                h2_stream_set:new(client, {Transport, Socket}, CallbackMod, CallbackOpts),
+                GarbageOnEnd
+            ),
             Receiver = spawn_data_receiver({Transport, Socket}, Streams, Flow),
             InitialState =
                 #connection{
                    type = client,
                    receiver=Receiver,
-                   garbage_on_end = maps:get(garbage_on_end, ConnectionSettings, false),
+                   garbage_on_end = GarbageOnEnd,
                    streams = Streams,
                    socket = {Transport, Socket}
                   },
@@ -229,6 +233,7 @@ init({client, Transport, Host, Port, SSLOptions, Http2Settings, ConnectionSettin
 init({client_ssl_upgrade, Host, Port, InitialMessage, SSLOptions, Http2Settings, ConnectionSettings}) ->
     ConnectTimeout = maps:get(connect_timeout, ConnectionSettings, 5000),
     SocketOptions = maps:get(socket_options, ConnectionSettings, []),
+     GarbageOnEnd = maps:get(garbage_on_end, ConnectionSettings, false),
     put('__h2_connection_details', {client, ssl_upgrade, Host, Port}),
     case gen_tcp:connect(Host, Port, [{active, false}], ConnectTimeout) of
         {ok, TCP} ->
@@ -239,14 +244,17 @@ init({client_ssl_upgrade, Host, Port, InitialMessage, SSLOptions, Http2Settings,
                     ssl:send(Socket, ?PREFACE),
                     CallbackMod = maps:get(stream_callback_mod, ConnectionSettings, undefined),
                     CallbackOpts = maps:get(stream_callback_opts, ConnectionSettings, []),
-                    Streams = h2_stream_set:new(client, {ssl, Socket}, CallbackMod, CallbackOpts),
+                    Streams = h2_stream_set:set_garbage_on_end(
+                        h2_stream_set:new(client, {ssl, Socket}, CallbackMod, CallbackOpts),
+                        GarbageOnEnd
+                    ),
                     Flow = application:get_env(chatterbox, client_flow_control, auto),
                     Receiver = spawn_data_receiver({ssl, Socket}, Streams, Flow),
                     InitialState =
                         #connection{
                            type = client,
                            receiver=Receiver,
-                           garbage_on_end = maps:get(garbage_on_end, ConnectionSettings, false),
+                           garbage_on_end = GarbageOnEnd,
                            streams = Streams,
                            socket = {ssl, Socket}
                           },
@@ -697,44 +705,6 @@ handle_settings(Event, {H, _Payload},
             maybe_reply(Event, {next_state, closing, Conn}, ok)
     end.
 
-
-handle_event(_, {stream_finished,
-              StreamId,
-              Headers,
-              Body,
-              Trailers},
-             Conn) ->
-    Stream = h2_stream_set:get(StreamId, Conn#connection.streams),
-    case h2_stream_set:type(Stream) of
-        active ->
-            NotifyPid = h2_stream_set:notify_pid(Stream),
-            Response =
-                case {Conn#connection.type, Conn#connection.garbage_on_end} of
-                    {server, _} -> garbage;
-                    {client, false} -> {Headers, Body, Trailers};
-                    {client, true} -> garbage
-                end,
-            {_NewStream, NewStreams} =
-                h2_stream_set:close(
-                  Stream,
-                  Response,
-                  Conn#connection.streams),
-
-            NewConn =
-                Conn#connection{
-                  streams = NewStreams
-                 },
-            case {Conn#connection.type, is_pid(NotifyPid)} of
-                {client, true} ->
-                    NotifyPid ! {'END_STREAM', StreamId};
-                _ ->
-                    ok
-            end,
-            {keep_state, NewConn};
-        _ ->
-            %% stream finished multiple times
-            {keep_state, Conn}
-    end;
 handle_event(_, {send_window_update, 0}, Conn) ->
     {keep_state, Conn};
 handle_event(_, {send_window_update, Size},
@@ -961,7 +931,7 @@ terminate(_Reason, _StateName, _Conn=#connection{}) ->
 terminate(_Reason, _StateName, _State) ->
     ok.
 
-new_stream_(From, CallbackMod, CallbackState, Headers, Opts, NotifyPid, Conn=#connection{streams=Streams}) ->
+new_stream_(From, CallbackMod, CallbackState, Headers, Opts, NotifyPid, Conn=#connection{streams=Streams, garbage_on_end=GarbageOnEnd}) ->
     {Reply, NewStreams} =
         case
             h2_stream_set:new_stream(
@@ -969,7 +939,8 @@ new_stream_(From, CallbackMod, CallbackState, Headers, Opts, NotifyPid, Conn=#co
               NotifyPid,
               CallbackMod,
               CallbackState,
-              Streams)
+              h2_stream_set:set_garbage_on_end(Streams, GarbageOnEnd)
+            )
         of
             {error, Code, _NewStream} ->
                 %% TODO: probably want to have events like this available for metrics
@@ -991,7 +962,7 @@ new_stream_(From, CallbackMod, CallbackState, Headers, Opts, NotifyPid, Conn=#co
             end,
     {keep_state, Conn2, [{reply, From, Reply}]}.
 
-new_stream_(From, CallbackMod, CallbackState, Headers, Body, Opts, NotifyPid, Conn=#connection{streams=Streams}) ->
+new_stream_(From, CallbackMod, CallbackState, Headers, Body, Opts, NotifyPid, Conn=#connection{streams=Streams, garbage_on_end=GarbageOnEnd}) ->
     {Reply, NewStreams} =
         case
             h2_stream_set:new_stream(
@@ -999,7 +970,7 @@ new_stream_(From, CallbackMod, CallbackState, Headers, Body, Opts, NotifyPid, Co
               NotifyPid,
               CallbackMod,
               CallbackState,
-              Streams)
+              h2_stream_set:set_garbage_on_end(Streams, GarbageOnEnd))
         of
             {error, Code, _NewStream} ->
                 %% TODO: probably want to have events like this available for metrics
@@ -1051,7 +1022,7 @@ send_headers_(StreamId, Headers, Opts, Streams) ->
             ok
     end.
 
-send_promise_(From, StreamId, Headers, NotifyPid, Conn=#connection{streams=Streams}) ->
+send_promise_(From, StreamId, Headers, NotifyPid, Conn=#connection{streams=Streams, garbage_on_end=GarbageOnEnd}) ->
     {CallbackMod, CallbackOpts} = h2_stream_set:get_callback(Streams),
     {Reply, NewStreams} =
         case
@@ -1060,7 +1031,7 @@ send_promise_(From, StreamId, Headers, NotifyPid, Conn=#connection{streams=Strea
               NotifyPid,
               CallbackMod,
               CallbackOpts,
-              Streams)
+              h2_stream_set:set_garbage_on_end(Streams, GarbageOnEnd))
         of
             {error, Code, _NewStream} ->
                 %% TODO: probably want to have events like this available for metrics
@@ -1334,7 +1305,9 @@ receive_data(Socket, Streams, Connection, Flow, Type, First, Decoder) ->
                                   Connection,
                                   CallbackMod,
                                   CallbackOpts,
-                                  Streams) of
+                                  Streams
+                                )
+                            of
                                 {error, ErrorCode, NewStream} ->
                                     rst_stream__(NewStream, ErrorCode, Socket),
                                     none;
@@ -1444,8 +1417,8 @@ receive_data(Socket, Streams, Connection, Flow, Type, First, Decoder) ->
                       NotifyPid,
                       CallbackMod,
                       CallbackOpts,
-                      Streams),
-
+                      Streams
+                    ),
                     Frames = case ?IS_FLAG((Header#frame_header.flags), ?FLAG_END_HEADERS) of
                                  true ->
                                      %% complete headers frame, just do it
@@ -1745,14 +1718,15 @@ send_request_(NotifyPid, Conn, Streams, Headers, Body) ->
     {CallbackMod, CallbackOpts} = h2_stream_set:get_callback(Streams),
     send_request_(NotifyPid, Conn, Streams, Headers, Body, CallbackMod, CallbackOpts).
 
-send_request_(NotifyPid, Conn, Streams, Headers, Body, CallbackMod, CallbackOpts) ->
+send_request_(NotifyPid, #connection{garbage_on_end=GarbageOnEnd}=Conn, Streams, Headers, Body, CallbackMod, CallbackOpts) ->
     case
         h2_stream_set:new_stream(
-          next,
+            next,
             NotifyPid,
             CallbackMod,
             CallbackOpts,
-            Streams)
+            h2_stream_set:set_garbage_on_end(Streams, GarbageOnEnd)
+        )
     of
         {error, Code, _NewStream} ->
             %% error creating new stream
