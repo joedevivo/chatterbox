@@ -152,7 +152,7 @@
 %% Set Operations
 -export(
    [
-    new/4,
+    new/5,
     new_stream/5,
     get/2,
     update/3,
@@ -204,8 +204,7 @@
     get_encode_context/1,
     get_encode_context/2,
     release_encode_context/2,
-    get_garbage_on_end/1,
-    set_garbage_on_end/2
+    get_garbage_on_end/1
    ]
   ).
 
@@ -225,14 +224,15 @@
 -spec new(
         client | server,
         sock:socket(),
-        atom(), list()
+        atom(), list(), boolean()
        ) -> stream_set().
-new(client, Socket, CallbackMod, CallbackOpts) ->
+new(client, Socket, CallbackMod, CallbackOpts, GarbageOnEnd) ->
     StreamSet = #stream_set{
         callback_mod = CallbackMod,
         callback_opts = CallbackOpts,
         socket=Socket,
         connection=self(),
+        garbage_on_end=GarbageOnEnd,
        type=client},
     ets:insert_new(StreamSet#stream_set.table, #connection_settings{type=self_settings}),
     ets:insert_new(StreamSet#stream_set.table, #connection_settings{type=peer_settings}),
@@ -259,12 +259,13 @@ new(client, Socket, CallbackMod, CallbackOpts) ->
                        next_available_stream_id=2
                       }),
     StreamSet;
-new(server, Socket, CallbackMod, CallbackOpts) ->
+new(server, Socket, CallbackMod, CallbackOpts, GarbageOnEnd) ->
     StreamSet = #stream_set{
        callback_mod = CallbackMod,
        callback_opts = CallbackOpts,
        socket=Socket,
        connection=self(),
+       garbage_on_end=GarbageOnEnd,
        type=server},
     ets:insert_new(StreamSet#stream_set.table, #connection_settings{type=self_settings}),
     ets:insert_new(StreamSet#stream_set.table, #connection_settings{type=peer_settings}),
@@ -486,10 +487,6 @@ release_encode_context(StreamSet, {lock, NewEncoder}) ->
 -spec get_garbage_on_end(StreamSet :: stream_set()) -> boolean().
 get_garbage_on_end(StreamSet) ->
     StreamSet#stream_set.garbage_on_end.
-
--spec set_garbage_on_end(StreamSet :: stream_set(), GarbageOnEnd :: boolean()) -> stream_set().
-set_garbage_on_end(StreamSet, GarbageOnEnd) ->
-    StreamSet#stream_set{garbage_on_end=GarbageOnEnd}.
 
 -spec get_peer_subset(
         stream_id(),
