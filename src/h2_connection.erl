@@ -1314,6 +1314,10 @@ receive_data(Socket, Streams, Connection, Flow, Type, First, Decoder) ->
                     case ContinuationType of
                         none ->
                             receive_data(Socket, Streams, Connection, Flow, Type, false, Decoder);
+                        trailers when ?NOT_FLAG((Header#frame_header.flags), ?FLAG_END_STREAM) ->
+                            rst_stream__(Stream0, ?PROTOCOL_ERROR, Socket),
+
+                            receive_data(Socket, Streams, Connection, Flow, Type, false, Decoder);
                         _ ->
                             Frames = case ?IS_FLAG((Header#frame_header.flags), ?FLAG_END_HEADERS) of
                                          true ->
