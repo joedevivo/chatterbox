@@ -214,7 +214,6 @@ init([
      ]) ->
     erlang:monitor(process, ConnectionPid),
     %% don't block stream init with a slow callback init
-    self() ! {init_callback, CBOptions},
     {ok, idle, #stream_state{
                   callback_mod=CB,
                   stream_id=StreamId,
@@ -222,7 +221,7 @@ init([
                   connection=ConnectionPid,
                   socket=h2_stream_set:socket(Streams),
                   type=h2_stream_set:stream_set_type(Streams)
-                 }};
+                 }, [{next_event, info, {init_callback, CBOptions}}]};
 init([
       link_connection,
       _StreamId,
