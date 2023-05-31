@@ -75,7 +75,6 @@ on_end_stream(State=#cb_static{connection_pid=ConnPid,
                 case Method of
                     <<"HEAD">> ->
                         h2_connection:send_headers(ConnPid, StreamId, ResponseHeaders, [{send_end_stream, true}]);
-                    %%{<<"GET">>, _, _} ->
                     _ ->
                         h2_connection:send_headers(ConnPid, StreamId, ResponseHeaders),
                         h2_connection:send_body(ConnPid, StreamId, <<"No soup for you!">>)
@@ -100,7 +99,6 @@ on_end_stream(State=#cb_static{connection_pid=ConnPid,
                 case Method of
                     <<"HEAD">> ->
                         h2_connection:send_headers(ConnPid, StreamId, ResponseHeaders, [{send_end_stream, true}]);
-                    %%{<<"GET">>, _, _} ->
                     _ ->
                         h2_connection:send_headers(ConnPid, StreamId, ResponseHeaders),
                         h2_connection:send_body(ConnPid, StreamId, Data)
@@ -150,7 +148,6 @@ on_end_stream(State=#cb_static{connection_pid=ConnPid,
                 case Method of
                     <<"HEAD">> ->
                         h2_connection:send_headers(ConnPid, StreamId, ResponseHeaders, [{send_end_stream, true}]);
-                    %%{<<"GET">>, _, _} ->
                     _ ->
                         h2_connection:send_headers(ConnPid, StreamId, ResponseHeaders),
                         h2_connection:send_body(ConnPid, StreamId, <<"No soup for you!">>)
