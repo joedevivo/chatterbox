@@ -892,7 +892,7 @@ send_what_we_can(StreamId, StreamFun, Streams) ->
 
 %% Send at the connection level
 -spec c_send_what_we_can(MaxFrameSize :: non_neg_integer(),
-                         Streams :: {[stream()], ets:continuation()},
+                         Streams :: {[stream()], term()},
                          StreamSet :: stream_set()
                         ) ->
                                 integer().

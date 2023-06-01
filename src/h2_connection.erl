@@ -1134,7 +1134,7 @@ rst_stream_(Event, Stream, ErrorCode, Conn) ->
 -spec rst_stream__(
         h2_stream_set:stream(),
         error_code(),
-        sock:sock()
+        sock:socket()
        ) -> ok.
 rst_stream__(Stream, ErrorCode, Sock) ->
     case h2_stream_set:type(Stream) of

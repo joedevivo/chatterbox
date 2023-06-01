@@ -47,7 +47,7 @@
 
 -record(stream_state, {
           stream_id = undefined :: stream_id(),
-          streams :: h2_stream_set:steam_set(),
+          streams :: h2_stream_set:stream_set(),
           connection = undefined :: undefined | pid(),
           socket = undefined :: sock:socket(),
           state = idle :: stream_state_name(),
