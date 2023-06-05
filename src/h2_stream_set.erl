@@ -456,7 +456,7 @@ get_encode_context(StreamSet, Headers) ->
             end
     catch
         error:badarg ->
-            hpack:new_context()
+            {nolock, hpack:new_context()}
     end.
 
 release_encode_context(_StreamSet, {nolock, _}) ->

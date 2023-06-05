@@ -1,4 +1,8 @@
-[{<<"hpack">>,
-  {git,"https://github.com/novalabsxyz/hpack.git",
-       {ref,"291f83c8efbd50cf57ddcf311e5d9a4fbe2bb5cb"}},
-  0}].
+{"1.2.0",
+[{<<"hpack">>,{pkg,<<"hpack_erl">>,<<"0.3.0">>},0}]}.
+[
+{pkg_hash,[
+ {<<"hpack">>, <<"2461899CC4AB6A0EF8E970C1661C5FC6A52D3C25580BC6DD204F84CE94669926">>}]},
+{pkg_hash_ext,[
+ {<<"hpack">>, <<"D6137D7079169D8C485C6962DFE261AF5B9EF60FBC557344511C1E65E3D95FB0">>}]}
+].
