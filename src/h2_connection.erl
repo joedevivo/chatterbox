@@ -26,20 +26,21 @@
          send_body/3,
          send_body/4,
          send_request/3,
+         send_request/5,
          send_ping/1,
          is_push/1,
-         new_stream/1,
-         new_stream/2,
-         new_stream/4,
+         new_stream/3,
          new_stream/6,
-         send_promise/4,
+         new_stream/7,
+         send_promise/3,
          get_response/2,
          get_peer/1,
          get_peercert/1,
          get_streams/1,
          send_window_update/2,
          update_settings/2,
-         send_frame/2
+         send_frame/2,
+         rst_stream/3
         ]).
 
 %% gen_statem callbacks
@@ -56,12 +57,11 @@
          listen/3,
          handshake/3,
          connected/3,
-         continuation/3,
          closing/3
         ]).
 
 -export([
-         go_away/2
+         go_away/3
         ]).
 
 -record(h2_listening_state, {
@@ -73,37 +73,15 @@
           server_settings = #settings{} :: settings()
          }).
 
--record(continuation_state, {
-          stream_id                 :: stream_id(),
-          promised_id = undefined   :: undefined | stream_id(),
-          frames      = queue:new() :: queue:queue(h2_frame:frame()),
-          type                      :: headers | push_promise | trailers,
-          end_stream  = false       :: boolean(),
-          end_headers = false       :: boolean()
-}).
-
 -record(connection, {
           type = undefined :: client | server | undefined,
-          ssl_options = [],
-          listen_ref :: non_neg_integer() | undefined,
+          receiver :: pid() | undefined,
           socket = undefined :: sock:socket(),
-          peer_settings = #settings{} :: settings(),
-          self_settings = #settings{} :: settings(),
-          send_window_size = ?DEFAULT_INITIAL_WINDOW_SIZE :: integer(),
-          recv_window_size = ?DEFAULT_INITIAL_WINDOW_SIZE :: integer(),
-          decode_context = hpack:new_context() :: hpack:context(),
-          encode_context = hpack:new_context() :: hpack:context(),
           settings_sent = queue:new() :: queue:queue(),
-          next_available_stream_id = 2 :: stream_id(),
           streams :: h2_stream_set:stream_set(),
-          stream_callback_mod :: module() | undefined,
-          stream_callback_opts :: list() | undefined,
-          buffer = empty :: empty | {binary, binary()} | {frame, h2_frame:header(), binary()},
-          continuation = undefined :: undefined | #continuation_state{},
-          flow_control = auto :: auto | manual,
-          pings = #{} :: #{binary() => {pid(), non_neg_integer()}},
-          %% if true then set a stream as garbage in the stream_set
-          garbage_on_end = false :: boolean()
+          send_all_we_can_timer :: reference() | undefined,
+          missed_send_all_we_can = false :: boolean(),
+          pings = #{} :: #{binary() => {pid(), non_neg_integer()}}
 }).
 
 -define(HIBERNATE_AFTER_DEFAULT_MS, infinity).
@@ -192,15 +170,15 @@ become(Socket, Http2Settings) ->
 -spec become(socket(), settings(), map()) -> no_return().
 become({Transport, Socket}, Http2Settings, ConnectionSettings) ->
     ok = sock:setopts({Transport, Socket}, [{packet, raw}, binary]),
+    CallbackMod = maps:get(stream_callback_mod, ConnectionSettings,
+                           application:get_env(chatterbox, stream_callback_mod, chatterbox_static_stream)),
+    CallbackOpts = maps:get(stream_callback_opts, ConnectionSettings,
+                            application:get_env(chatterbox, stream_callback_opts, [])),
+    GarbageOnEnd = maps:get(garbage_on_end, ConnectionSettings, false),
+
     case start_http2_server(Http2Settings,
                            #connection{
-                              stream_callback_mod =
-                                  maps:get(stream_callback_mod, ConnectionSettings,
-                                           application:get_env(chatterbox, stream_callback_mod, chatterbox_static_stream)),
-                              stream_callback_opts =
-                                  maps:get(stream_callback_opts, ConnectionSettings,
-                                           application:get_env(chatterbox, stream_callback_opts, [])),
-                              streams = h2_stream_set:new(server),
+                              streams = h2_stream_set:new(server, {Transport, Socket}, CallbackMod, CallbackOpts, GarbageOnEnd),
                               socket = {Transport, Socket}
                              }) of
         {_, handshake, NewState} ->
@@ -210,7 +188,7 @@ become({Transport, Socket}, Http2Settings, ConnectionSettings) ->
                                   NewState);
         {_, closing, _NewState} ->
             sock:close({Transport, Socket}),
-            exit(invalid_preface)
+            exit(normal)
     end.
 
 %% Init callback
@@ -218,24 +196,27 @@ init({client, Transport, Host, Port, SSLOptions, Http2Settings, ConnectionSettin
     ConnectTimeout = maps:get(connect_timeout, ConnectionSettings, 5000),
     TcpUserTimeout = maps:get(tcp_user_timeout, ConnectionSettings, 0),
     SocketOptions = maps:get(socket_options, ConnectionSettings, []),
+    GarbageOnEnd = maps:get(garbage_on_end, ConnectionSettings, false),
+    put('__h2_connection_details', {client, Transport, Host, Port}),
     case Transport:connect(Host, Port, client_options(Transport, SSLOptions, SocketOptions), ConnectTimeout) of
         {ok, Socket} ->
-            ok = sock:setopts({Transport, Socket}, [{packet, raw}, binary, {active, once}]),
+            ok = sock:setopts({Transport, Socket}, [{packet, raw}, binary, {active, false}]),
             case TcpUserTimeout of
                 0 -> ok;
                 _ -> sock:setopts({Transport, Socket}, [{raw,6,18,<<TcpUserTimeout:32/native>>}])
             end,
-            Transport:send(Socket, <<?PREFACE>>),
+            Transport:send(Socket, ?PREFACE),
+            Flow = application:get_env(chatterbox, client_flow_control, auto),
+            CallbackMod = maps:get(stream_callback_mod, ConnectionSettings, undefined),
+            CallbackOpts = maps:get(stream_callback_opts, ConnectionSettings, []),
+            Streams = h2_stream_set:new(client, {Transport, Socket}, CallbackMod, CallbackOpts, GarbageOnEnd),
+            Receiver = spawn_data_receiver({Transport, Socket}, Streams, Flow),
             InitialState =
                 #connection{
                    type = client,
-                   garbage_on_end = maps:get(garbage_on_end, ConnectionSettings, false),
-                   stream_callback_mod = maps:get(stream_callback_mod, ConnectionSettings, undefined),
-                   stream_callback_opts = maps:get(stream_callback_opts, ConnectionSettings, []),
-                   streams = h2_stream_set:new(client),
-                   socket = {Transport, Socket},
-                   next_available_stream_id=1,
-                   flow_control=application:get_env(chatterbox, client_flow_control, auto)
+                   receiver=Receiver,
+                   streams = Streams,
+                   socket = {Transport, Socket}
                   },
             {ok,
              handshake,
@@ -247,23 +228,26 @@ init({client, Transport, Host, Port, SSLOptions, Http2Settings, ConnectionSettin
 init({client_ssl_upgrade, Host, Port, InitialMessage, SSLOptions, Http2Settings, ConnectionSettings}) ->
     ConnectTimeout = maps:get(connect_timeout, ConnectionSettings, 5000),
     SocketOptions = maps:get(socket_options, ConnectionSettings, []),
+    GarbageOnEnd = maps:get(garbage_on_end, ConnectionSettings, false),
+    put('__h2_connection_details', {client, ssl_upgrade, Host, Port}),
     case gen_tcp:connect(Host, Port, [{active, false}], ConnectTimeout) of
         {ok, TCP} ->
             gen_tcp:send(TCP, InitialMessage),
             case ssl:connect(TCP, client_options(ssl, SSLOptions, SocketOptions)) of
                 {ok, Socket} ->
-                    ok = ssl:setopts(Socket, [{packet, raw}, binary, {active, once}]),
-                    ssl:send(Socket, <<?PREFACE>>),
+                    ok = ssl:setopts(Socket, [{packet, raw}, binary, {active, false}]),
+                    ssl:send(Socket, ?PREFACE),
+                    CallbackMod = maps:get(stream_callback_mod, ConnectionSettings, undefined),
+                    CallbackOpts = maps:get(stream_callback_opts, ConnectionSettings, []),
+                    Streams = h2_stream_set:new(client, {ssl, Socket}, CallbackMod, CallbackOpts, GarbageOnEnd),
+                    Flow = application:get_env(chatterbox, client_flow_control, auto),
+                    Receiver = spawn_data_receiver({ssl, Socket}, Streams, Flow),
                     InitialState =
                         #connection{
                            type = client,
-                           garbage_on_end = maps:get(garbage_on_end, ConnectionSettings, false),
-                           stream_callback_mod = maps:get(stream_callback_mod, ConnectionSettings, undefined),
-                           stream_callback_opts = maps:get(stream_callback_opts, ConnectionSettings, []),
-                           streams = h2_stream_set:new(client),
-                           socket = {ssl, Socket},
-                           next_available_stream_id=1,
-                           flow_control=application:get_env(chatterbox, client_flow_control, auto)
+                           receiver=Receiver,
+                           streams = Streams,
+                           socket = {ssl, Socket}
                           },
                     {ok,
                      handshake,
@@ -304,94 +288,122 @@ send_frame(Pid, Bin)
 send_frame(Pid, Frame) ->
     gen_statem:cast(Pid, {send_frame, Frame}).
 
--spec send_headers(pid(), stream_id(), hpack:headers()) -> ok.
+-spec send_headers(h2_stream_set:stream_set(), stream_id(), hpack:headers()) -> ok.
 send_headers(Pid, StreamId, Headers) ->
-    gen_statem:cast(Pid, {send_headers, StreamId, Headers, []}),
-    ok.
+    send_headers_(StreamId, Headers, [], Pid).
 
--spec send_headers(pid(), stream_id(), hpack:headers(), send_opts()) -> ok.
+-spec send_headers(h2_stream_set:stream_set(), stream_id(), hpack:headers(), send_opts()) -> ok.
 send_headers(Pid, StreamId, Headers, Opts) ->
-    gen_statem:cast(Pid, {send_headers, StreamId, Headers, Opts}),
+    send_headers_(StreamId, Headers, Opts, Pid).
+
+-spec rst_stream(h2_stream_set:stream_set(), stream_id(), error_code()) -> ok.
+rst_stream(Streams, StreamId, ErrorCode) ->
+    Stream = h2_stream_set:get(StreamId, Streams),
+    rst_stream__(Stream, ErrorCode, h2_stream_set:socket(Streams)).
+
+-spec send_trailers(h2_stream_set:stream_set(), stream_id(), hpack:headers()) -> ok.
+send_trailers(Streams, StreamId, Trailers) ->
+    send_trailers_(StreamId, Trailers, [], Streams).
+
+-spec send_trailers(h2_stream_set:stream_set(), stream_id(), hpack:headers(), send_opts()) -> ok.
+send_trailers(Streams, StreamId, Trailers, Opts) ->
+    send_trailers_(StreamId, Trailers, Opts, Streams).
+
+actually_send_trailers(Streams, StreamId, Trailers) ->
+    Stream = h2_stream_set:get(StreamId, Streams),
+    PeerSettings = h2_stream_set:get_peer_settings(Streams),
+    {Lock, EncodeContext} = h2_stream_set:get_encode_context(Streams, Trailers),
+    {FramesToSend, NewContext} =
+    h2_frame_headers:to_frames(h2_stream_set:stream_id(Stream),
+                               Trailers,
+                               EncodeContext,
+                               PeerSettings#settings.max_frame_size,
+                               true
+                              ),
+
+    sock:send(h2_stream_set:socket(Streams), [h2_frame:to_binary(Frame) || Frame <- FramesToSend]),
+
+    h2_stream_set:release_encode_context(Streams, {Lock, NewContext}),
     ok.
 
--spec send_trailers(pid(), stream_id(), hpack:headers()) -> ok.
-send_trailers(Pid, StreamId, Trailers) ->
-    gen_statem:cast(Pid, {send_trailers, StreamId, Trailers, []}),
-    ok.
-
--spec send_trailers(pid(), stream_id(), hpack:headers(), send_opts()) -> ok.
-send_trailers(Pid, StreamId, Trailers, Opts) ->
-    gen_statem:cast(Pid, {send_trailers, StreamId, Trailers, Opts}),
-    ok.
-
-actually_send_trailers(Pid, StreamId, Trailers) ->
-    gen_statem:cast(Pid, {actually_send_trailers, StreamId, Trailers}),
-    ok.
-
--spec send_body(pid(), stream_id(), binary()) -> ok.
+-spec send_body(h2_stream_set:stream_set(), stream_id(), binary()) -> ok.
 send_body(Pid, StreamId, Body) ->
-    gen_statem:cast(Pid, {send_body, StreamId, Body, []}),
-    ok.
--spec send_body(pid(), stream_id(), binary(), send_opts()) -> ok.
+    send_body_(StreamId, Body, [], Pid).
+
+-spec send_body(h2_stream_set:stream_set(), stream_id(), binary(), send_opts()) -> ok.
 send_body(Pid, StreamId, Body, Opts) ->
-    gen_statem:cast(Pid, {send_body, StreamId, Body, Opts}),
-    ok.
+    send_body_(StreamId, Body, Opts, Pid).
 
--spec send_request(pid(), hpack:headers(), binary()) -> ok.
-send_request(Pid, Headers, Body) ->
-    gen_statem:call(Pid, {send_request, self(), Headers, Body}, infinity),
-    ok.
+-spec send_request(h2_stream_set:stream_set(), hpack:headers(), binary()) -> ok.
+send_request(Streams, Headers, Body) ->
+    {CallbackMod, CallbackOpts} = h2_stream_set:get_callback(Streams),
+    send_request(Streams, Headers, Body, CallbackMod, CallbackOpts).
 
--spec send_ping(pid()) -> ok.
-send_ping(Pid) ->
+-spec send_request(h2_stream_set:stream_set(), hpack:headers(), binary(), atom(), list()) -> ok.
+send_request(Streams, Headers, Body, CallbackMod, CallbackOpts) ->
+    gen_server:call(h2_stream_set:connection(Streams), {new_stream, CallbackMod, CallbackOpts, Headers, Body, [], self()}).
+
+-spec send_ping(h2_stream_set:stream_set()) -> ok.
+send_ping(Streams) ->
+    Pid = h2_stream_set:connection(Streams),
     gen_statem:call(Pid, {send_ping, self()}, infinity),
     ok.
 
--spec get_peer(pid()) ->
+-spec get_peer(h2_stream_set:stream_set()) ->
     {ok, {inet:ip_address(), inet:port_number()}} | {error, term()}.
-get_peer(Pid) ->
-    gen_statem:call(Pid, get_peer).
+get_peer(Streams) ->
+    Socket = h2_stream_set:socket(Streams),
+    sock:peername(Socket).
 
--spec get_peercert(pid()) ->
+-spec get_peercert(h2_stream_set:stream_set()) ->
     {ok, binary()} | {error, term()}.
-get_peercert(Pid) ->
-    gen_statem:call(Pid, get_peercert).
+get_peercert(Streams) ->
+    Socket = h2_stream_set:socket(Streams),
+    sock:peercert(Socket).
 
--spec is_push(pid()) -> boolean().
-is_push(Pid) ->
-    gen_statem:call(Pid, is_push).
+-spec is_push(h2_stream_set:stream_set()) -> boolean().
+is_push(Streams) ->
+    #settings{enable_push=Push} = h2_stream_set:get_peer_settings(Streams),
+    case Push of
+        1 -> true;
+        _ -> false
+    end.
 
--spec new_stream(pid()) -> {stream_id(), pid()} | {error, error_code()}.
-new_stream(Pid) ->
-    new_stream(Pid, self()).
-
--spec new_stream(pid(), pid()) ->
-                        {stream_id(), pid()}
-                      | {error, error_code()}.
-new_stream(Pid, NotifyPid) ->
-    gen_statem:call(Pid, {new_stream, NotifyPid}).
-
-new_stream(Pid, CallbackMod, CallbackOpts, NotifyPid) ->
-    gen_statem:call(Pid, {new_stream, CallbackMod, CallbackOpts, NotifyPid}).
+new_stream(Streams, Headers, Body) ->
+    gen_server:call(h2_stream_set:connection(Streams), {new_stream, undefined, [], Headers, Body, [], self()}).
 
 %% @doc `new_stream/6' accepts Headers so they can be sent within the connection process
 %% when a stream id is assigned. This ensures that another process couldn't also have
 %% requested a new stream and send its headers before the stream with a lower id, which
 %% results in the server closing the connection when it gets headers for the lower id stream.
--spec new_stream(pid(), module(), term(), hpack:headers(), send_opts(), pid()) -> {stream_id(), pid()} | {error, error_code()}.
-new_stream(Pid, CallbackMod, CallbackOpts, Headers, Opts, NotifyPid) ->
-    gen_statem:call(Pid, {new_stream, CallbackMod, CallbackOpts, Headers, Opts, NotifyPid}).
+-spec new_stream(h2_stream_set:stream_set(), module(), term(), hpack:headers(), send_opts(), pid()) -> {stream_id(), pid()} | {error, error_code()}.
+new_stream(Streams, CallbackMod, CallbackOpts, Headers, Opts, NotifyPid) ->
+    gen_server:call(h2_stream_set:connection(Streams), {new_stream, CallbackMod, CallbackOpts, Headers, Opts, NotifyPid}).
 
--spec send_promise(pid(), stream_id(), stream_id(), hpack:headers()) -> ok.
-send_promise(Pid, StreamId, NewStreamId, Headers) ->
-    gen_statem:cast(Pid, {send_promise, StreamId, NewStreamId, Headers}),
-    ok.
+-spec new_stream(h2_stream_set:stream_set(), module(), term(), hpack:headers(), any(), send_opts(), pid()) -> {stream_id(), pid()} | {error, error_code()}.
+new_stream(Streams, CallbackMod, CallbackOpts, Headers, Body, Opts, NotifyPid) ->
+    gen_server:call(h2_stream_set:connection(Streams), {new_stream, CallbackMod, CallbackOpts, Headers, Body, Opts, NotifyPid}).
 
--spec get_response(pid(), stream_id()) ->
+-spec send_promise(h2_stream_set:stream_set(), stream_id(), hpack:headers()) -> {stream_id(), pid()} | {error, error_code()}.
+send_promise(Streams, StreamId, Headers) ->
+    gen_server:call(h2_stream_set:connection(Streams), {send_promise, StreamId, Headers, self()}).
+
+-spec get_response(h2_stream_set:stream_set(), stream_id()) ->
                           {ok, {hpack:headers(), iodata(), iodata()}}
                            | not_ready.
-get_response(Pid, StreamId) ->
-    gen_statem:call(Pid, {get_response, StreamId}).
+get_response(Streams, StreamId) ->
+    Stream = h2_stream_set:get(StreamId, Streams),
+    case h2_stream_set:type(Stream) of
+        closed ->
+            {_, _NewStreams0} =
+            h2_stream_set:close(
+              Stream,
+              garbage,
+              Streams),
+            {ok, h2_stream_set:response(Stream)};
+        active ->
+            not_ready
+    end.
 
 -spec get_streams(pid()) -> h2_stream_set:stream_set().
 get_streams(Pid) ->
@@ -405,8 +417,9 @@ send_window_update(Pid, Size) ->
 update_settings(Pid, Payload) ->
     gen_statem:cast(Pid, {update_settings, Payload}).
 
--spec stop(pid()) -> ok.
-stop(Pid) ->
+-spec stop(h2_stream_set:stream_set()) -> ok.
+stop(Streams) ->
+    Pid = h2_stream_set:connection(Streams),
     gen_statem:cast(Pid, stop).
 
 %% The listen state only exists to wait around for new prim_inet
@@ -437,11 +450,12 @@ listen(info, {inet_async, ListenSocket, Ref, {ok, ClientSocket}},
     start_http2_server(
       Http2Settings,
       #connection{
-         streams = h2_stream_set:new(server),
+         %% TODO there appears to be no way to set garbage_on_end for a server here
+        streams = h2_stream_set:new(server, {Transport, Socket}, undefined, [], false),
          socket={Transport, Socket}
         });
 listen(timeout, _, State) ->
-    go_away(?PROTOCOL_ERROR, State);
+    go_away(timeout, ?PROTOCOL_ERROR, <<"listen timeout">>, State);
 listen(Type, Msg, State) ->
     handle_event(Type, Msg, State).
 
@@ -450,41 +464,52 @@ listen(Type, Msg, State) ->
                      handshake|connected|closing,
                      connection()}.
 handshake(timeout, _, State) ->
-    go_away(?PROTOCOL_ERROR, State);
-handshake(_, {frame, {FH, _Payload}=Frame}, State) ->
+    go_away(timeout, ?PROTOCOL_ERROR, <<"handshake timeout">>, State);
+handshake(Event, {settings, Frame}, State) ->
+    handle_settings(Event, Frame, State);
+handshake(Event, {frame, _}, State) ->
     %% The first frame should be the client settings as per
     %% RFC-7540#3.5
-    case FH#frame_header.type of
-        ?SETTINGS ->
-            route_frame(Frame, State);
-        _ ->
-            go_away(?PROTOCOL_ERROR, State)
-    end;
+    go_away(Event, ?PROTOCOL_ERROR, <<"handshake frame not SETTINGS">>, State);
 handshake(Type, Msg, State) ->
     handle_event(Type, Msg, State).
 
-connected(_, {frame, Frame},
-          #connection{}=Conn
+connected(Event, {frame, Frame},
+          #connection{streams=Streams}=Conn
          ) ->
-    route_frame(Frame, Conn);
-connected(Type, Msg, State) ->
-    handle_event(Type, Msg, State).
 
-%% The continuation state in entered after receiving a HEADERS frame
-%% with no ?END_HEADERS flag set, we're locked waiting for contiunation
-%% frames on the same stream to preserve the decoding context state
-continuation(_, {frame,
-              {#frame_header{
-                  stream_id=StreamId,
-                  type=?CONTINUATION
-                 }, _}=Frame},
-             #connection{
-                continuation = #continuation_state{
-                                  stream_id = StreamId
-                                 }
-               }=Conn) ->
-    route_frame(Frame, Conn);
-continuation(Type, Msg, State) ->
+    {SelfSettings, PeerSettings} = h2_stream_set:get_settings(Streams),
+    route_frame(Event, Frame, SelfSettings, PeerSettings, Conn);
+connected(info, send_all_we_can, State=#connection{send_all_we_can_timer=undefined}) ->
+    %% either the connection is new, or we haven't gotten
+    %% a stream 0 window update in a while
+    %% in this case send it immediately
+    Ref = erlang:send_after(0, self(), actually_send_all_we_can),
+    {keep_state, State#connection{send_all_we_can_timer=Ref}};
+connected(info, actually_send_all_we_can, State) ->
+    %% time to do the thing, but do it in a spawn so we don't block
+    %% the connection
+    {_, Ref} = spawn_monitor(fun() ->
+                          h2_stream_set:send_all_we_can(State#connection.streams)
+                  end),
+    {keep_state, State#connection{send_all_we_can_timer=Ref}};
+connected(info, {'DOWN', Ref, process, _, _}, State=#connection{send_all_we_can_timer=Ref}) ->
+    %% its done, decide if we need to schedule another one
+    case State#connection.missed_send_all_we_can of
+        true ->
+            %% more window updates came in, schedule another
+            %% send_all_we_can after a period of time
+            NewRef = erlang:send_after(application:get_env(chatterbox, stream_0_coalesce_window_update_time, 500), self(), actually_send_all_we_can),
+            {keep_state, State#connection{send_all_we_can_timer=NewRef, missed_send_all_we_can=false}};
+        false ->
+            %% no more came in, don't bother trying to do anything
+            {keep_state, State#connection{send_all_we_can_timer=undefined}}
+    end;
+connected(info, send_all_we_can, State) ->
+    %% keep track of if any of these came in while we were waiting/processing
+    %% and use that to decide if we need to immediately schedule another one
+    {keep_state, State#connection{missed_send_all_we_can=true}};
+connected(Type, Msg, State) ->
     handle_event(Type, Msg, State).
 
 %% The closing state should deal with frames on the wire still, I
@@ -502,34 +527,66 @@ closing(Type, Msg, State) ->
 %% wire, do connection based things to it and/or forward it to the
 %% http2 stream processor (h2_stream:recv_frame)
 -spec route_frame(
+        gen_statem:event_type(),
         h2_frame:frame() | {error, term()},
+        SelfSettings :: settings(),
+        PeerSettings :: settings(),
         connection()) ->
     {next_state,
-     connected | continuation | closing ,
+     connected | closing ,
      connection()}.
-%% Bad Length of frame, exceedes maximum allowed size
-route_frame({#frame_header{length=L}, _},
-            #connection{
-               self_settings=#settings{max_frame_size=MFS}
-              }=Conn)
-    when L > MFS ->
-    go_away(?FRAME_SIZE_ERROR, Conn);
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Connection Level Frames
 %%
 %% Here we'll handle anything that belongs on stream 0.
 
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% Stream level frames
+%%
+
+
+
+
+%% PING
+route_frame(Event, {H, Payload},
+            _SelfSettings,
+            _PeerSettings,
+            #connection{pings = Pings}=Conn)
+    when H#frame_header.type == ?PING,
+         ?IS_FLAG((H#frame_header.flags), ?FLAG_ACK) ->
+    case maps:get(h2_frame_ping:to_binary(Payload), Pings, undefined) of
+        undefined ->
+            ok;
+        {NotifyPid, _} ->
+            NotifyPid ! {'PONG', self()}
+    end,
+    NextPings = maps:remove(Payload, Pings),
+    maybe_reply(Event, {next_state, connected, Conn#connection{pings = NextPings}}, ok);
+route_frame(Event, {H=#frame_header{stream_id=0}, _Payload},
+            _SelfSettings,
+            _PeerSettings,
+            #connection{}=Conn)
+    when H#frame_header.type == ?GOAWAY ->
+    go_away(Event, ?NO_ERROR, Conn);
+
+route_frame(Event, {#frame_header{type=T}, _}, _SelfSettings, _PeerSettings, Conn)
+  when T > ?CONTINUATION ->
+    maybe_reply(Event, {next_state, connected, Conn}, ok);
+route_frame(Event, Frame, _SelfSettings, _PeerSettings, #connection{}=Conn) ->
+    error_logger:error_msg("Frame condition not covered by pattern match."
+                           "Please open a github issue with this output: ~s",
+                           [h2_frame:format(Frame)]),
+    F = iolist_to_binary(io_lib:format("~p", [Frame])),
+    go_away(Event, ?PROTOCOL_ERROR, <<"unhandled frame ", F/binary>>, Conn).
+
+
 %% SETTINGS, finally something that's ok on stream 0
 %% This is the non-ACK case, where settings have actually arrived
-route_frame({H, Payload},
+handle_settings(Event, {H, Payload},
             #connection{
-               peer_settings=PS=#settings{
-                                   initial_window_size=OldIWS,
-                                   header_table_size=HTS
-                                  },
-               streams=Streams,
-               encode_context=EncodeContext
+               streams=Streams
               }=Conn)
     when H#frame_header.type == ?SETTINGS,
          ?NOT_FLAG((H#frame_header.flags), ?FLAG_ACK) ->
@@ -538,6 +595,11 @@ route_frame({H, Payload},
     case h2_frame_settings:validate(Payload) of
         ok ->
             {settings, PList} = Payload,
+
+            PS=#settings{
+               initial_window_size=OldIWS,
+               header_table_size=HTS
+              } = h2_stream_set:get_peer_settings_locked(Streams),
 
             Delta =
                 case proplists:get_value(?SETTINGS_INITIAL_WINDOW_SIZE, PList) of
@@ -550,52 +612,60 @@ route_frame({H, Payload},
             %% We've just got connection settings from a peer. He have a
             %% couple of jobs to do here w.r.t. flow control
 
+            h2_stream_set:update_peer_settings(Streams, NewPeerSettings),
+            case proplists:get_value(?SETTINGS_HEADER_TABLE_SIZE, PList) /= undefined of
+                true ->
+                    {lock, EncodeContext} = h2_stream_set:get_encode_context(Streams),
+                    NewEncodeContext = hpack:new_max_table_size(HTS, EncodeContext),
+                    h2_stream_set:release_encode_context(Streams, {lock, NewEncodeContext});
+                false ->
+                    ok
+            end,
             %% If Delta != 0, we need to change every stream's
             %% send_window_size in the state open or
             %% half_closed_remote. We'll just send the message
             %% everywhere. It's up to them if they need to do
             %% anything.
             UpdatedStreams1 =
-                h2_stream_set:update_all_send_windows(Delta, Streams),
+            h2_stream_set:update_all_send_windows(Delta, Streams),
 
             UpdatedStreams2 =
-                case proplists:get_value(?SETTINGS_MAX_CONCURRENT_STREAMS, PList) of
-                    undefined ->
-                        UpdatedStreams1;
-                    NewMax ->
-                        h2_stream_set:update_my_max_active(NewMax, UpdatedStreams1)
-                end,
+            case proplists:get_value(?SETTINGS_MAX_CONCURRENT_STREAMS, PList) of
+                undefined ->
+                    UpdatedStreams1;
+                NewMax ->
+                    h2_stream_set:update_my_max_active(NewMax, UpdatedStreams1)
+            end,
 
-            NewEncodeContext = hpack:new_max_table_size(HTS, EncodeContext),
 
             socksend(Conn, h2_frame_settings:ack()),
-            {next_state, connected, Conn#connection{
-                                      peer_settings=NewPeerSettings,
-                                      %% Why aren't we updating send_window_size here? Section 6.9.2 of
-                                      %% the spec says: "The connection flow-control window can only be
-                                      %% changed using WINDOW_UPDATE frames.",
-                                      encode_context=NewEncodeContext,
-                                      streams=UpdatedStreams2
-                                     }};
+            maybe_reply(Event, {next_state, connected, Conn#connection{
+                                                         %% Why aren't we updating send_window_size here? Section 6.9.2 of
+                                                         %% the spec says: "The connection flow-control window can only be
+                                                         %% changed using WINDOW_UPDATE frames.",
+                                                         streams=UpdatedStreams2
+                                                        }}, ok);
         {error, Code} ->
-            go_away(Code, Conn)
+            go_away(Event, Code, <<"invalid frame settings">>, Conn)
     end;
 
 %% This is the case where we got an ACK, so dequeue settings we're
 %% waiting to apply
-route_frame({H, _Payload},
-            #connection{
+handle_settings(Event, {H, _Payload},
+            Conn=#connection{
                settings_sent=SS,
-               streams=Streams,
-               self_settings=#settings{
-                                initial_window_size=OldIWS
-                               }
-              }=Conn)
+               streams=Streams})
     when H#frame_header.type == ?SETTINGS,
          ?IS_FLAG((H#frame_header.flags), ?FLAG_ACK) ->
     case queue:out(SS) of
         {{value, {_Ref, NewSettings}}, NewSS} ->
 
+            %% we have to change a bunch of stuff, so wait until we
+            %% have the lock to do so
+            #settings{
+               initial_window_size=OldIWS
+              } = h2_stream_set:get_self_settings_locked(Streams),
+            h2_stream_set:update_self_settings(Streams, NewSettings),
             UpdatedStreams1 =
                 case NewSettings#settings.initial_window_size of
                     undefined ->
@@ -616,428 +686,59 @@ route_frame({H, _Payload},
                     NewMax ->
                         h2_stream_set:update_their_max_active(NewMax, UpdatedStreams1)
                 end,
-            {next_state,
+            maybe_reply(Event, {next_state,
              connected,
              Conn#connection{
                streams=UpdatedStreams2,
-               settings_sent=NewSS,
-               self_settings=NewSettings
+               settings_sent=NewSS
                %% Same thing here, section 6.9.2
-              }};
+              }}, ok);
         _X ->
-            {next_state, closing, Conn}
-    end;
+            maybe_reply(Event, {next_state, closing, Conn}, ok)
+    end.
 
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%% Stream level frames
-%%
-
-%% receive data frame bigger than connection recv window
-route_frame({H,_Payload}, Conn)
-    when H#frame_header.type == ?DATA,
-         H#frame_header.length > Conn#connection.recv_window_size ->
-    go_away(?FLOW_CONTROL_ERROR, Conn);
-
-route_frame(F={H=#frame_header{
-                    length=L,
-                    stream_id=StreamId}, _Payload},
-            #connection{
-               recv_window_size=CRWS,
-               streams=Streams
-              }=Conn)
-    when H#frame_header.type == ?DATA ->
-    Stream = h2_stream_set:get(StreamId, Streams),
-
-    case h2_stream_set:type(Stream) of
-        active ->
-            case {
-              h2_stream_set:recv_window_size(Stream) < L,
-              Conn#connection.flow_control,
-              L > 0
-             } of
-                {true, _, _} ->
-                    rst_stream(Stream,
-                               ?FLOW_CONTROL_ERROR,
-                               Conn);
-                %% If flow control is set to auto, and L > 0, send
-                %% window updates back to the peer. If L == 0, we're
-                %% not allowed to send window_updates of size 0, so we
-                %% hit the next clause
-                {false, auto, true} ->
-                    %% Make window size great again
-                    h2_frame_window_update:send(Conn#connection.socket,
-                                                L, StreamId),
-                    send_window_update(self(), L),
-                    recv_data(Stream, F),
-                    {next_state,
-                     connected,
-                     Conn#connection{
-                       recv_window_size=CRWS-L
-                      }};
-                %% Either
-                %% {false, auto, true} or
-                %% {false, manual, _DoesntMatter}
-                _Tried ->
-                    recv_data(Stream, F),
-                    {next_state,
-                     connected,
-                     Conn#connection{
-                       recv_window_size=CRWS-L,
-                       streams=h2_stream_set:upsert(
-                                 h2_stream_set:decrement_recv_window(L, Stream),
-                                 Streams)
-                      }}
-            end;
-        _ ->
-            go_away(?PROTOCOL_ERROR, Conn)
-    end;
-
-route_frame({#frame_header{type=?HEADERS}=FH, _Payload},
-            #connection{}=Conn)
-  when Conn#connection.type == server,
-       FH#frame_header.stream_id rem 2 == 0 ->
-    go_away(?PROTOCOL_ERROR, Conn);
-route_frame({#frame_header{type=?HEADERS}=FH, _Payload}=Frame,
-            #connection{}=Conn) ->
-    StreamId = FH#frame_header.stream_id,
-    Streams = Conn#connection.streams,
-
-    %% Four things could be happening here.
-
-    %% If we're a server, these are either request headers or request
-    %% trailers
-
-    %% If we're a client, these are either headers in response to a
-    %% client request, or headers in response to a push promise
-
-    Stream = h2_stream_set:get(StreamId, Streams),
-    {ContinuationType, NewConn} =
-        case {h2_stream_set:type(Stream), Conn#connection.type} of
-            {idle, server} ->
-                case
-                    h2_stream_set:new_stream(
-                      StreamId,
-                      self(),
-                      Conn#connection.stream_callback_mod,
-                      Conn#connection.stream_callback_opts,
-                      Conn#connection.socket,
-                      (Conn#connection.peer_settings)#settings.initial_window_size,
-                      (Conn#connection.self_settings)#settings.initial_window_size,
-                      Conn#connection.type,
-                      Streams) of
-                    {error, ErrorCode, NewStream} ->
-                        rst_stream(NewStream, ErrorCode, Conn),
-                        {none, Conn};
-                    {_, NewStreams} ->
-                        {headers, Conn#connection{streams=NewStreams}}
-                end;
-            {active, server} ->
-                {trailers, Conn};
-            _ ->
-                {headers, Conn}
-        end,
-
-    case ContinuationType of
-        none ->
-            {next_state,
-             connected,
-             NewConn};
-        _ ->
-            ContinuationState =
-                #continuation_state{
-                   type = ContinuationType,
-                   frames = queue:from_list([Frame]),
-                   end_stream = ?IS_FLAG((FH#frame_header.flags), ?FLAG_END_STREAM),
-                   end_headers = ?IS_FLAG((FH#frame_header.flags), ?FLAG_END_HEADERS),
-                   stream_id = StreamId
-                  },
-            %% maybe_hpack/2 uses this #continuation_state to figure
-            %% out what to do, which might include hpack
-            maybe_hpack(ContinuationState, NewConn)
-    end;
-
-route_frame(F={H=#frame_header{
-                    stream_id=_StreamId,
-                    type=?CONTINUATION
-                   }, _Payload},
-            #connection{
-               continuation = #continuation_state{
-                                 frames = CFQ
-                                } = Cont
-              }=Conn) ->
-    maybe_hpack(Cont#continuation_state{
-                  frames=queue:in(F, CFQ),
-                  end_headers=?IS_FLAG((H#frame_header.flags), ?FLAG_END_HEADERS)
-                 },
-                Conn);
-
-route_frame({H, _Payload},
-            #connection{}=Conn)
-    when H#frame_header.type == ?PRIORITY,
-         H#frame_header.stream_id == 0 ->
-    go_away(?PROTOCOL_ERROR, Conn);
-route_frame({H, _Payload},
-            #connection{} = Conn)
-    when H#frame_header.type == ?PRIORITY ->
-    {next_state, connected, Conn};
-
-route_frame(
-  {#frame_header{
-      stream_id=StreamId,
-      type=?RST_STREAM
-      },
-   _Payload},
-  #connection{} = Conn) ->
-    %% TODO: anything with this?
-    %% EC = h2_frame_rst_stream:error_code(Payload),
-    Streams = Conn#connection.streams,
-    Stream = h2_stream_set:get(StreamId, Streams),
-    case h2_stream_set:type(Stream) of
-        idle ->
-            go_away(?PROTOCOL_ERROR, Conn);
-        _Stream ->
-            %% TODO: RST_STREAM support
-            {next_state, connected, Conn}
-    end;
-route_frame({H=#frame_header{}, _P},
-            #connection{} =Conn)
-    when H#frame_header.type == ?PUSH_PROMISE,
-         Conn#connection.type == server ->
-    go_away(?PROTOCOL_ERROR, Conn);
-route_frame({H=#frame_header{
-                  stream_id=StreamId
-                 },
-             Payload}=Frame,
-            #connection{}=Conn)
-    when H#frame_header.type == ?PUSH_PROMISE,
-         Conn#connection.type == client ->
-    PSID = h2_frame_push_promise:promised_stream_id(Payload),
-
-    Streams = Conn#connection.streams,
-
-    Old = h2_stream_set:get(StreamId, Streams),
-    NotifyPid = h2_stream_set:notify_pid(Old),
-
-    %% TODO: Case statement here about execeding the number of
-    %% pushed. Honestly I think it's a bigger problem with the
-    %% h2_stream_set, but we can punt it for now. The idea is that
-    %% reserved(local) and reserved(remote) aren't technically
-    %% 'active', but they're being counted that way right now. Again,
-    %% that only matters if Server Push is enabled.
-    {_, NewStreams} =
-        h2_stream_set:new_stream(
-          PSID,
-          NotifyPid,
-          Conn#connection.stream_callback_mod,
-          Conn#connection.stream_callback_opts,
-          Conn#connection.socket,
-          (Conn#connection.peer_settings)#settings.initial_window_size,
-          (Conn#connection.self_settings)#settings.initial_window_size,
-          Conn#connection.type,
-          Streams),
-
-    Continuation = #continuation_state{
-                      stream_id=StreamId,
-                      type=push_promise,
-                      frames = queue:in(Frame, queue:new()),
-                      end_headers=?IS_FLAG((H#frame_header.flags), ?FLAG_END_HEADERS),
-                      promised_id=PSID
-                     },
-    maybe_hpack(Continuation,
-                Conn#connection{
-                  streams = NewStreams
-                 });
-%% PING
-%% If not stream 0, then connection error
-route_frame({H, _Payload},
-            #connection{} = Conn)
-    when H#frame_header.type == ?PING,
-         H#frame_header.stream_id =/= 0 ->
-    go_away(?PROTOCOL_ERROR, Conn);
-%% If length != 8, FRAME_SIZE_ERROR
-%% TODO: I think this case is already covered in h2_frame now
-route_frame({H, _Payload},
-           #connection{}=Conn)
-    when H#frame_header.type == ?PING,
-         H#frame_header.length =/= 8 ->
-    go_away(?FRAME_SIZE_ERROR, Conn);
-%% If PING && !ACK, must ACK
-route_frame({H, Ping},
-            #connection{}=Conn)
-    when H#frame_header.type == ?PING,
-         ?NOT_FLAG((H#frame_header.flags), ?FLAG_ACK) ->
-    Ack = h2_frame_ping:ack(Ping),
-    socksend(Conn, h2_frame:to_binary(Ack)),
-    {next_state, connected, Conn};
-route_frame({H, Payload},
-            #connection{pings = Pings}=Conn)
-    when H#frame_header.type == ?PING,
-         ?IS_FLAG((H#frame_header.flags), ?FLAG_ACK) ->
-    case maps:get(h2_frame_ping:to_binary(Payload), Pings, undefined) of
-        undefined ->
-            ok;
-        {NotifyPid, _} ->
-            NotifyPid ! {'PONG', self()}
-    end,
-    NextPings = maps:remove(Payload, Pings),
-    {next_state, connected, Conn#connection{pings = NextPings}};
-route_frame({H=#frame_header{stream_id=0}, _Payload},
-            #connection{}=Conn)
-    when H#frame_header.type == ?GOAWAY ->
-    go_away(?NO_ERROR, Conn);
-
-%% Window Update
-route_frame(
-  {#frame_header{
-      stream_id=0,
-      type=?WINDOW_UPDATE
-     },
-   Payload},
-  #connection{
-     send_window_size=SWS
-    }=Conn) ->
-    WSI = h2_frame_window_update:size_increment(Payload),
-    NewSendWindow = SWS+WSI,
-    case NewSendWindow > 2147483647 of
-        true ->
-            go_away(?FLOW_CONTROL_ERROR, Conn);
-        false ->
-            %% TODO: Priority Sort! Right now, it's just sorting on
-            %% lowest stream_id first
-            Streams = h2_stream_set:sort(Conn#connection.streams),
-
-            {RemainingSendWindow, UpdatedStreams} =
-                h2_stream_set:send_what_we_can(
-                  all,
-                  NewSendWindow,
-                  (Conn#connection.peer_settings)#settings.max_frame_size,
-                  Streams
-                 ),
-            {next_state, connected,
-             Conn#connection{
-               send_window_size=RemainingSendWindow,
-               streams=UpdatedStreams
-              }}
-    end;
-route_frame(
-  {#frame_header{type=?WINDOW_UPDATE}=FH,
-   Payload},
-  #connection{}=Conn
- ) ->
-    StreamId = FH#frame_header.stream_id,
-    Streams = Conn#connection.streams,
-    WSI = h2_frame_window_update:size_increment(Payload),
-    Stream = h2_stream_set:get(StreamId, Streams),
-    case h2_stream_set:type(Stream) of
-        idle ->
-            go_away(?PROTOCOL_ERROR, Conn);
-        closed ->
-            rst_stream(Stream, ?STREAM_CLOSED, Conn);
-        active ->
-            SWS = Conn#connection.send_window_size,
-            NewSSWS = h2_stream_set:send_window_size(Stream)+WSI,
-
-            case NewSSWS > 2147483647 of
-                true ->
-                    rst_stream(Stream, ?FLOW_CONTROL_ERROR, Conn);
-                false ->
-                    {RemainingSendWindow, NewStreams}
-                        = h2_stream_set:send_what_we_can(
-                            StreamId,
-                            SWS,
-                            (Conn#connection.peer_settings)#settings.max_frame_size,
-                            h2_stream_set:upsert(
-                              h2_stream_set:increment_send_window_size(WSI, Stream),
-                              Streams)
-                           ),
-                    {next_state, connected,
-                     Conn#connection{
-                       send_window_size=RemainingSendWindow,
-                       streams=NewStreams
-                      }}
-            end
-    end;
-route_frame({#frame_header{type=T}, _}, Conn)
-  when T > ?CONTINUATION ->
-    {next_state, connected, Conn};
-route_frame(Frame, #connection{}=Conn) ->
-    error_logger:error_msg("Frame condition not covered by pattern match."
-                           "Please open a github issue with this output: ~s",
-                           [h2_frame:format(Frame)]),
-    go_away(?PROTOCOL_ERROR, Conn).
-
-handle_event(_, {stream_finished,
-              StreamId,
-              Headers,
-              Body,
-              Trailers},
-             Conn) ->
-    Stream = h2_stream_set:get(StreamId, Conn#connection.streams),
-    case h2_stream_set:type(Stream) of
-        active ->
-            NotifyPid = h2_stream_set:notify_pid(Stream),
-            Response =
-                case {Conn#connection.type, Conn#connection.garbage_on_end} of
-                    {server, _} -> garbage;
-                    {client, false} -> {Headers, Body, Trailers};
-                    {client, true} -> garbage
-                end,
-            {_NewStream, NewStreams} =
-                h2_stream_set:close(
-                  Stream,
-                  Response,
-                  Conn#connection.streams),
-
-            NewConn =
-                Conn#connection{
-                  streams = NewStreams
-                 },
-            case {Conn#connection.type, is_pid(NotifyPid)} of
-                {client, true} ->
-                    NotifyPid ! {'END_STREAM', StreamId};
-                _ ->
-                    ok
-            end,
-            {keep_state, NewConn};
-        _ ->
-            %% stream finished multiple times
-            {keep_state, Conn}
-    end;
 handle_event(_, {send_window_update, 0}, Conn) ->
     {keep_state, Conn};
 handle_event(_, {send_window_update, Size},
              #connection{
-                recv_window_size=CRWS,
                 socket=Socket
                 }=Conn) ->
     h2_frame_window_update:send(Socket, Size, 0),
-    {keep_state,
-     Conn#connection{
-       recv_window_size=CRWS+Size
-      }};
+    h2_stream_set:increment_socket_recv_window(Size, Conn#connection.streams),
+    {keep_state, Conn};
 handle_event(_, {update_settings, Http2Settings},
              #connection{}=Conn) ->
     {keep_state,
      send_settings(Http2Settings, Conn)};
 handle_event(_, {send_headers, StreamId, Headers, Opts}, Conn) ->
-    send_headers_(StreamId, Headers, Opts, Conn);
-handle_event(_, {actually_send_trailers, StreamId, Trailers}, Conn=#connection{encode_context=EncodeContext,
-                                                                               streams=Streams,
+    send_headers_(StreamId, Headers, Opts, Conn#connection.streams),
+    {keep_state, Conn};
+handle_event(_, {actually_send_trailers, StreamId, Trailers}, Conn=#connection{streams=Streams,
                                                                                socket=Socket}) ->
+
+    {Lock, EncodeContext} = h2_stream_set:get_encode_context(Streams, Trailers),
     Stream = h2_stream_set:get(StreamId, Streams),
+    PeerSettings = h2_stream_set:get_peer_settings(Streams),
     {FramesToSend, NewContext} =
-        h2_frame_headers:to_frames(h2_stream_set:stream_id(Stream),
-                                   Trailers,
-                                   EncodeContext,
-                                   (Conn#connection.peer_settings)#settings.max_frame_size,
-                                   true
-                                  ),
-   
-    [sock:send(Socket, h2_frame:to_binary(Frame)) || Frame <- FramesToSend],
-    {keep_state,
-     Conn#connection{
-       encode_context=NewContext
-      }};
+    h2_frame_headers:to_frames(h2_stream_set:stream_id(Stream),
+                               Trailers,
+                               EncodeContext,
+                               PeerSettings#settings.max_frame_size,
+                               true
+                              ),
+
+    sock:send(Socket, [h2_frame:to_binary(Frame) || Frame <- FramesToSend]),
+
+    h2_stream_set:release_encode_context(Streams, {Lock, NewContext}),
+    {keep_state, Conn};
+handle_event(Event, {rst_stream, StreamId, ErrorCode},
+             #connection{
+                streams = Streams,
+                socket = _Socket
+               }=Conn
+            ) ->
+    Stream = h2_stream_set:get(StreamId, Streams),
+    rst_stream_(Event, Stream, ErrorCode, Conn);
 handle_event(_, {send_trailers, StreamId, Headers, Opts},
              #connection{
                 streams = Streams,
@@ -1046,26 +747,19 @@ handle_event(_, {send_trailers, StreamId, Headers, Opts},
             ) ->
     BodyComplete = proplists:get_value(send_end_stream, Opts, true),
 
-    Stream = h2_stream_set:get(StreamId, Streams),
-    case h2_stream_set:type(Stream) of
+    Stream0 = h2_stream_set:get(StreamId, Streams),
+    case h2_stream_set:type(Stream0) of
         active ->
-            NewS = h2_stream_set:update_trailers(Headers, Stream),
-            {NewSWS, NewStreams} =
-                h2_stream_set:send_what_we_can(
-                  StreamId,
-                  Conn#connection.send_window_size,
-                  (Conn#connection.peer_settings)#settings.max_frame_size,
-                  h2_stream_set:upsert(
-                    h2_stream_set:update_data_queue(h2_stream_set:queued_data(Stream), BodyComplete, NewS),
-                    Conn#connection.streams)),
-
-            send_t(Stream, Headers),
+            h2_stream_set:send_what_we_can(
+              StreamId,
+              fun(Stream) -> 
+                      NewS = h2_stream_set:update_trailers(Headers, Stream),
+                      h2_stream_set:update_data_queue(h2_stream_set:queued_data(Stream), BodyComplete, NewS)
+              end, Streams),
+            send_t(Stream0, Headers),
 
             {keep_state,
-             Conn#connection{
-               send_window_size=NewSWS,
-               streams=NewStreams
-              }};
+             Conn};
         idle ->
             %% In theory this is a client maybe activating a stream,
             %% but in practice, we've already activated the stream in
@@ -1075,96 +769,29 @@ handle_event(_, {send_trailers, StreamId, Headers, Opts},
             {keep_state, Conn}
     end;
 handle_event(_, {send_body, StreamId, Body, Opts},
-             #connection{}=Conn) ->
-    BodyComplete = proplists:get_value(send_end_stream, Opts, true),
-
-    Stream = h2_stream_set:get(StreamId, Conn#connection.streams),
-    case h2_stream_set:type(Stream) of
-        active ->
-            OldBody = h2_stream_set:queued_data(Stream),
-            NewBody = case is_binary(OldBody) of
-                          true -> <<OldBody/binary, Body/binary>>;
-                          false -> Body
-                      end,
-            {NewSWS, NewStreams} =
-                h2_stream_set:send_what_we_can(
-                  StreamId,
-                  Conn#connection.send_window_size,
-                  (Conn#connection.peer_settings)#settings.max_frame_size,
-                  h2_stream_set:upsert(
-                    h2_stream_set:update_data_queue(NewBody, BodyComplete, Stream),
-                    Conn#connection.streams)),
-
-            {keep_state,
-             Conn#connection{
-               send_window_size=NewSWS,
-               streams=NewStreams
-              }};
-        idle ->
-            %% Sending DATA frames on an idle stream?  It's a
-            %% Connection level protocol error on reciept, but If we
-            %% have no active stream what can we even do?
-            {keep_state, Conn};
-        closed ->
-            {keep_state, Conn}
-    end;
-
+             #connection{streams=Streams}=Conn) ->
+    send_body_(StreamId, Body, Opts, Streams),
+    {keep_state, Conn};
 handle_event(_, {send_request, NotifyPid, Headers, Body},
         #connection{
-            streams=Streams,
-            next_available_stream_id=NextId
+            streams=Streams
         }=Conn) ->
-    case send_request(NextId, NotifyPid, Conn, Streams, Headers, Body) of
-        {ok, GoodStreamSet} ->
-            {keep_state, Conn#connection{
-                next_available_stream_id=NextId+2,
-                streams=GoodStreamSet
-            }};
+    case send_request_(NotifyPid, Conn, Streams, Headers, Body) of
+        {ok, NewConn} ->
+            {keep_state, NewConn};
         {error, _Code} ->
             {keep_state, Conn}
     end;
-
-handle_event(_, {send_promise, StreamId, NewStreamId, Headers},
-             #connection{
-                streams=Streams,
-                encode_context=OldContext
-               }=Conn
-            ) ->
-    NewStream = h2_stream_set:get(NewStreamId, Streams),
-    case h2_stream_set:type(NewStream) of
-        active ->
-            %% TODO: This could be a series of frames, not just one
-            {PromiseFrame, NewContext} =
-                h2_frame_push_promise:to_frame(
-               StreamId,
-               NewStreamId,
-               Headers,
-               OldContext
-              ),
-
-            %% Send the PP Frame
-            Binary = h2_frame:to_binary(PromiseFrame),
-            socksend(Conn, Binary),
-
-            %% Get the promised stream rolling
-            h2_stream:send_pp(h2_stream_set:stream_pid(NewStream), Headers),
-
-            {keep_state,
-             Conn#connection{
-               encode_context=NewContext
-              }};
-        _ ->
-            {keep_state, Conn}
-    end;
-
-handle_event(_, {check_settings_ack, {Ref, NewSettings}},
+handle_event(Event, {settings, Frame}, State) ->
+    handle_settings(Event, Frame, State);
+handle_event(Event, {check_settings_ack, {Ref, NewSettings}},
              #connection{
                 settings_sent=SS
                }=Conn) ->
     case queue:out(SS) of
         {{value, {Ref, NewSettings}}, _} ->
             %% This is still here!
-            go_away(?SETTINGS_TIMEOUT, Conn);
+            go_away(Event, ?SETTINGS_TIMEOUT, Conn);
         _ ->
             %% YAY!
             {keep_state, Conn}
@@ -1180,7 +807,7 @@ handle_event(_, {send_frame, Frame},
     {keep_state, Conn};
 handle_event(stop, _StateName,
             #connection{}=Conn) ->
-    go_away(0, Conn);
+    go_away(stop, 0, Conn);
 handle_event({call, From}, streams,
                   #connection{
                      streams=Streams
@@ -1202,56 +829,29 @@ handle_event({call, From}, {get_response, StreamId},
                 {not_ready, Conn#connection.streams}
         end,
     {keep_state, Conn#connection{streams=NewStreams}, [{reply, From, Reply}]};
-handle_event({call, From}, {new_stream, NotifyPid},
-                  #connection{
-                     stream_callback_mod=CallbackMod,
-                     stream_callback_opts=CallbackOpts
-                    }=Conn) ->
-    new_stream_(From, CallbackMod, CallbackOpts, NotifyPid, Conn);
-handle_event({call, From}, {new_stream, CallbackMod, CallbackState, NotifyPid}, Conn) ->
-    new_stream_(From, CallbackMod, CallbackState, NotifyPid, Conn);
 handle_event({call, From}, {new_stream, CallbackMod, CallbackState, Headers, Opts, NotifyPid}, Conn) ->
     new_stream_(From, CallbackMod, CallbackState, Headers, Opts, NotifyPid, Conn);
-handle_event({call, From}, is_push,
-                  #connection{
-                     peer_settings=#settings{enable_push=Push}
-                    }=Conn) ->
-    IsPush = case Push of
-        1 -> true;
-        _ -> false
-    end,
-    {keep_state, Conn, [{reply, From, IsPush}]};
-handle_event({call, From}, get_peer,
-                  #connection{
-                     socket=Socket
-                    }=Conn) ->
-    case sock:peername(Socket) of
-        {error, _}=Error ->
-            {keep_state, Conn, [{reply, From, Error}]};
-        {ok, _AddrPort}=OK ->
-            {keep_state, Conn, [{reply, From, OK}]}
-    end;
-handle_event({call, From}, get_peercert,
-                  #connection{
-                     socket=Socket
-                    }=Conn) ->
-    case sock:peercert(Socket) of
-        {error, _}=Error ->
-            {keep_state, Conn, [{reply, From, Error}]};
-        {ok, _Cert}=OK ->
-            {keep_state, Conn, [{reply, From, OK}]}
-    end;
+handle_event({call, From}, {new_stream, CallbackMod, CallbackState, Headers, Body, Opts, NotifyPid}, Conn) ->
+    new_stream_(From, CallbackMod, CallbackState, Headers, Body, Opts, NotifyPid, Conn);
+handle_event({call, From}, {send_promise, StreamId, Headers, NotifyPid}, Conn) ->
+    send_promise_(From, StreamId, Headers, NotifyPid, Conn);
 handle_event({call, From}, {send_request, NotifyPid, Headers, Body},
         #connection{
-            streams=Streams,
-            next_available_stream_id=NextId
+            streams=Streams
         }=Conn) ->
-    case send_request(NextId, NotifyPid, Conn, Streams, Headers, Body) of
-        {ok, GoodStreamSet} ->
-            {keep_state, Conn#connection{
-                next_available_stream_id=NextId+2,
-                streams=GoodStreamSet
-            }, [{reply, From, ok}]};
+    case send_request_(NotifyPid, Conn, Streams, Headers, Body) of
+        {ok, NewConn} ->
+            {keep_state, NewConn, [{reply, From, ok}]};
+        {error, Code} ->
+            {keep_state, Conn, [{reply, From, {error, Code}}]}
+    end;
+handle_event({call, From}, {send_request, NotifyPid, Headers, Body, CallbackMod, CallbackOpts},
+        #connection{
+            streams=Streams
+        }=Conn) ->
+    case send_request_(NotifyPid, Conn, Streams, Headers, Body, CallbackMod, CallbackOpts) of
+        {ok, NewConn} ->
+            {keep_state, NewConn, [{reply, From, ok}]};
         {error, Code} ->
             {keep_state, Conn, [{reply, From, {error, Code}}]}
     end;
@@ -1272,18 +872,6 @@ handle_event({call, From}, {send_ping, NotifyPid},
     end;
 
 %% Socket Messages
-%% {tcp, Socket, Data}
-handle_event(info, {tcp, Socket, Data},
-            #connection{
-               socket={gen_tcp,Socket}
-              }=Conn) ->
-    handle_socket_data(Data, Conn);
-%% {ssl, Socket, Data}
-handle_event(info, {ssl, Socket, Data},
-            #connection{
-               socket={ssl,Socket}
-              }=Conn) ->
-    handle_socket_data(Data, Conn);
 %% {tcp_passive, Socket}
 handle_event(info, {tcp_passive, Socket},
             #connection{
@@ -1314,11 +902,16 @@ handle_event(info, {ssl_error, Socket, Reason},
                socket={ssl,Socket}
               }=Conn) ->
     handle_socket_error(Reason, Conn);
-handle_event(info, {_,R},
-           #connection{}=Conn) ->
-    handle_socket_error(R, Conn);
-handle_event(_, _, Conn) ->
-     go_away(?PROTOCOL_ERROR, Conn).
+handle_event(info, {go_away, ErrorCode}, Conn) ->
+    gen_statem:cast(self(), io_lib:format("GO_AWAY: ErrorCode ~p", [ErrorCode])),
+    {next_state, closing, Conn};
+%handle_event(info, {_,R},
+%           #connection{}=Conn) ->
+%    handle_socket_error(R, Conn);
+handle_event(Event, Msg, Conn) ->
+    error_logger:error_msg("h2_connection received unexpected event of type ~p : ~p", [Event, Msg]),
+    %%go_away(Event, ?PROTOCOL_ERROR, Conn).
+    {keep_state, Conn}.
 
 code_change(_OldVsn, StateName, Conn, _Extra) ->
     {ok, StateName, Conn}.
@@ -1330,120 +923,220 @@ terminate(_Reason, _StateName, _Conn=#connection{}) ->
 terminate(_Reason, _StateName, _State) ->
     ok.
 
-new_stream_(From, CallbackMod, CallbackState, NotifyPid, Conn=#connection{streams=Streams,
-                                                                          next_available_stream_id=NextId}) ->
+new_stream_(From, CallbackMod, CallbackState, Headers, Opts, NotifyPid, Conn=#connection{streams=Streams}) ->
     {Reply, NewStreams} =
         case
             h2_stream_set:new_stream(
-              NextId,
+              next,
               NotifyPid,
               CallbackMod,
               CallbackState,
-              Conn#connection.socket,
-              Conn#connection.peer_settings#settings.initial_window_size,
-              Conn#connection.self_settings#settings.initial_window_size,
-              Conn#connection.type,
-              Streams)
+              Streams
+            )
         of
             {error, Code, _NewStream} ->
                 %% TODO: probably want to have events like this available for metrics
                 %% tried to create new_stream but there are too many
                 {{error, Code}, Streams};
-            {Pid, GoodStreamSet} ->
-                {{NextId, Pid}, GoodStreamSet}
-        end,
-    {keep_state, Conn#connection{
-                                 next_available_stream_id=NextId+2,
-                                 streams=NewStreams
-                                }, [{reply, From, Reply}]}.
-
-new_stream_(From, CallbackMod, CallbackState, Headers, Opts, NotifyPid, Conn=#connection{streams=Streams,
-                                                                                         next_available_stream_id=NextId}) ->
-    {Reply, NewStreams} =
-        case
-            h2_stream_set:new_stream(
-              NextId,
-              NotifyPid,
-              CallbackMod,
-              CallbackState,
-              Conn#connection.socket,
-              Conn#connection.peer_settings#settings.initial_window_size,
-              Conn#connection.self_settings#settings.initial_window_size,
-              Conn#connection.type,
-              Streams)
-        of
-            {error, Code, _NewStream} ->
-                %% TODO: probably want to have events like this available for metrics
-                %% tried to create new_stream but there are too many
-                {{error, Code}, Streams};
-            {Pid, GoodStreamSet} ->
+            {Pid, NextId, GoodStreamSet} ->
                 {{NextId, Pid}, GoodStreamSet}
         end,
 
     Conn1 = Conn#connection{
-              next_available_stream_id=NextId+2,
               streams=NewStreams
              },
-    {keep_state, Conn2} = send_headers_(NextId, Headers, Opts, Conn1),
-
+    Conn2 = case Reply of
+                {error, _Code} ->
+                    Conn1;
+                {NextId0, _Pid} ->
+                    send_headers_(NextId0, Headers, Opts, NewStreams),
+                    Conn1
+            end,
     {keep_state, Conn2, [{reply, From, Reply}]}.
 
-send_headers_(StreamId, Headers, Opts, #connection{encode_context=EncodeContext,
-                                                   streams = Streams,
-                                                   socket = Socket
-                                                  }=Conn) ->
+new_stream_(From, CallbackMod, CallbackState, Headers, Body, Opts, NotifyPid, Conn=#connection{streams=Streams}) ->
+    {Reply, NewStreams} =
+        case
+            h2_stream_set:new_stream(
+              next,
+              NotifyPid,
+              CallbackMod,
+              CallbackState,
+              Streams)
+        of
+            {error, Code, _NewStream} ->
+                %% TODO: probably want to have events like this available for metrics
+                %% tried to create new_stream but there are too many
+                {{error, Code}, Streams};
+            {Pid, NextId, GoodStreamSet} ->
+                {{NextId, Pid}, GoodStreamSet}
+        end,
+
+    Conn1 = Conn#connection{
+              streams=NewStreams
+             },
+    Conn2 = case Reply of
+                {error, _Code} ->
+                    Conn1;
+                {NextId0, _Pid} ->
+                    send_headers_(NextId0, Headers, Opts, Streams),
+                    send_body_(NextId0, Body, Opts, Streams),
+                    Conn1
+            end,
+    {keep_state, Conn2, [{reply, From, Reply}]}.
+
+send_headers_(StreamId, Headers, Opts, Streams) ->
     StreamComplete = proplists:get_value(send_end_stream, Opts, false),
+    Socket = h2_stream_set:socket(Streams),
 
     Stream = h2_stream_set:get(StreamId, Streams),
     case h2_stream_set:type(Stream) of
         active ->
+            {_SelfSettings, PeerSettings} = h2_stream_set:get_settings(Streams),
+            {Lock, EncodeContext} = h2_stream_set:get_encode_context(Streams, Headers),
             {FramesToSend, NewContext} =
-                h2_frame_headers:to_frames(h2_stream_set:stream_id(Stream),
-                                           Headers,
-                                           EncodeContext,
-                                           (Conn#connection.peer_settings)#settings.max_frame_size,
-                                           StreamComplete
-                                          ),
-            [sock:send(Socket, h2_frame:to_binary(Frame)) || Frame <- FramesToSend],
+            h2_frame_headers:to_frames(h2_stream_set:stream_id(Stream),
+                                       Headers,
+                                       EncodeContext,
+                                       PeerSettings#settings.max_frame_size,
+                                       StreamComplete
+                                      ),
+            sock:send(Socket, [h2_frame:to_binary(Frame) || Frame <- FramesToSend]),
+            h2_stream_set:release_encode_context(Streams, {Lock, NewContext}),
             send_h(Stream, Headers),
-            {keep_state,
-             Conn#connection{
-               encode_context=NewContext
-              }};
+            ok;
         idle ->
             %% In theory this is a client maybe activating a stream,
             %% but in practice, we've already activated the stream in
             %% new_stream/1
-            {keep_state, Conn};
+            ok;
         closed ->
-            {keep_state, Conn}
+            ok
     end.
 
--spec go_away(error_code(), connection()) -> {next_state, closing, connection()}.
-go_away(ErrorCode,
-        #connection{
-           next_available_stream_id=NAS
-          }=Conn) ->
-    GoAway = h2_frame_goaway:new(NAS, ErrorCode),
+send_promise_(From, StreamId, Headers, NotifyPid, Conn=#connection{streams=Streams}) ->
+    {CallbackMod, CallbackOpts} = h2_stream_set:get_callback(Streams),
+    {Reply, NewStreams} =
+        case
+            h2_stream_set:new_stream(
+              next,
+              NotifyPid,
+              CallbackMod,
+              CallbackOpts,
+              Streams)
+        of
+            {error, Code, _NewStream} ->
+                %% TODO: probably want to have events like this available for metrics
+                %% tried to create new_stream but there are too many
+                {{error, Code}, Streams};
+            {Pid, NextId, GoodStreamSet} ->
+                {{NextId, Pid}, GoodStreamSet}
+        end,
+
+    Conn1 = Conn#connection{
+              streams=NewStreams
+             },
+    Conn2 = case Reply of
+                {error, _Code} ->
+                    Conn1;
+                {NextId0, _Pid} ->
+                    {Lock, OldContext} = h2_stream_set:get_encode_context(Streams, Headers),
+                    %% TODO: This could be a series of frames, not just one
+                    {PromiseFrame, NewContext} =
+                    h2_frame_push_promise:to_frame(
+                      StreamId,
+                      NextId0,
+                      Headers,
+                      OldContext
+                     ),
+
+                    %% Send the PP Frame
+                    Binary = h2_frame:to_binary(PromiseFrame),
+                    sock:send(h2_stream_set:socket(Streams), Binary),
+
+                    h2_stream_set:release_encode_context(Streams, {Lock, NewContext}),
+
+                    %% Get the promised stream rolling
+                    h2_stream:send_pp(_Pid, Headers),
+
+                    Conn1
+            end,
+    {keep_state, Conn2, [{reply, From, Reply}]}.
+
+
+send_trailers_(StreamId, Trailers, Opts, Streams) ->
+    BodyComplete = proplists:get_value(send_end_stream, Opts, true),
+
+    Stream0 = h2_stream_set:get(StreamId, Streams),
+    case h2_stream_set:type(Stream0) of
+        active ->
+                h2_stream_set:send_what_we_can(
+                  StreamId,
+                  fun(Stream) ->
+                          NewS = h2_stream_set:update_trailers(Trailers, Stream),
+                          h2_stream_set:update_data_queue(h2_stream_set:queued_data(Stream), BodyComplete, NewS)
+                  end, Streams),
+
+            send_t(Stream0, Trailers),
+            ok;
+        idle ->
+            %% In theory this is a client maybe activating a stream,
+            %% but in practice, we've already activated the stream in
+            %% new_stream/1
+            ok;
+        closed ->
+            ok
+    end.
+
+
+go_away(Event, ErrorCode, Conn) ->
+    go_away(Event, ErrorCode, <<>>, Conn).
+
+go_away(Event, ErrorCode, Reason, Conn) ->
+    go_away_(ErrorCode, Reason, Conn#connection.socket, Conn#connection.streams),
+    %% TODO: why is this sending a string?
+    gen_statem:cast(self(), io_lib:format("GO_AWAY: ErrorCode ~p", [ErrorCode])),
+    maybe_reply(Event, {next_state, closing, Conn}, ok).
+
+
+-spec go_away_(error_code(), sock:socket(), h2_stream_set:stream_set()) -> ok.
+go_away_(ErrorCode, Socket, Streams) ->
+    go_away_(ErrorCode, <<>>, Socket, Streams).
+
+go_away_(ErrorCode, Reason, Socket, Streams) ->
+    NAS = h2_stream_set:get_next_available_stream_id(Streams),
+    GoAway = h2_frame_goaway:new(NAS, ErrorCode, Reason),
     GoAwayBin = h2_frame:to_binary({#frame_header{
                                        stream_id=0
                                       }, GoAway}),
-    socksend(Conn, GoAwayBin),
-    %% TODO: why is this sending a string?
-    gen_statem:cast(self(), io_lib:format("GO_AWAY: ErrorCode ~p", [ErrorCode])),
-    {next_state, closing, Conn}.
+    sock:send(Socket, GoAwayBin),
+    ok.
 
-%% rst_stream/3 looks for a running process for the stream. If it
+maybe_reply({call, From}, {next_state, NewState, NewData}, Msg) ->
+    {next_state, NewState, NewData, [{reply, From, Msg}]};
+maybe_reply(_, Return, _) ->
+    Return.
+
+%% rst_stream_/3 looks for a running process for the stream. If it
 %% finds one, it delegates sending the rst_stream frame to it, but if
 %% it doesn't, it seems like a waste to spawn one just to kill it
 %% after sending that frame, so we send it from here.
--spec rst_stream(
+-spec rst_stream_(
+        gen_statem:event_type(),
         h2_stream_set:stream(),
         error_code(),
         connection()
-       ) ->
-                        {next_state, connected, connection()}.
-rst_stream(Stream, ErrorCode, Conn) ->
+       ) -> {next_state, connected, connection()}.
+rst_stream_(Event, Stream, ErrorCode, Conn) ->
+    rst_stream__(Stream, ErrorCode, Conn#connection.socket),
+    maybe_reply(Event, {next_state, connected, Conn}, ok).
+
+-spec rst_stream__(
+        h2_stream_set:stream(),
+        error_code(),
+        sock:socket()
+       ) -> ok.
+rst_stream__(Stream, ErrorCode, Sock) ->
     case h2_stream_set:type(Stream) of
         active ->
             %% Can this ever be undefined?
@@ -1451,8 +1144,7 @@ rst_stream(Stream, ErrorCode, Conn) ->
             %% h2_stream's rst_stream will take care of letting us know
             %% this stream is closed and will send us a message to close the
             %% stream somewhere else
-            h2_stream:rst_stream(Pid, ErrorCode),
-            {next_state, connected, Conn};
+            h2_stream:rst_stream(Pid, ErrorCode);
         _ ->
             StreamId = h2_stream_set:stream_id(Stream),
             RstStream = h2_frame_rst_stream:new(ErrorCode),
@@ -1461,17 +1153,17 @@ rst_stream(Stream, ErrorCode, Conn) ->
                               stream_id=StreamId
                              },
                            RstStream}),
-            sock:send(Conn#connection.socket, RstStreamBin),
-            {next_state, connected, Conn}
+            sock:send(Sock, RstStreamBin)
     end.
 
 -spec send_settings(settings(), connection()) -> connection().
 send_settings(SettingsToSend,
               #connection{
-                 self_settings=CurrentSettings,
+                 streams=Streams,
                  settings_sent=SS
                 }=Conn) ->
     Ref = make_ref(),
+    {CurrentSettings, _PeerSettings} = h2_stream_set:get_settings(Streams),
     Bin = h2_frame_settings:send(CurrentSettings, SettingsToSend),
     socksend(Conn, Bin),
     send_ack_timeout({Ref,SettingsToSend}),
@@ -1479,18 +1171,361 @@ send_settings(SettingsToSend,
       settings_sent=queue:in({Ref, SettingsToSend}, SS)
      }.
 
--spec send_ack_timeout({reference(), settings()}) -> pid().
+-spec send_ack_timeout({reference(), settings()}) -> reference().
 send_ack_timeout(SS) ->
     Self = self(),
-    SendAck = fun() ->
-                  timer:sleep(5000),
-                  gen_statem:cast(Self, {check_settings_ack,SS})
-              end,
-    spawn_link(SendAck).
+    erlang:send_after(5000, Self, {check_settings_ack,SS}).
 
 %% private socket handling
-active_once(Socket) ->
-    sock:setopts(Socket, [{active, once}]).
+
+spawn_data_receiver(Socket, Streams, Flow) ->
+    Connection = self(),
+    h2_stream_set:set_socket_recv_window_size(?DEFAULT_INITIAL_WINDOW_SIZE, Streams),
+    h2_stream_set:set_socket_send_window_size(?DEFAULT_INITIAL_WINDOW_SIZE, Streams),
+    Type = h2_stream_set:stream_set_type(Streams),
+    ConnDetails = get('__h2_connection_details'),
+    spawn_link(fun() ->
+                       put('__h2_connection_details', ConnDetails),
+                       receive_data(Socket, Streams, Connection, Flow, Type, true, hpack:new_context())
+               end).
+
+
+receive_data(Socket, Streams, Connection, Flow, Type, First, Decoder) ->
+    case h2_frame:read(Socket, infinity) of
+        {error, closed} ->
+            Connection ! socket_closed(Socket);
+        {error, Reason} ->
+            Connection ! socket_error(Socket, Reason);
+        {stream_error, 0, Code} ->
+            %% Remaining Bytes don't matter, we're closing up shop.
+            go_away_(Code, <<"stream error">>, Socket, Streams),
+            Connection ! {go_away, Code};
+        {stream_error, StreamId, Code} ->
+            Stream = h2_stream_set:get(StreamId, Streams),
+            rst_stream__(Stream, Code, Socket),
+            receive_data(Socket, Streams, Connection, Flow, Type, First, Decoder);
+        {#frame_header{length=L} = Header, Payload} = Frame ->
+            %% TODO move some of the cases of route_frame into here
+            %% so we can send frames directly to the stream pids
+            StreamId = Header#frame_header.stream_id,
+            #settings{max_frame_size=MFS} = h2_stream_set:get_self_settings(Streams),
+            case Header#frame_header.type of
+                _ when L > MFS ->
+                    go_away_(?FRAME_SIZE_ERROR, list_to_binary(io_lib:format("received frame of size ~p over max of ~p", [L, MFS])), Socket, Streams),
+                    Connection ! {go_away, ?FRAME_SIZE_ERROR};
+                %% The first frame should be the client settings as per
+                %% RFC-7540#3.5
+                HType when HType /= ?SETTINGS andalso First ->
+                    go_away_(?PROTOCOL_ERROR, <<"non settings frame sent first">>, Socket, Streams),
+                    Connection ! {go_away, ?PROTOCOL_ERROR};
+                ?SETTINGS ->
+                    %% we want to handle settings specially here because
+                    %% of the way they have to be updated
+                    ok = gen_statem:call(Connection, {settings, Frame}),
+                    receive_data(Socket, Streams, Connection, Flow, Type, false, Decoder);
+                ?DATA ->
+                    case L > h2_stream_set:socket_recv_window_size(Streams) of
+                        true ->
+                            go_away_(?FLOW_CONTROL_ERROR, Socket, Streams),
+                            Connection ! {go_away, ?FLOW_CONTROL_ERROR};
+                        false ->
+                            Stream = h2_stream_set:get(Header#frame_header.stream_id, Streams),
+
+                            case h2_stream_set:type(Stream) of
+                                active ->
+                                    case {
+                                      h2_stream_set:recv_window_size(Stream) < L,
+                                      Flow,
+                                      L > 0
+                                     } of
+                                        {true, _, _} ->
+                                            rst_stream__(Stream,
+                                                         ?FLOW_CONTROL_ERROR,
+                                                         Socket);
+                                        %% If flow control is set to auto, and L > 0, send
+                                        %% window updates back to the peer. If L == 0, we're
+                                        %% not allowed to send window_updates of size 0, so we
+                                        %% hit the next clause
+                                        {false, auto, true} ->
+                                            %% Make window size great again if we've used up half our buffer
+                                            #settings{
+                                                  initial_window_size=IWS
+                                                 } = h2_stream_set:get_peer_settings(Streams),
+                                            case {h2_stream_set:decrement_socket_recv_window(L, Streams), IWS div 2} of
+                                                {Rem, Half} when Rem < Half ->
+                                                    %% refill the window
+                                                    h2_frame_window_update:send(Socket, IWS - Rem, 0),
+                                                    h2_stream_set:increment_socket_recv_window(IWS - Rem, Streams);
+                                                _ ->
+                                                    ok
+                                            end,
+
+                                            %send_window_update(Connection, L),
+                                            recv_data(Stream, Frame),
+                                            h2_frame_window_update:send(Socket,
+                                                                        L, Header#frame_header.stream_id);
+                                        %% Either
+                                        %% {false, auto, false} or
+                                        %% {false, manual, _DoesntMatter}
+                                        _Tried ->
+                                            recv_data(Stream, Frame),
+                                            h2_stream_set:decrement_socket_recv_window(L, Streams),
+                                            {ok, ok} = h2_stream_set:update(Header#frame_header.stream_id,
+                                                                            fun(Str) ->
+                                                                                    {h2_stream_set:decrement_recv_window(L, Str), ok}
+                                                                            end,
+                                                                            Streams)
+                                    end,
+                                    receive_data(Socket, Streams, Connection, Flow, Type, false, Decoder);
+                                StreamType ->
+                                    go_away_(?PROTOCOL_ERROR, list_to_binary(io_lib:format("data on ~p stream ~p", [StreamType, Header#frame_header.stream_id])), Socket, Streams),
+                                    Connection ! {go_away, ?PROTOCOL_ERROR}
+                            end
+                    end;
+                ?HEADERS when Type == server, StreamId rem 2 == 0 ->
+                    go_away_(?PROTOCOL_ERROR, <<"Headers on even streamid on server">>, Socket, Streams),
+                    Connection ! {go_away, ?PROTOCOL_ERROR};
+                ?HEADERS when Type == server ->
+                    Stream0 = h2_stream_set:get(StreamId, Streams),
+                    ContinuationType =
+                    case h2_stream_set:type(Stream0) of
+                        idle ->
+                            {CallbackMod, CallbackOpts} = h2_stream_set:get_callback(Streams),
+                            case
+                                h2_stream_set:new_stream(
+                                  StreamId,
+                                  Connection,
+                                  CallbackMod,
+                                  CallbackOpts,
+                                  Streams
+                                )
+                            of
+                                {error, ErrorCode, NewStream} ->
+                                    rst_stream__(NewStream, ErrorCode, Socket),
+                                    none;
+                                {_, _, _NewStreams} ->
+                                    headers
+                            end;
+                        active ->
+                            trailers;
+                        _ ->
+                            headers
+                    end,
+                    case ContinuationType of
+                        none ->
+                            receive_data(Socket, Streams, Connection, Flow, Type, false, Decoder);
+                        trailers when ?NOT_FLAG((Header#frame_header.flags), ?FLAG_END_STREAM) ->
+                            rst_stream__(Stream0, ?PROTOCOL_ERROR, Socket),
+
+                            receive_data(Socket, Streams, Connection, Flow, Type, false, Decoder);
+                        _ ->
+                            Frames = case ?IS_FLAG((Header#frame_header.flags), ?FLAG_END_HEADERS) of
+                                         true ->
+                                             %% complete headers frame, just do it
+                                             [Frame];
+                                         false ->
+                                             read_continuations(Connection, Socket, StreamId, Streams, [Frame])
+                                     end,
+                            HeadersBin = h2_frame_headers:from_frames(Frames),
+                            case hpack:decode(HeadersBin, Decoder) of
+                                {error, compression_error} ->
+                                    go_away_(?COMPRESSION_ERROR, Socket, Streams),
+                                    Connection ! {go_away, ?COMPRESSION_ERROR};
+                                {ok, {Headers, NewDecoder}} ->
+                                    Stream = h2_stream_set:get(StreamId, Streams),
+                                    %% always headers or trailers!
+                                    recv_h_(Stream, Socket, Headers),
+                                    case ?IS_FLAG((Header#frame_header.flags), ?FLAG_END_STREAM) of
+                                        true ->
+                                            recv_es_(Stream, Socket);
+                                        false ->
+                                            ok
+                                    end,
+                                    receive_data(Socket, Streams, Connection, Flow, Type, false, NewDecoder)
+                            end
+                    end;
+                ?HEADERS when Type == client ->
+                    Frames = case ?IS_FLAG((Header#frame_header.flags), ?FLAG_END_HEADERS) of
+                                 true ->
+                                     %% complete headers frame, just do it
+                                     [Frame];
+                                 false ->
+                                     read_continuations(Connection, Socket, StreamId, Streams, [Frame])
+                             end,
+                    HeadersBin = h2_frame_headers:from_frames(Frames),
+                    case hpack:decode(HeadersBin, Decoder) of
+                        {error, compression_error} ->
+                            go_away_(?COMPRESSION_ERROR, Socket, Streams),
+                            Connection ! {go_away, ?COMPRESSION_ERROR};
+                        {ok, {Headers, NewDecoder}} ->
+                            Stream = h2_stream_set:get(StreamId, Streams),
+                            %% always headers or trailers!
+                            recv_h_(Stream, Socket, Headers),
+                            case ?IS_FLAG((Header#frame_header.flags), ?FLAG_END_STREAM) of
+                                true ->
+                                    recv_es_(Stream, Socket);
+                                false ->
+                                    ok
+                            end,
+                            receive_data(Socket, Streams, Connection, Flow, Type, false, NewDecoder)
+                    end;
+                ?PRIORITY when StreamId == 0 ->
+                    go_away_(?PROTOCOL_ERROR, <<"set priority on stream 0">>, Socket, Streams),
+                    Connection ! {go_away, ?PROTOCOL_ERROR};
+                ?PRIORITY ->
+                    %% seems unimplemented?
+                    receive_data(Socket, Streams, Connection, Flow, Type, false, Decoder);
+                ?RST_STREAM when StreamId == 0 ->
+                    go_away_(?PROTOCOL_ERROR, <<"RST on stream 0">>, Socket, Streams),
+                    Connection ! {go_away, ?PROTOCOL_ERROR};
+                ?RST_STREAM ->
+                    Stream = h2_stream_set:get(StreamId, Streams),
+                    %% TODO: anything with this?
+                    %% EC = h2_frame_rst_stream:error_code(Payload),
+                    case h2_stream_set:type(Stream) of
+                        idle ->
+                            go_away_(?PROTOCOL_ERROR, <<"RST on idle stream">>, Socket, Streams),
+                            Connection ! {go_away, ?PROTOCOL_ERROR};
+                        _Stream ->
+                            %% TODO: RST_STREAM support
+                            receive_data(Socket, Streams, Connection, Flow, Type, false, Decoder)
+                    end;
+                ?PING when StreamId /= 0 ->
+                    go_away_(?PROTOCOL_ERROR, <<"ping on stream /= 0">>, Socket, Streams),
+                    Connection ! {go_away, ?PROTOCOL_ERROR};
+                ?PING when Header#frame_header.length /= 8 ->
+                    go_away_(?FRAME_SIZE_ERROR, <<"Ping packet length is not 8">>, Socket, Streams),
+                    Connection ! {go_away, ?FRAME_SIZE_ERROR};
+                ?PING when ?NOT_FLAG((Header#frame_header.flags), ?FLAG_ACK) ->
+                    Ack = h2_frame_ping:ack(Payload),
+                    sock:send(Socket, h2_frame:to_binary(Ack)),
+                    receive_data(Socket, Streams, Connection, Flow, Type, false, Decoder);
+                ?PUSH_PROMISE when Type == server ->
+                    go_away_(?PROTOCOL_ERROR, <<"push_promise sent to server">>, Socket, Streams),
+                    Connection ! {go_away, ?PROTOCOL_ERROR};
+                ?PUSH_PROMISE when Type == client ->
+                    PSID = h2_frame_push_promise:promised_stream_id(Payload),
+                    Old = h2_stream_set:get(StreamId, Streams),
+                    NotifyPid = h2_stream_set:notify_pid(Old),
+                    {CallbackMod, CallbackOpts} = h2_stream_set:get_callback(Streams),
+                    h2_stream_set:new_stream(
+                      PSID,
+                      NotifyPid,
+                      CallbackMod,
+                      CallbackOpts,
+                      Streams
+                    ),
+                    Frames = case ?IS_FLAG((Header#frame_header.flags), ?FLAG_END_HEADERS) of
+                                 true ->
+                                     %% complete headers frame, just do it
+                                     [Frame];
+                                 false ->
+                                     read_continuations(Connection, Socket, StreamId, Streams, [Frame])
+                             end,
+                    PromiseBin = h2_frame_headers:from_frames(Frames),
+                    case hpack:decode(PromiseBin, Decoder) of
+                        {error, compression_error} ->
+                            go_away_(?COMPRESSION_ERROR, Socket, Streams),
+                            Connection ! {go_away, ?COMPRESSION_ERROR};
+                        {ok, {Promise, NewDecoder}} ->
+
+                            New = h2_stream_set:get(PSID, Streams),
+                            recv_pp(New, Promise),
+
+                            case ?IS_FLAG((Header#frame_header.flags), ?FLAG_END_STREAM) of
+                                true ->
+                                    recv_es_(Old, Socket);
+                                false ->
+                                    ok
+                            end,
+
+                            receive_data(Socket, Streams, Connection, Flow, Type, false, NewDecoder)
+                    end;
+                ?WINDOW_UPDATE when StreamId == 0 ->
+                    WSI = h2_frame_window_update:size_increment(Payload),
+                    NewSendWindow = h2_stream_set:increment_socket_send_window(WSI, Streams),
+                    case NewSendWindow > 2147483647 of
+                        true ->
+                            go_away_(?FLOW_CONTROL_ERROR, <<"stream 0 window update exceeded limit">>, Socket, Streams),
+                            Connection ! {go_away, ?FLOW_CONTROL_ERROR};
+                        false ->
+                            %% TODO: Priority Sort! Right now, it's just sorting on
+                            %% lowest stream_id first
+                            Connection ! send_all_we_can,
+                            %h2_stream_set:send_all_we_can(Streams),
+                            receive_data(Socket, Streams, Connection, Flow, Type, false, Decoder)
+                    end;
+                ?WINDOW_UPDATE ->
+                    WSI = h2_frame_window_update:size_increment(Payload),
+                    Stream0 = h2_stream_set:get(StreamId, Streams),
+                    case h2_stream_set:type(Stream0) of
+                        idle ->
+                            go_away_(?PROTOCOL_ERROR, list_to_binary(io_lib:format("window update on idle stream ~p", [StreamId])), Socket, Streams),
+                            Connection ! {go_away, ?PROTOCOL_ERROR};
+                        closed ->
+                            rst_stream__(Stream0, ?STREAM_CLOSED, Socket),
+                            receive_data(Socket, Streams, Connection, Flow, Type, false, Decoder);
+                        active ->
+                            NewSSWS = h2_stream_set:send_window_size(Stream0)+WSI,
+
+                            case NewSSWS > 2147483647 of
+                                true ->
+                                    rst_stream__(Stream0, ?FLOW_CONTROL_ERROR, Socket),
+                                    receive_data(Socket, Streams, Connection, Flow, Type, false, Decoder);
+                                false ->
+                                    h2_stream_set:send_what_we_can(
+                                      StreamId,
+                                      fun(Stream) ->
+                                              h2_stream_set:increment_send_window_size(WSI, Stream)
+                                      end, Streams),
+                                    receive_data(Socket, Streams, Connection, Flow, Type, false, Decoder)
+                            end
+                    end;
+                _ ->
+                    %% let the connection process handle anything else
+                    %% which is only PING acks and GOAWAYs
+                    gen_statem:call(Connection, {frame, Frame}),
+                    receive_data(Socket, Streams, Connection, Flow, Type, false, Decoder)
+            end
+    end.
+
+read_continuations(Connection, Socket, StreamId, Streams, Acc) ->
+    case h2_frame:read(Socket, infinity) of
+        {error, closed} ->
+            Connection ! socket_closed(Socket),
+            exit(normal);
+        {error, Reason} ->
+            Connection ! socket_error(Socket, Reason),
+            exit(normal);
+        {stream_error, _StreamId, _Code} ->
+            go_away_(?PROTOCOL_ERROR, <<"continuation violated stream_error">>, Socket, Streams),
+            Connection ! {go_away, ?PROTOCOL_ERROR},
+            exit(normal);
+        {Header, _Payload} = Frame ->
+            case Header#frame_header.type == ?CONTINUATION andalso Header#frame_header.stream_id == StreamId of
+                false ->
+                    go_away_(?PROTOCOL_ERROR, <<"continuation violated">>, Socket, Streams),
+                    Connection ! {go_away, ?PROTOCOL_ERROR},
+                    exit(normal);
+                true ->
+                    case ?IS_FLAG((Header#frame_header.flags), ?FLAG_END_HEADERS) of
+                        true ->
+                            lists:reverse([Frame|Acc]);
+                        false ->
+                            read_continuations(Connection, Socket, StreamId, Streams, [Frame|Acc])
+                    end
+            end
+    end.
+
+socket_closed({gen_tcp, Socket}) ->
+    {tcp_closed, Socket};
+socket_closed({ssl, Socket}) ->
+    {ssl_closed, Socket}.
+
+socket_error({gen_tcp, Socket}, Reason) ->
+    {tcp_error, Socket, Reason};
+socket_error({ssl, Socket}, Reason) ->
+    {ssl_error, Socket, Reason}.
 
 client_options(Transport, SSLOptions, SocketOptions) ->
     DefaultSocketOptions = [
@@ -1516,12 +1551,18 @@ start_http2_server(
     }=Conn) ->
     case accept_preface(Socket) of
         ok ->
-            ok = active_once(Socket),
+            Flow = application:get_env(chatterbox, server_flow_control, auto),
+            case sock:peername(Socket) of
+                {ok, {Host, Port}} ->
+                    put('__h2_connection_details', {server, element(1, Socket), Host, Port});
+                _ ->
+                    ok
+            end,
+            Receiver = spawn_data_receiver(Socket, Conn#connection.streams, Flow),
             NewState =
                 Conn#connection{
                   type=server,
-                  next_available_stream_id=2,
-                  flow_control=application:get_env(chatterbox, server_flow_control, auto)
+                  receiver=Receiver
                  },
             {next_state,
              handshake,
@@ -1534,16 +1575,10 @@ start_http2_server(
 %% We're going to iterate through the preface string until we're done
 %% or hit a mismatch
 accept_preface(Socket) ->
-    accept_preface(Socket, <<?PREFACE>>).
-
-accept_preface(_Socket, <<>>) ->
-    ok;
-accept_preface(Socket, <<Char:8,Rem/binary>>) ->
-    case sock:recv(Socket, 1, 5000) of
-        {ok, <<Char>>} ->
-            accept_preface(Socket, Rem);
-        _E ->
-            sock:close(Socket),
+    case sock:recv(Socket, byte_size(?PREFACE), 5000) of
+        {ok, ?PREFACE} ->
+            ok;
+        _ ->
             {error, invalid_preface}
     end.
 
@@ -1569,67 +1604,6 @@ accept_preface(Socket, <<Char:8,Rem/binary>>) ->
 %% won't block the gen_server on Transport:read(L), but it will wake
 %% up and do something every time Data comes in.
 
-handle_socket_data(<<>>,
-                   #connection{
-                      socket=Socket
-                     }=Conn) ->
-    active_once(Socket),
-    {keep_state, Conn};
-handle_socket_data(Data,
-                   #connection{
-                      socket=Socket,
-                      buffer=Buffer
-                     }=Conn) ->
-    More =
-        case sock:recv(Socket, 0, 0) of %% fail fast
-            {ok, Rest} ->
-                Rest;
-            %% It's not really an error, it's what we want
-            {error, timeout} ->
-                <<>>;
-            _ ->
-                <<>>
-    end,
-    %% What is buffer?
-    %% empty - nothing, yay
-    %% {frame, h2_frame:header(), binary()} - Frame Header processed, Payload not big enough
-    %% {binary, binary()} - If we're here, it must mean that Bin was too small to even be a header
-    ToParse = case Buffer of
-        empty ->
-            <<Data/binary,More/binary>>;
-        {frame, FHeader, BufferBin} ->
-            {FHeader, <<BufferBin/binary,Data/binary,More/binary>>};
-        {binary, BufferBin} ->
-            <<BufferBin/binary,Data/binary,More/binary>>
-    end,
-    %% Now that the buffer has been merged, it's best to make sure any
-    %% further state references don't have one
-    NewConn = Conn#connection{buffer=empty},
-
-    case h2_frame:recv(ToParse) of
-        %% We got a full frame, ship it off to the FSM
-        {ok, Frame, Rem} ->
-            gen_statem:cast(self(), {frame, Frame}),
-            handle_socket_data(Rem, NewConn);
-        %% Not enough bytes left to make a header :(
-        {not_enough_header, Bin} ->
-            %% This is a situation where more bytes should come soon,
-            %% so let's switch back to active, once
-            active_once(Socket),
-            {keep_state, NewConn#connection{buffer={binary, Bin}}};
-        %% Not enough bytes to make a payload
-        {not_enough_payload, Header, Bin} ->
-            %% This too
-            active_once(Socket),
-            {keep_state, NewConn#connection{buffer={frame, Header, Bin}}};
-        {error, 0, Code, _Rem} ->
-            %% Remaining Bytes don't matter, we're closing up shop.
-            go_away(Code, NewConn);
-        {error, StreamId, Code, Rem} ->
-            Stream = h2_stream_set:get(StreamId, Conn#connection.streams),
-            rst_stream(Stream, Code, NewConn),
-            handle_socket_data(Rem, NewConn)
-    end.
 
 handle_socket_passive(Conn) ->
     {keep_state, Conn}.
@@ -1650,66 +1624,10 @@ socksend(#connection{
             {error, Reason}
     end.
 
-%% maybe_hpack will decode headers if it can, or tell the connection
-%% to wait for CONTINUATION frames if it can't.
--spec maybe_hpack(#continuation_state{}, connection()) ->
-                         {next_state, atom(), connection()}.
-%% If there's an END_HEADERS flag, we have a complete headers binary
-%% to decode, let's do this!
-maybe_hpack(Continuation, Conn)
-  when Continuation#continuation_state.end_headers ->
-    Stream = h2_stream_set:get(
-               Continuation#continuation_state.stream_id,
-               Conn#connection.streams
-              ),
-    HeadersBin = h2_frame_headers:from_frames(
-                queue:to_list(Continuation#continuation_state.frames)
-               ),
-    case hpack:decode(HeadersBin, Conn#connection.decode_context) of
-        {error, compression_error} ->
-            go_away(?COMPRESSION_ERROR, Conn);
-        {ok, {Headers, NewDecodeContext}} ->
-            case {Continuation#continuation_state.type,
-                  Continuation#continuation_state.end_stream} of
-                {push_promise, _} ->
-                    Promised =
-                        h2_stream_set:get(
-                          Continuation#continuation_state.promised_id,
-                          Conn#connection.streams
-                         ),
-                    recv_pp(Promised, Headers);
-                {trailers, false} ->
-                    rst_stream(Stream, ?PROTOCOL_ERROR, Conn);
-                _ -> %% headers or trailers!
-                    recv_h(Stream, Conn, Headers)
-            end,
-            case Continuation#continuation_state.end_stream of
-                true ->
-                    recv_es(Stream, Conn);
-                false ->
-                    ok
-            end,
-            {next_state, connected,
-             Conn#connection{
-               decode_context=NewDecodeContext,
-               continuation=undefined
-              }}
-    end;
-%% If not, we have to wait for all the CONTINUATIONS to roll in.
-maybe_hpack(Continuation, Conn) ->
-    {next_state, continuation,
-     Conn#connection{
-       continuation = Continuation
-      }}.
-
 %% Stream API: These will be moved
--spec recv_h(
-        Stream :: h2_stream_set:stream(),
-        Conn :: connection(),
-        Headers :: hpack:headers()) ->
-                    ok.
-recv_h(Stream,
-       Conn,
+
+recv_h_(Stream,
+       Sock,
        Headers) ->
     case h2_stream_set:type(Stream) of
         active ->
@@ -1718,13 +1636,14 @@ recv_h(Stream,
             h2_stream:send_event(Pid, {recv_h, Headers});
         closed ->
             %% If the stream is closed, there's no running FSM
-            rst_stream(Stream, ?STREAM_CLOSED, Conn);
+            rst_stream__(Stream, ?STREAM_CLOSED, Sock);
         idle ->
             %% If we're calling this function, we've already activated
             %% a stream FSM (probably). On the off chance we didn't,
             %% we'll throw this
-            rst_stream(Stream, ?STREAM_CLOSED, Conn)
+            rst_stream__(Stream, ?STREAM_CLOSED, Sock)
     end.
+
 
 -spec send_h(
         h2_stream_set:stream(),
@@ -1752,20 +1671,18 @@ send_t(Stream, Trailers) ->
             h2_stream:send_event(Pid, {send_t, Trailers})
     end.
 
--spec recv_es(Stream :: h2_stream_set:stream(),
-              Conn :: connection()) ->
-                     ok | {rst_stream, error_code()}.
 
-recv_es(Stream, Conn) ->
+recv_es_(Stream, Sock) ->
     case h2_stream_set:type(Stream) of
         active ->
             Pid = h2_stream_set:pid(Stream),
             h2_stream:send_event(Pid, recv_es);
         closed ->
-            rst_stream(Stream, ?STREAM_CLOSED, Conn);
+            rst_stream__(Stream, ?STREAM_CLOSED, Sock);
         idle ->
-            rst_stream(Stream, ?STREAM_CLOSED, Conn)
+            rst_stream__(Stream, ?STREAM_CLOSED, Sock)
     end.
+
 
 -spec recv_pp(h2_stream_set:stream(),
               hpack:headers()) ->
@@ -1793,25 +1710,54 @@ recv_data(Stream, Frame) ->
             h2_stream:send_event(Pid, {recv_data, Frame})
     end.
 
-send_request(NextId, NotifyPid, Conn, Streams, Headers, Body) ->
+send_request_(NotifyPid, Conn, Streams, Headers, Body) ->
+    {CallbackMod, CallbackOpts} = h2_stream_set:get_callback(Streams),
+    send_request_(NotifyPid, Conn, Streams, Headers, Body, CallbackMod, CallbackOpts).
+
+send_request_(NotifyPid, Conn, Streams, Headers, Body, CallbackMod, CallbackOpts) ->
     case
         h2_stream_set:new_stream(
-            NextId,
+            next,
             NotifyPid,
-            Conn#connection.stream_callback_mod,
-            Conn#connection.stream_callback_opts,
-            Conn#connection.socket,
-            Conn#connection.peer_settings#settings.initial_window_size,
-            Conn#connection.self_settings#settings.initial_window_size,
-            Conn#connection.type,
-            Streams)
+            CallbackMod,
+            CallbackOpts,
+            Streams
+        )
     of
         {error, Code, _NewStream} ->
             %% error creating new stream
             {error, Code};
-        {_, GoodStreamSet} ->
-            send_headers(self(), NextId, Headers),
-            send_body(self(), NextId, Body),
+        {_Pid, NextId, GoodStreamSet} ->
+            send_headers_(NextId, Headers, [], GoodStreamSet),
+            send_body_(NextId, Body, [], GoodStreamSet),
 
-            {ok, GoodStreamSet}
+            {ok, Conn#connection{streams=GoodStreamSet}}
     end.
+
+send_body_(StreamId, Body, Opts, Streams) ->
+    BodyComplete = proplists:get_value(send_end_stream, Opts, true),
+
+    Stream0 = h2_stream_set:get(StreamId, Streams),
+    case h2_stream_set:type(Stream0) of
+        active ->
+                h2_stream_set:send_what_we_can(
+                  StreamId,
+                  fun(Stream) ->
+                          OldBody = h2_stream_set:queued_data(Stream),
+                          NewBody = case is_binary(OldBody) of
+                                        true -> <<OldBody/binary, Body/binary>>;
+                                        false -> Body
+                                    end,
+                          h2_stream_set:update_data_queue(NewBody, BodyComplete, Stream)
+                  end, Streams),
+
+                ok;
+        idle ->
+            %% Sending DATA frames on an idle stream?  It's a
+            %% Connection level protocol error on reciept, but If we
+            %% have no active stream what can we even do?
+            ok;
+        closed ->
+            ok
+    end.
+

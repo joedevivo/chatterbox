@@ -10,12 +10,13 @@
          on_send_push_promise/2,
          on_receive_data/2,
          on_end_stream/1,
+         handle_info/2,
          terminate/1
         ]).
 
 -record(cb_static, {
         req_headers=[],
-        connection_pid :: pid(),
+        connection_pid :: h2_stream_set:stream_set(),
         stream_id :: stream_id()
           }).
 
@@ -66,13 +67,18 @@ on_end_stream(State=#cb_static{connection_pid=ConnPid,
     %% TODO: Logic about "/" vs "index.html", "index.htm", etc...
     %% Directory browsing?
     File = RootDir ++ Path4,
-    {HeadersToSend, BodyToSend} =
         case {filelib:is_file(File), filelib:is_dir(File)} of
             {_, true} ->
                 ResponseHeaders = [
                                    {<<":status">>,<<"403">>}
                                   ],
-                {ResponseHeaders, <<"No soup for you!">>};
+                case Method of
+                    <<"HEAD">> ->
+                        h2_connection:send_headers(ConnPid, StreamId, ResponseHeaders, [{send_end_stream, true}]);
+                    _ ->
+                        h2_connection:send_headers(ConnPid, StreamId, ResponseHeaders),
+                        h2_connection:send_body(ConnPid, StreamId, <<"No soup for you!">>)
+                end;
             {true, false} ->
                 Ext = filename:extension(File),
                 MimeType = case Ext of
@@ -90,6 +96,13 @@ on_end_stream(State=#cb_static{connection_pid=ConnPid,
                                    {<<":status">>, <<"200">>},
                                    {<<"content-type">>, MimeType}
                                   ],
+                case Method of
+                    <<"HEAD">> ->
+                        h2_connection:send_headers(ConnPid, StreamId, ResponseHeaders, [{send_end_stream, true}]);
+                    _ ->
+                        h2_connection:send_headers(ConnPid, StreamId, ResponseHeaders),
+                        h2_connection:send_body(ConnPid, StreamId, Data)
+                end,
 
                 case {MimeType, h2_connection:is_push(ConnPid)} of
                     {<<"text/html">>, true} ->
@@ -103,10 +116,8 @@ on_end_stream(State=#cb_static{connection_pid=ConnPid,
 
                         lists:foldl(
                           fun(R, Acc) ->
-                                  {NewStreamId, _} = h2_connection:new_stream(ConnPid),
-                                  PHeaders = generate_push_promise_headers(Headers, <<$/,R/binary>>
-                                                                          ),
-                                  h2_connection:send_promise(ConnPid, StreamId, NewStreamId, PHeaders),
+                                  PHeaders = generate_push_promise_headers(Headers, <<$/,R/binary>>),
+                                  {NewStreamId, _} = h2_connection:send_promise(ConnPid, StreamId, PHeaders),
                                   [{NewStreamId, PHeaders}|Acc]
                           end,
                           [],
@@ -129,23 +140,23 @@ on_end_stream(State=#cb_static{connection_pid=ConnPid,
 
                 %% If it does, we still need to try and check stream level
                 %% flow control.
-                {ResponseHeaders, Data};
+                ok;
         {false, false} ->
             ResponseHeaders = [
                                {<<":status">>,<<"404">>}
                               ],
-                {ResponseHeaders, <<"No soup for you!">>}
+                case Method of
+                    <<"HEAD">> ->
+                        h2_connection:send_headers(ConnPid, StreamId, ResponseHeaders, [{send_end_stream, true}]);
+                    _ ->
+                        h2_connection:send_headers(ConnPid, StreamId, ResponseHeaders),
+                        h2_connection:send_body(ConnPid, StreamId, <<"No soup for you!">>)
+                end
         end,
 
-    case {Method, HeadersToSend, BodyToSend} of
-        {<<"HEAD">>, _, _} ->
-                h2_connection:send_headers(ConnPid, StreamId, HeadersToSend, [{send_end_stream, true}]);
-        %%{<<"GET">>, _, _} ->
-        _ ->
-            h2_connection:send_headers(ConnPid, StreamId, HeadersToSend),
-            h2_connection:send_body(ConnPid, StreamId, BodyToSend)
-    end,
+    {ok, State}.
 
+handle_info(_Event, State) ->
     {ok, State}.
 
 terminate(_State) ->

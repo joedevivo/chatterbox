@@ -3,7 +3,8 @@
 
 %% Public API
 -export([
-         start_link/6,
+         start_link/5,
+         start/5,
          send_event/2,
          send_pp/2,
          send_data/2,
@@ -46,6 +47,7 @@
 
 -record(stream_state, {
           stream_id = undefined :: stream_id(),
+          streams :: h2_stream_set:stream_set(),
           connection = undefined :: undefined | pid(),
           socket = undefined :: sock:socket(),
           state = idle :: stream_state_name(),
@@ -72,7 +74,7 @@
 -export_type([state/0, callback_state/0]).
 
 -callback init(
-            Conn :: pid(),
+            Conn :: h2_stream_set:stream_set(),
             StreamId :: stream_id(),
             CallbackOptions :: list()
            ) ->
@@ -97,6 +99,11 @@
             CallbackState :: callback_state()) ->
     {ok, NewState :: callback_state()}.
 
+-callback handle_info(
+            Event :: any(),
+            CallbackState :: callback_state()) ->
+    {ok, NewState :: callback_state()}.
+
 -callback terminate(
             CallbackState :: callback_state()) ->
     any().
@@ -104,21 +111,38 @@
 %% Public API
 -spec start_link(
         StreamId :: stream_id(),
+        Streams :: h2_stream_set:stream_set(),
         Connection :: pid(),
         CallbackModule :: module(),
-        CallbackOptions :: list(),
-        Type :: client | server,
-        Socket :: sock:socket()
+        CallbackOptions :: list()
                   ) ->
                         {ok, pid()} | ignore | {error, term()}.
-start_link(StreamId, Connection, CallbackModule, CallbackOptions, Type, Socket) ->
+start_link(StreamId, Streams, Connection, CallbackModule, CallbackOptions) ->
     gen_statem:start_link(?MODULE,
                           [StreamId,
+                           Streams,
                            Connection,
                            CallbackModule,
-                           CallbackOptions,
-                           Type,
-                           Socket],
+                           CallbackOptions],
+                          []).
+
+
+-spec start(
+        StreamId :: stream_id(),
+        Streams :: h2_stream_set:stream_set(),
+        Connection :: pid(),
+        CallbackModule :: module(),
+        CallbackOptions :: list()
+                  ) ->
+                        {ok, pid()} | ignore | {error, term()}.
+start(StreamId, Streams, Connection, CallbackModule, CallbackOptions) ->
+    gen_statem:start(?MODULE,
+                          [link_connection,
+                           StreamId,
+                           Streams,
+                           Connection,
+                           CallbackModule,
+                           CallbackOptions],
                           []).
 
 send_event(Pid, Event) ->
@@ -159,7 +183,7 @@ send_connection_window_update(Size) ->
     gen_statem:cast(self(), {send_connection_window_update, Size}).
 
 rst_stream(Pid, Code) ->
-    gen_statem:call(Pid, {rst_stream, Code}).
+    gen_statem:cast(Pid, {rst_stream, Code}).
 
 -spec stop(pid()) -> ok.
 stop(Pid) ->
@@ -167,37 +191,48 @@ stop(Pid) ->
 
 init([
       StreamId,
+      Streams,
       ConnectionPid,
       CB=undefined,
-      _CBOptions,
-      Type,
-      Socket
+      _CBOptions
      ]) ->
+    erlang:monitor(process, ConnectionPid),
     {ok, idle, #stream_state{
                   callback_mod=CB,
-                  socket=Socket,
                   stream_id=StreamId,
+                  streams=Streams,
                   connection=ConnectionPid,
-                  type = Type
+                  socket=h2_stream_set:socket(Streams),
+                  type=h2_stream_set:stream_set_type(Streams)
                  }};
 init([
       StreamId,
+      Streams,
       ConnectionPid,
       CB,
-      CBOptions,
-      Type,
-      Socket
+      CBOptions
      ]) ->
-    %% TODO: Check for CB implementing this behaviour
-    {ok, NewCBState} = callback(CB, init, [ConnectionPid, StreamId], [Socket | CBOptions]),
+    erlang:monitor(process, ConnectionPid),
+    %% don't block stream init with a slow callback init
     {ok, idle, #stream_state{
                   callback_mod=CB,
-                  socket=Socket,
                   stream_id=StreamId,
+                  streams=Streams,
                   connection=ConnectionPid,
-                  callback_state=NewCBState,
-                  type = Type
-                 }}.
+                  socket=h2_stream_set:socket(Streams),
+                  type=h2_stream_set:stream_set_type(Streams)
+                 }, [{next_event, info, {init_callback, CBOptions}}]};
+init([
+      link_connection,
+      _StreamId,
+      _Streams,
+      ConnectionPid,
+      _CB,
+      _CBOptions
+     ]=Args) ->
+    link(ConnectionPid),
+    init(tl(Args)).
+
 
 callback_mode() ->
     state_functions.
@@ -224,6 +259,17 @@ callback(Mod, Fun, Args, State) ->
         false ->
             {ok, State}
     end.
+
+idle(info, {init_callback, CBOptions},
+     #stream_state{
+        callback_mod=CB,
+        socket=Socket,
+        stream_id=StreamId,
+        streams=Streams
+       }=Stream) ->
+    %% TODO: Check for CB implementing this behaviour
+    {ok, NewCBState} = callback(CB, init, [Streams, StreamId], [Socket | CBOptions]),
+    {next_state, idle, Stream#stream_state{callback_state = NewCBState}};
 
 %% Server 'RECV H'
 idle(cast, {recv_h, Headers},
@@ -500,6 +546,7 @@ open(cast, {send_data,
             _ ->
                 open
         end,
+
     {next_state, NextState, Stream};
 open(_, {send_trailers, Trailers}, Stream) ->
     send_trailers(open, Trailers, Stream);
@@ -584,7 +631,7 @@ half_closed_remote(cast,
 
 half_closed_remote(_Type, {send_trailers, Trailers}, State) ->
     send_trailers(half_closed_remote, Trailers, State);
-half_closed_remote(cast, _,
+half_closed_remote(cast, _E,
        #stream_state{}=Stream) ->
     rst_stream_(?STREAM_CLOSED, Stream);
 half_closed_remote(Type, Event, State) ->
@@ -627,6 +674,7 @@ half_closed_local(cast,
             Data =
                 [h2_frame_data:data(Payload)
                  || {#frame_header{type=?DATA}, Payload} <- queue:to_list(NewQ)],
+
             {next_state, closed,
              Stream#stream_state{
                incoming_frames=queue:new(),
@@ -697,30 +745,62 @@ half_closed_local(cast, recv_es,
 half_closed_local(cast, {send_t, _Trailers},
                   #stream_state{}) ->
     keep_state_and_data;
-half_closed_local(_, _,
+half_closed_local(_T, _E,
        #stream_state{}=Stream) ->
     rst_stream_(?STREAM_CLOSED, Stream);
 half_closed_local(Type, Event, State) ->
     handle_event(Type, Event, State).
 
 closed(timeout, _,
-       #stream_state{}=Stream) ->
-    gen_statem:cast(Stream#stream_state.connection,
-                    {stream_finished,
-                     Stream#stream_state.stream_id,
-                     Stream#stream_state.response_headers,
-                     Stream#stream_state.response_body,
-                     Stream#stream_state.response_trailers}),
-    {stop, normal, Stream};
-closed(_, _,
+       #stream_state{stream_id=StreamId, streams=Streams}=StreamState) ->
+    try 
+        Stream = h2_stream_set:get(StreamId, Streams),
+        Type = h2_stream_set:stream_set_type(Streams),
+        case h2_stream_set:type(Stream) of
+            active ->
+                NotifyPid = h2_stream_set:notify_pid(Stream),
+                GarbageOnEnd = h2_stream_set:get_garbage_on_end(Streams),
+                Response =
+                    case {Type, GarbageOnEnd} of
+                        {server, _} -> garbage;
+                        {client, true} -> garbage;
+                        {client, false} -> {StreamState#stream_state.response_headers,
+                                            StreamState#stream_state.response_body,
+                                            StreamState#stream_state.response_trailers}
+                        
+                    end,
+                {_NewStream, _NewStreams} =
+                h2_stream_set:close(
+                  Stream,
+                  Response,
+                  Streams),
+                case {Type, is_pid(NotifyPid)} of
+                    {client, true} ->
+                        NotifyPid ! {'END_STREAM', StreamId};
+                    _ ->
+                        ok
+                end;
+            _ ->
+                ok
+        end
+    catch _:_ ->
+              ok
+    end,
+    {stop, normal, StreamState};
+closed(cast,
+  {send_t, Headers},
+  #stream_state{connection=_Pid,
+                stream_id=_StreamId}=Stream) ->
+   {keep_state,Stream#stream_state{response_trailers=Headers}, 0};
+closed(_T, _E,
        #stream_state{}=Stream) ->
     rst_stream_(?STREAM_CLOSED, Stream);
 closed(Type, Event, State) ->
     handle_event(Type, Event, State).
 
-send_trailers(State, Trailers, Stream=#stream_state{connection=Pid,
+send_trailers(State, Trailers, Stream=#stream_state{streams=Streams,
                                                     stream_id=StreamId}) ->
-    h2_connection:actually_send_trailers(Pid, StreamId, Trailers),
+    h2_connection:actually_send_trailers(Streams, StreamId, Trailers),
     case State of
         half_closed_remote ->
             {next_state, closed, Stream, 0};
@@ -744,8 +824,6 @@ handle_event(_, {send_connection_window_update, Size},
                  }=State) ->
     h2_connection:send_window_update(ConnPid, Size),
     {keep_state, State};
-handle_event({call,  From}, {rst_stream, ErrorCode}, State=#stream_state{}) ->
-    {keep_state, State, [{reply, From, {ok, rst_stream_(ErrorCode, State)}}]};
 handle_event({call, From}, stream_id, State=#stream_state{stream_id=StreamId}) ->
     {keep_state, State, [{reply, From, StreamId}]};
 handle_event({call, From}, connection, State=#stream_state{connection=Conn}) ->
@@ -754,12 +832,16 @@ handle_event({call, From}, Event, State=#stream_state{callback_mod=CB,
                                                       callback_state=CallbackState}) ->
     {ok, Reply, CallbackState1} = CB:handle_call(Event, CallbackState),
     {keep_state, State#stream_state{callback_state=CallbackState1}, [{reply, From, Reply}]};
+handle_event(cast, {rst_stream, ErrorCode}, State=#stream_state{}) ->
+    rst_stream_(ErrorCode, State);
+handle_event(info, {'DOWN', _Ref, process, Pid, Reason}, #stream_state{connection=Pid}) ->
+    {stop, Reason};
 handle_event(cast, Event, State=#stream_state{callback_mod=CB,
-                                              callback_state=CallbackState}) ->
+                                              callback_state=CallbackState}) when CB /= undefined ->
     CallbackState1 = CB:handle_info(Event, CallbackState),
     {keep_state, State#stream_state{callback_state=CallbackState1}};
 handle_event(info, Event, State=#stream_state{callback_mod=CB,
-                                              callback_state=CallbackState}) ->
+                                              callback_state=CallbackState}) when CB /= undefined ->
      CallbackState1 = CB:handle_info(Event, CallbackState),
     {keep_state, State#stream_state{callback_state=CallbackState1}};
 handle_event(_, _Event, State) ->
