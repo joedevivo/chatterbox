@@ -11,8 +11,9 @@ start(Config) ->
     PreDataSettings = [
     {port, 8081},
     {ssl, ?config(ssl, Config2)},
-    {ssl_options, [{certfile,   "../../../../config/localhost.crt"},
-                   {keyfile,    "../../../../config/localhost.key"},
+    {ssl_options, [{keyfile, "../../../../config/localhost.key"},
+                   {certfile, "../../../../config/localhost.pem"},
+                   {cacertfile, "../../../../config/ca.pem"},
                    {versions, ['tlsv1.2']},
                    {alpn_preferred_protocols, [<<"h2">>]}]}
     ],
