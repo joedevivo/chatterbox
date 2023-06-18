@@ -20,7 +20,7 @@ identifies_protocol(Config) ->
     {ok, SSLOptions} = application:get_env(chatterbox, ssl_options),
     Options =  ClientOptions ++ SSLOptions ++ [{alpn_advertised_protocols, [<<"h2">>]}],
 
-    {ok, Socket} = ssl:connect("localhost", Port, Options),
+    {ok, Socket} = ssl:connect("localhost", Port, Options), 
     cthr:pal("Socket to me: ~p", [Socket]),
 
     try ssl:negotiated_protocol(Socket) of
