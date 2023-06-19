@@ -76,7 +76,9 @@ complex_request(_Config) ->
     ok.
 
 upgrade_tcp_connection(_Config) ->
-    {ok, Client} = h2_client:start_ssl_upgrade_link("localhost", 8081, <<>>, []),
+    %% TODO Why don't the options of keyfile/certfile/cacertfile work here
+    %% but instead we have to turn off verification?
+    {ok, Client} = h2_client:start_ssl_upgrade_link("localhost", 8081, <<>>, [{verify, verify_none}]),
 
     RequestHeaders =
         [

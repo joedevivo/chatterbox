@@ -14,8 +14,7 @@ start(Config) ->
     {ssl_options, [{keyfile, "../../../../config/localhost.key"},
                    {certfile, "../../../../config/localhost.pem"},
                    {cacertfile, "../../../../config/ca.pem"},
-                   {versions, ['tlsv1.2']},
-                   {alpn_preferred_protocols, [<<"h2">>]}]}
+                   {versions, ['tlsv1.2']}]}
     ],
 
     Settings =
@@ -77,7 +76,7 @@ start(Config) ->
         ranch:start_listener(
           chatterbox_ranch_protocol,
           ranch_ssl,
-          #{ socket_opts => [{port, 8081}|proplists:get_value(ssl_options, Settings)] },
+          #{ socket_opts => [{alpn_preferred_protocols, [<<"h2">>]},{port, 8081}|proplists:get_value(ssl_options, Settings)] },
           chatterbox_ranch_protocol,
           []),
     Config.
