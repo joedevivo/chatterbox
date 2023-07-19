@@ -30,7 +30,7 @@
 
      connection :: pid(),
 
-     table = ets:new(?MODULE, [public, {keypos, 2}, {read_concurrency, true}, {write_concurrency, true}]) :: ets:tab(),
+     table = ets:new(?MODULE, [public, {keypos, 2}, {read_concurrency, true}]) :: ets:tab(),
      %% Streams initiated by this peer
      %% mine :: peer_subset(),
      %% Streams initiated by the other peer
