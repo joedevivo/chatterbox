@@ -124,7 +124,7 @@ start_link(StreamId, Streams, Connection, CallbackModule, CallbackOptions) ->
                            Connection,
                            CallbackModule,
                            CallbackOptions],
-                          []).
+                          [{hibernate_after, 10000}]).
 
 
 -spec start(
@@ -143,7 +143,7 @@ start(StreamId, Streams, Connection, CallbackModule, CallbackOptions) ->
                            Connection,
                            CallbackModule,
                            CallbackOptions],
-                          []).
+                          [{hibernate_after, 10000}]).
 
 send_event(Pid, Event) ->
     gen_statem:cast(Pid, Event).
