@@ -1184,10 +1184,13 @@ spawn_data_receiver(Socket, Streams, Flow) ->
     h2_stream_set:set_socket_send_window_size(?DEFAULT_INITIAL_WINDOW_SIZE, Streams),
     Type = h2_stream_set:stream_set_type(Streams),
     ConnDetails = get('__h2_connection_details'),
-    spawn_link(fun() ->
-                       put('__h2_connection_details', ConnDetails),
-                       receive_data(Socket, Streams, Connection, Flow, Type, true, hpack:new_context())
-               end).
+    spawn_opt(
+        fun() ->
+            put('__h2_connection_details', ConnDetails),
+            receive_data(Socket, Streams, Connection, Flow, Type, true, hpack:new_context())
+        end,
+        [link, {fullsweep_after, 0}]
+    ).
 
 
 receive_data(Socket, Streams, Connection, Flow, Type, First, Decoder) ->
