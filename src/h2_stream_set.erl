@@ -971,7 +971,6 @@ s_send_what_we_can(MFS, StreamId, StreamFun0, Streams) ->
                     %% may have updated the stream
                     {Stream, {0, Stream, []}};
                 true ->
-
                     {Frames, SentBytes, NewS} =
                     case MaxToSend >= QueueSize of
                         _ when MaxToSend == 0 ->
@@ -1035,13 +1034,13 @@ s_send_what_we_can(MFS, StreamId, StreamFun0, Streams) ->
             NewSWS;
         {ok, {BytesSent, OldStream, Actions}} ->
             NewSWS = decrement_socket_send_window(BytesSent, Streams),
-            case BytesSent > NewSWS of
+            case NewSWS < 0 of
                 true ->
+                    %% if we sent all these bytes the window would be less than 0
                     %% we delved too deep, and too greedily
                     %% try to roll things back
                     ets:insert(Streams#stream_set.table, StreamFun0(OldStream)),
-                    SWS = increment_socket_send_window(BytesSent, Streams),
-                    SWS;
+                    increment_socket_send_window(BytesSent, Streams);
                 false ->
                     %% ok, its now safe to apply these actions
                     apply_stream_actions(Actions),

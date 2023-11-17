@@ -20,7 +20,8 @@ groups() -> [{default_handler,  [complex_request,
                                  connect_timeout]},
              {peer_handler, [get_peer_in_handler]},
              {double_body_handler, [send_body_opts]},
-             {echo_handler, [echo_body]}
+             {echo_handler, [echo_body,
+                             large_body]}
             ].
 
 init_per_suite(Config) ->
@@ -40,8 +41,7 @@ init_per_group(peer_handler, Config) ->
                  {initial_window_size,99999999}|Config],
     chatterbox_test_buddy:start(NewConfig);
 init_per_group(echo_handler, Config) ->
-    NewConfig = [{stream_callback_mod, echo_handler},
-                 {initial_window_size,64}|Config],
+    NewConfig = [{stream_callback_mod, echo_handler}|Config],
     chatterbox_test_buddy:start(NewConfig);
 init_per_group(_, Config) -> Config.
 
@@ -235,4 +235,45 @@ echo_body(_Config) ->
                              end, DataFrames),
     io:format("Body: ~p, response: ~p~n", [Body, ResponseData]),
     ?assertEqual(Body, (iolist_to_binary(ResponseData))),
+    ok.
+
+large_body(_Config) ->
+    {ok, Client} = http2c:start_link(),
+    RequestHeaders =
+    [
+      {<<":method">>, <<"POST">>},
+      {<<":path">>, <<"/">>},
+      {<<":scheme">>, <<"https">>},
+      {<<":authority">>, <<"localhost:8080">>},
+      {<<"accept">>, <<"*/*">>},
+      {<<"accept-encoding">>, <<"gzip, deflate">>},
+      {<<"user-agent">>, <<"chattercli/0.0.1 :D">>}
+    ],
+
+    {ok, {HeadersBin, _EncodeContext}} = hpack:encode(RequestHeaders, hpack:new_context()),
+
+    HeaderFrame = {#frame_header{
+                      length=byte_size(HeadersBin),
+                      type=?HEADERS,
+                      flags=?FLAG_END_HEADERS,
+                      stream_id=3
+                     },
+                   h2_frame_headers:new(HeadersBin)
+                  },
+
+    http2c:send_unaltered_frames(Client, [HeaderFrame]),
+
+    Body = crypto:strong_rand_bytes(32828),
+    BodyFrames = h2_frame_data:to_frames(3, Body, #settings{max_frame_size=16384}),
+    http2c:send_unaltered_frames(Client, BodyFrames),
+
+    timer:sleep(300),
+    Frames = http2c:get_frames(Client, 3),
+    DataFrames = lists:filter(fun({#frame_header{type=?DATA}, _}) -> true;
+                                 (_) -> false end, Frames),
+    ResponseData = lists:map(fun({_, DataP}) ->
+                                     h2_frame_data:data(DataP)
+                             end, DataFrames),
+    io:format("response: ~p~n", [ResponseData]),
+    ?assertEqual(size(Body), iolist_size(ResponseData)),
     ok.
